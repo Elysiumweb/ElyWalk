@@ -92,7 +92,6 @@ export default function WalletPage() {
         <div className="gc-euro" data-testid="wallet-euro-value">
           ≈ {coinsToEuros(profile?.elycoins || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
         </div>
-        <img src="/elywalk-logo.png" className="gc-logo" alt="ElyWalk" />
       </div>
 
       {isExcluded && (

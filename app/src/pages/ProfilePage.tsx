@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import Sheet from '../components/Sheet';
-import { logout, startPhoneLink, frAuthError, type PhoneSession } from '../lib/auth-service';
+import Avatar from '../components/Avatar';
+import { logout, startPhoneLink, frAuthError, updateAuthProfile, type PhoneSession } from '../lib/auth-service';
 import { updateUserFields, setReferredBy, maybeCreateReferralClaim } from '../lib/db';
+import { uploadAvatar } from '../lib/avatar';
 import { isPresidentUid } from '../lib/constants';
 import { fmtCoins } from '../lib/coins';
 
@@ -24,6 +26,12 @@ export default function ProfilePage() {
 
   const [paypalOpen, setPaypalOpen] = useState(false);
   const [paypalEmail, setPaypalEmail] = useState(profile?.paypalEmail || '');
+
+  const [editOpen, setEditOpen] = useState(false);
+  const [editName, setEditName] = useState(profile?.displayName || '');
+  const [editPreview, setEditPreview] = useState<string | null>(null);
+  const [editFile, setEditFile] = useState<File | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const isAdmin = isPresidentUid(profile?.uid);
 
@@ -94,6 +102,65 @@ export default function ProfilePage() {
     }
   };
 
+  const openEdit = () => {
+    setEditName(profile?.displayName || '');
+    setEditPreview(null);
+    setEditFile(null);
+    setEditOpen(true);
+  };
+
+  const onPickPhoto = (file: File | undefined) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      toast('Choisissez une image (JPG, PNG, WEBP…).', 'error');
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      toast('Image trop lourde (8 Mo max).', 'error');
+      return;
+    }
+    setEditFile(file);
+    const url = URL.createObjectURL(file);
+    setEditPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return url;
+    });
+  };
+
+  const saveProfile = async () => {
+    if (!profile) return;
+    const name = editName.trim();
+    if (name.length < 2) {
+      toast('Le pseudo doit contenir au moins 2 caractères.', 'error');
+      return;
+    }
+    if (name.length > 24) {
+      toast('Le pseudo est limité à 24 caractères.', 'error');
+      return;
+    }
+    setBusy(true);
+    try {
+      const fields: { displayName: string; photoURL?: string } = { displayName: name };
+      if (editFile) {
+        fields.photoURL = await uploadAvatar(profile.uid, editFile);
+      }
+      await updateUserFields(profile.uid, fields);
+      await updateAuthProfile({
+        displayName: name,
+        ...(fields.photoURL && fields.photoURL.startsWith('http') ? { photoURL: fields.photoURL } : {}),
+      }).catch(() => undefined);
+      toast('Profil mis à jour.', 'success');
+      setEditOpen(false);
+      if (editPreview) URL.revokeObjectURL(editPreview);
+      setEditPreview(null);
+      setEditFile(null);
+    } catch (e) {
+      toast((e as Error).message || 'Impossible d’enregistrer le profil.', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const onLogout = async () => {
     await logout();
   };
@@ -110,10 +177,19 @@ export default function ProfilePage() {
 
       <div className="gold-hero" style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
         <img src="/deco-1.webp" className="hero-deco" alt="" />
-        <div className="avatar" style={{ width: 58, height: 58, fontSize: 22 }}>
-          {profile.displayName.charAt(0).toUpperCase()}
-        </div>
-        <div>
+        <button
+          type="button"
+          className="avatar-edit"
+          onClick={openEdit}
+          data-testid="edit-avatar-button"
+          aria-label="Modifier la photo de profil"
+        >
+          <Avatar name={profile.displayName} photoURL={profile.photoURL} size={58} />
+          <span className="avatar-cam">
+            <CamIcon />
+          </span>
+        </button>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div className="display" style={{ fontSize: 17 }} data-testid="profile-name">
             {profile.displayName}
           </div>
@@ -126,6 +202,11 @@ export default function ProfilePage() {
           </div>
         </div>
       </div>
+
+      <button className="btn btn-outline" onClick={openEdit} data-testid="edit-profile-button">
+        Modifier mon profil
+      </button>
+      <div className="section-gap" />
 
       <div className="card">
         <div className="card-title">Téléphone</div>
@@ -183,6 +264,57 @@ export default function ProfilePage() {
       <button className="btn btn-danger" onClick={onLogout} data-testid="logout-button">
         Se déconnecter
       </button>
+
+      <Sheet open={editOpen} onClose={() => setEditOpen(false)} title="Modifier mon profil" testId="edit-profile-sheet">
+        <div className="profile-edit-photo">
+          <button
+            type="button"
+            className="avatar-edit"
+            onClick={() => fileRef.current?.click()}
+            data-testid="pick-photo-button"
+            aria-label="Choisir une photo"
+          >
+            <Avatar
+              name={editName || profile.displayName}
+              photoURL={editPreview || profile.photoURL}
+              size={88}
+            />
+            <span className="avatar-cam">
+              <CamIcon />
+            </span>
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => fileRef.current?.click()}
+            data-testid="change-photo-button"
+          >
+            Changer la photo
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            hidden
+            data-testid="profile-photo-input"
+            onChange={(e) => onPickPhoto(e.target.files?.[0])}
+          />
+        </div>
+        <div className="field">
+          <label>Pseudo</label>
+          <input
+            className="input"
+            value={editName}
+            maxLength={24}
+            onChange={(e) => setEditName(e.target.value)}
+            placeholder="Votre pseudo"
+            data-testid="edit-name-input"
+          />
+        </div>
+        <button className="btn btn-gold" onClick={saveProfile} disabled={busy} data-testid="save-profile-button">
+          {busy ? '...' : 'Enregistrer'}
+        </button>
+      </Sheet>
 
       <Sheet open={phoneOpen} onClose={() => setPhoneOpen(false)} title="Vérifier mon téléphone" testId="phone-sheet">
         {!session ? (
@@ -256,5 +388,14 @@ export default function ProfilePage() {
         </button>
       </Sheet>
     </div>
+  );
+}
+
+function CamIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+      <path d="M4 8h3l1.5-2h7L17 8h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z" strokeLinejoin="round" />
+      <circle cx="12" cy="14" r="3.2" />
+    </svg>
   );
 }

@@ -1,0 +1,10 @@
+# Dépendances & builds
+node_modules/
+app/node_modules/
+app/dist/
+app/android/app/build/
+app/android/build/
+app/android/.gradle/
+*.iml
+.idea/
+.DS_Store
