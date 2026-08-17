@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "260136634782",
+    "project_id": "elywalk-2f7ba",
+    "storage_bucket": "elywalk-2f7ba.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:260136634782:android:791d77945d9cd98b306e8f",
+        "android_client_info": {
+          "package_name": "com.example.elywalk"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAeAsfLWZejW5pKInlPBvYgXiQQxO59x9Q"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
