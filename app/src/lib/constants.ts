@@ -1,0 +1,42 @@
+// ===== ElyWalk — Constantes globales =====
+
+// --- AdMob (production) ---
+export const ADMOB_APP_ID = 'ca-app-pub-6906841385343667~6481018527';
+export const AD_UNIT_REWARDED = 'ca-app-pub-6906841385343667/3683414466';
+export const AD_UNIT_APP_OPEN = 'ca-app-pub-6906841385343667/6616749893';
+export const AD_UNIT_INTERSTITIAL = 'ca-app-pub-6906841385343667/3494240028';
+
+// --- Rôles Elysium ---
+export const PRESIDENT_UID = 'BZ333LlhuJMoD4rXIquGE0zzjX43';
+export const CO_PRESIDENT_UID = '7XLpqYMKEMX5kLrQtts6NG3zRB32';
+export const PRESIDENT_UIDS: string[] = [PRESIDENT_UID, CO_PRESIDENT_UID];
+
+export function isPresidentUid(uid: string | null | undefined): boolean {
+  return !!uid && PRESIDENT_UIDS.includes(uid);
+}
+
+// --- Économie ElyCoins ---
+export const COINS_PER_EURO = 1000; // 1000 ElyCoins = 1 €
+export const AD_REWARD_COINS = 0.1; // 1 pub récompensée = 0,1 ElyCoins
+export const REFERRAL_BONUS = 10; // Parrainage = 10 ElyCoins
+export const MIN_PAYPAL_COINS = 1000; // Retrait minimum : 1 €
+
+// Barème pas quotidiens -> ElyCoins (bornes inclusives)
+export const STEP_TIERS: { min: number; max: number; coins: number }[] = [
+  { min: 0, max: 2499, coins: 1 },
+  { min: 2500, max: 4999, coins: 2 },
+  { min: 5000, max: 7499, coins: 5 },
+  { min: 7500, max: 9999, coins: 7 },
+  { min: 10000, max: 12499, coins: 10 },
+  { min: 12500, max: 14999, coins: 12 },
+  { min: 15000, max: 19999, coins: 15 },
+  { min: 20000, max: 29999, coins: 20 },
+  { min: 30000, max: 39999, coins: 30 },
+  { min: 40000, max: 49999, coins: 40 },
+  { min: 50000, max: Infinity, coins: 50 },
+];
+
+export const DAILY_STEP_GOAL = 10000;
+
+// --- reCAPTCHA (auth téléphone web) ---
+export const RECAPTCHA_SITE_KEY = '6Lc_koktAAAAAG2n551aIeGJbJVWKD9mvGiUwTH_';
