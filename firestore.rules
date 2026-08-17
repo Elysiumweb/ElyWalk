@@ -1,0 +1,124 @@
+rules_version = '2';
+
+// ============================================================
+// ElyWalk — Règles Firestore sécurisées
+// À déployer dans Firebase Console > Firestore Database > Règles
+//
+// NOTE PRODUCTION : sans Cloud Functions, l'économie (ElyCoins)
+// est gérée côté client. Ces règles limitent l'accès document par
+// document, mais pour une protection anti-triche totale, il est
+// recommandé de migrer le crédit de coins vers des Cloud Functions.
+// ============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --- Rôles ---
+    function isAuth() {
+      return request.auth != null;
+    }
+    function isSelf(uid) {
+      return isAuth() && request.auth.uid == uid;
+    }
+    // Président & Co-Président
+    function isPresident() {
+      return isAuth() && (
+        request.auth.uid == 'BZ333LlhuJMoD4rXIquGE0zzjX43' ||
+        request.auth.uid == '7XLpqYMKEMX5kLrQtts6NG3zRB32'
+      );
+    }
+
+    // --- Profils utilisateurs ---
+    // Lecture par tout utilisateur connecté (classement, amis, parrainage)
+    match /users/{uid} {
+      allow read: if isAuth();
+      allow create: if isSelf(uid);
+      allow update: if isSelf(uid) || isPresident();
+      allow delete: if false;
+
+      // Historique des pas quotidiens
+      match /dailySteps/{day} {
+        allow read: if isAuth();
+        allow write: if isSelf(uid);
+      }
+
+      // Historique des transactions ElyCoins
+      match /transactions/{txId} {
+        allow read: if isSelf(uid) || isPresident();
+        allow create: if isSelf(uid);
+        allow update, delete: if false;
+      }
+    }
+
+    // --- Codes de parrainage (code -> uid) ---
+    match /referralCodes/{code} {
+      allow read: if isAuth();
+      allow create: if isAuth() && request.resource.data.uid == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // --- Réclamations de bonus de parrainage ---
+    // Créée par le filleul (id = uid du filleul, donc une seule fois),
+    // réclamée par le parrain.
+    match /referralClaims/{referredUid} {
+      allow read: if isAuth();
+      allow create: if isSelf(referredUid)
+        && request.resource.data.referredUid == referredUid;
+      allow update: if isAuth()
+        && resource.data.sponsorUid == request.auth.uid
+        && request.resource.data.claimed == true;
+      allow delete: if false;
+    }
+
+    // --- Demandes d'ami ---
+    match /friendRequests/{id} {
+      allow read: if isAuth() &&
+        (resource.data.from == request.auth.uid || resource.data.to == request.auth.uid);
+      allow create: if isAuth() && request.resource.data.from == request.auth.uid;
+      allow update: if isAuth() && resource.data.to == request.auth.uid;
+      allow delete: if isAuth() &&
+        (resource.data.from == request.auth.uid || resource.data.to == request.auth.uid);
+    }
+
+    // --- Amitiés (members: [uidA, uidB]) ---
+    match /friendships/{id} {
+      allow read: if isAuth() && request.auth.uid in resource.data.members;
+      allow create: if isAuth() && request.auth.uid in request.resource.data.members;
+      allow delete: if isAuth() && request.auth.uid in resource.data.members;
+      allow update: if false;
+    }
+
+    // --- Demandes de retrait (PayPal / Donation / Partenaire) ---
+    match /withdrawals/{id} {
+      allow read: if isPresident() || (isAuth() && resource.data.uid == request.auth.uid);
+      allow create: if isAuth() && request.resource.data.uid == request.auth.uid
+        // Président & Co-Président exclus de la conversion argent / partenaire
+        && !(request.resource.data.type in ['paypal', 'partner'] &&
+             (request.auth.uid == 'BZ333LlhuJMoD4rXIquGE0zzjX43' ||
+              request.auth.uid == '7XLpqYMKEMX5kLrQtts6NG3zRB32'));
+      allow update: if isPresident();
+      allow delete: if false;
+    }
+
+    // --- Demandes de partenariat ---
+    // Lisibles uniquement par le Président et le Co-Président (+ l'auteur)
+    match /partnerRequests/{id} {
+      allow read: if isPresident() || (isAuth() && resource.data.uid == request.auth.uid);
+      allow create: if isAuth() && request.resource.data.uid == request.auth.uid;
+      allow update: if isPresident();
+      allow delete: if false;
+    }
+
+    // --- Fiches établissements partenaires (carte) ---
+    // Lecture par tous les connectés, écriture réservée aux Présidents.
+    match /establishments/{id} {
+      allow read: if isAuth();
+      allow create, update, delete: if isPresident();
+    }
+
+    // Tout le reste : refusé
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
