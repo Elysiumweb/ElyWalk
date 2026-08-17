@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { getLeaderboard } from '../lib/db';
+import Avatar from '../components/Avatar';
 import { fmtCoins, fmtNumber } from '../lib/coins';
 import { isPresidentUid, PRESIDENT_UID } from '../lib/constants';
 import type { UserProfile } from '../lib/types';
@@ -45,7 +46,12 @@ export default function LeaderboardPage() {
                 return (
                   <div className={`podium-col ${cls}`} key={u.uid} data-testid="leaderboard-podium-item">
                     {idx === 0 && <div className="podium-crown">👑</div>}
-                    <div className="podium-avatar">{u.displayName.charAt(0).toUpperCase()}</div>
+                    <Avatar
+                      className="podium-avatar"
+                      name={u.displayName}
+                      photoURL={u.photoURL}
+                      size={idx === 0 ? 72 : 58}
+                    />
                     <div className="podium-name">{u.displayName}</div>
                     <div className="podium-coins">{fmtCoins(u.elycoins)} EC</div>
                     <div className="podium-base">{idx + 1}</div>
@@ -62,12 +68,10 @@ export default function LeaderboardPage() {
                 style={u.uid === profile?.uid ? { background: 'var(--gold-dim)', borderRadius: 10, padding: '12px 8px' } : undefined}
                 data-testid="leaderboard-row"
               >
-                <div
-                  className="avatar"
-                  style={i < 3 ? { background: 'linear-gradient(160deg,#ecdfa6,#b7a75f)', color: 'var(--black)' } : undefined}
-                >
+                <div className="row-value" style={{ width: 22, textAlign: 'center', color: i < 3 ? 'var(--gold)' : 'var(--muted)' }}>
                   {i + 1}
                 </div>
+                <Avatar name={u.displayName} photoURL={u.photoURL} size={42} />
                 <div className="row-main">
                   <div className="row-title">
                     {u.displayName}{' '}

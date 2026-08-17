@@ -10,6 +10,7 @@ import {
   watchFriendships,
   getProfiles,
 } from '../lib/db';
+import Avatar from '../components/Avatar';
 import { fmtNumber, dateStr } from '../lib/coins';
 import type { UserProfile, FriendRequest } from '../lib/types';
 
@@ -122,7 +123,7 @@ export default function FriendsPage() {
         ) : (
           friends.map((f) => (
             <div className="list-row" key={f.uid} data-testid="friend-row">
-              <div className="avatar">{f.displayName.charAt(0).toUpperCase()}</div>
+              <Avatar name={f.displayName} photoURL={f.photoURL} size={42} />
               <div className="row-main">
                 <div className="row-title">{f.displayName}</div>
                 <div className="row-sub">

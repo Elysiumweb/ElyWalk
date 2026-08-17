@@ -148,6 +148,15 @@ async function nativeSendCode(trigger: () => Promise<void>): Promise<string> {
 
 // ============ Déconnexion ============
 
+export async function updateAuthProfile(fields: {
+  displayName?: string;
+  photoURL?: string;
+}): Promise<void> {
+  const user = auth.currentUser;
+  if (!user) return;
+  await updateProfile(user, fields);
+}
+
 export async function logout(): Promise<void> {
   if (isNative()) {
     await FirebaseAuthentication.signOut().catch(() => undefined);

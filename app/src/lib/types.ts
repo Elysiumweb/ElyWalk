@@ -3,6 +3,7 @@ export type Role = 'president' | 'copresident' | 'member';
 export interface UserProfile {
   uid: string;
   displayName: string;
+  photoURL?: string | null;
   email: string | null;
   phoneNumber: string | null;
   phoneVerified: boolean;

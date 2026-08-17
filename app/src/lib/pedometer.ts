@@ -1,72 +1,60 @@
-import { Capacitor } from '@capacitor/core';
-import { CapacitorPedometer } from '@capgo/capacitor-pedometer';
-import { Preferences } from '@capacitor/preferences';
-import { dateStr } from './coins';
+import { Capacitor, registerPlugin } from '@capacitor/core';
+import { App as CapApp } from '@capacitor/app';
 
 /**
- * Service de comptage de pas — capteur système Android (TYPE_STEP_COUNTER),
- * permission "Activité physique" (ACTIVITY_RECOGNITION). Pas de Health Connect.
+ * Service de comptage de pas.
  *
- * Le capteur fournit un cumul : on persiste la dernière valeur vue et le total
- * du jour dans les Preferences pour survivre aux fermetures de l'app.
+ * Sur Android, un service natif de premier plan (StepCounterService)
+ * écoute TYPE_STEP_COUNTER même lorsque l'application est fermée.
+ * Les totaux sont persistés en SharedPreferences côté natif.
+ * Ce module n'est qu'un pont JS vers ce service.
  */
 
-const KEY_DATE = 'elywalk.steps.date';
-const KEY_TODAY = 'elywalk.steps.today';
-const KEY_LAST_SENSOR = 'elywalk.steps.lastSensor';
+interface NativeStepCounterPlugin {
+  start(): Promise<{ todaySteps: number }>;
+  getTodaySteps(): Promise<{ todaySteps: number }>;
+  resetToday(): Promise<{ todaySteps: number }>;
+  checkPermission(): Promise<{ status: 'granted' | 'denied' | 'prompt' }>;
+  requestPermission(): Promise<{ status: 'granted' | 'denied' | 'prompt' }>;
+  requestBatteryExemption(): Promise<void>;
+  addListener(
+    eventName: 'steps',
+    listenerFunc: (data: { todaySteps: number }) => void
+  ): Promise<{ remove: () => void }>;
+}
+
+const Native = registerPlugin<NativeStepCounterPlugin>('StepCounter');
 
 type Listener = (todaySteps: number) => void;
 
 class PedometerService {
   private todaySteps = 0;
-  private today = dateStr();
-  private lastSensor: number | null = null;
   private listeners = new Set<Listener>();
   private started = false;
-  private loaded = false;
+  private nativeHandle: { remove: () => void } | null = null;
+  private appHandle: { remove: () => void } | null = null;
 
   isNative(): boolean {
     return Capacitor.isNativePlatform();
   }
 
   async loadPersisted(): Promise<number> {
-    if (this.loaded) return this.todaySteps;
-    const [d, t, ls] = await Promise.all([
-      Preferences.get({ key: KEY_DATE }),
-      Preferences.get({ key: KEY_TODAY }),
-      Preferences.get({ key: KEY_LAST_SENSOR }),
-    ]);
-    const storedDate = d.value;
-    if (storedDate === dateStr()) {
-      this.todaySteps = Number(t.value || 0) || 0;
-    } else {
-      this.todaySteps = 0;
+    if (!this.isNative()) return this.todaySteps;
+    try {
+      const r = await Native.getTodaySteps();
+      this.todaySteps = Number(r.todaySteps) || 0;
+      this.notify();
+    } catch {
+      // Plugin absent (web / preview).
     }
-    this.today = dateStr();
-    this.lastSensor = ls.value != null && ls.value !== '' ? Number(ls.value) : null;
-    this.loaded = true;
     return this.todaySteps;
-  }
-
-  private async persist(): Promise<void> {
-    await Promise.all([
-      Preferences.set({ key: KEY_DATE, value: this.today }),
-      Preferences.set({ key: KEY_TODAY, value: String(this.todaySteps) }),
-      Preferences.set({
-        key: KEY_LAST_SENSOR,
-        value: this.lastSensor == null ? '' : String(this.lastSensor),
-      }),
-    ]);
   }
 
   async checkPermission(): Promise<'granted' | 'denied' | 'prompt'> {
     if (!this.isNative()) return 'denied';
     try {
-      const st = await CapacitorPedometer.checkPermissions();
-      const v = st.activityRecognition || 'prompt';
-      if (v === 'granted') return 'granted';
-      if (v === 'denied') return 'denied';
-      return 'prompt';
+      const r = await Native.checkPermission();
+      return r.status || 'prompt';
     } catch {
       return 'denied';
     }
@@ -75,66 +63,52 @@ class PedometerService {
   async requestPermission(): Promise<boolean> {
     if (!this.isNative()) return false;
     try {
-      const st = await CapacitorPedometer.requestPermissions();
-      return st.activityRecognition === 'granted';
+      const r = await Native.requestPermission();
+      return r.status === 'granted';
     } catch {
       return false;
     }
   }
 
-  /** Démarre l'écoute du capteur (permission déjà accordée). */
+  /** Démarre le service natif (permission déjà accordée). */
   async start(): Promise<void> {
     if (!this.isNative() || this.started) return;
-    await this.loadPersisted();
     try {
-      const avail = await CapacitorPedometer.isAvailable();
-      if (!avail.stepCounting) return;
-      await CapacitorPedometer.addListener('measurement', (m) => {
-        this.onMeasurement(m.numberOfSteps);
-      });
-      await CapacitorPedometer.startMeasurementUpdates();
+      if (!this.nativeHandle) {
+        this.nativeHandle = await Native.addListener('steps', (d) => {
+          this.todaySteps = Number(d.todaySteps) || 0;
+          this.notify();
+        });
+      }
+      const r = await Native.start();
+      this.todaySteps = Number(r.todaySteps) || 0;
       this.started = true;
+      this.notify();
+      Native.requestBatteryExemption().catch(() => undefined);
+      if (!this.appHandle) {
+        this.appHandle = await CapApp.addListener('appStateChange', ({ isActive }) => {
+          if (isActive) this.loadPersisted();
+        });
+      }
     } catch (e) {
       console.warn('[Pedometer] start error', e);
     }
   }
 
-  private onMeasurement(sensorValue?: number): void {
-    if (sensorValue == null || Number.isNaN(sensorValue)) return;
-    this.rolloverIfNeeded();
-    if (this.lastSensor == null || sensorValue < this.lastSensor) {
-      // Première mesure ou capteur réinitialisé (redémarrage appareil).
-      this.lastSensor = sensorValue;
-      this.persist();
-      this.notify();
-      return;
-    }
-    const delta = sensorValue - this.lastSensor;
-    this.lastSensor = sensorValue;
-    if (delta > 0) {
-      this.todaySteps += delta;
-    }
-    this.persist();
-    this.notify();
-  }
-
-  private rolloverIfNeeded(): void {
-    const now = dateStr();
-    if (now !== this.today) {
-      this.today = now;
-      this.todaySteps = 0;
-    }
-  }
-
   getTodaySteps(): number {
-    this.rolloverIfNeeded();
     return this.todaySteps;
   }
 
   /** Remet le compteur du jour à zéro (après validation des pas). */
   async resetToday(): Promise<void> {
+    if (this.isNative()) {
+      try {
+        await Native.resetToday();
+      } catch {
+        // ignore
+      }
+    }
     this.todaySteps = 0;
-    await this.persist();
     this.notify();
   }
 

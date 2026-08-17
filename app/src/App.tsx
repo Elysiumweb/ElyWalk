@@ -6,6 +6,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './components/Toast';
 import TabBar from './components/TabBar';
 import { initAds, loadAppOpenAd, showAppOpenAdIfReady } from './lib/ads';
+import { pedometer } from './lib/pedometer';
 import AuthPage from './pages/AuthPage';
 import HomePage from './pages/HomePage';
 import FriendsPage from './pages/FriendsPage';
@@ -18,6 +19,15 @@ import MapPage from './pages/MapPage';
 
 function Shell() {
   const { user, loading } = useAuth();
+
+  // Démarre le service de pas dès la connexion (survît à la fermeture de l'app).
+  useEffect(() => {
+    if (!user || !Capacitor.isNativePlatform()) return;
+    (async () => {
+      const p = await pedometer.checkPermission();
+      if (p === 'granted') await pedometer.start();
+    })();
+  }, [user?.uid]);
 
   // Annonce à l'ouverture + au retour sur l'application (App Open Ad).
   useEffect(() => {

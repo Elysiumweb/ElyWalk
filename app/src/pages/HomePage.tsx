@@ -158,8 +158,9 @@ export default function HomePage() {
         <div className="card" data-testid="permission-card">
           <div className="card-title">Activer le comptage des pas</div>
           <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 12 }}>
-            ElyWalk utilise le capteur de pas de votre téléphone. Autorisez
-            « Activité physique » pour compter vos pas et gagner des ElyCoins.
+            ElyWalk utilise le capteur de pas de votre téléphone, même lorsque
+            l’application est fermée. Autorisez « Activité physique » — une
+            notification discrète restera visible pour continuer à compter.
           </p>
           <button className="btn btn-gold" onClick={askPermission} data-testid="request-permission-button">
             Autoriser l’activité physique

@@ -4,4 +4,8 @@
     <string name="title_activity_main">ElyWalk</string>
     <string name="package_name">com.example.elywalk</string>
     <string name="custom_url_scheme">com.example.elywalk</string>
+    <string name="step_channel_name">Comptage des pas</string>
+    <string name="step_channel_desc">ElyWalk compte vos pas même lorsque l\'application est fermée.</string>
+    <string name="step_notif_title">ElyWalk</string>
+    <string name="step_notif_text">%1$d pas aujourd\'hui</string>
 </resources>

@@ -76,6 +76,7 @@ export async function ensureUserDoc(
     uid: user.uid,
     displayName:
       displayNameOverride || user.displayName || user.email?.split('@')[0] || 'Marcheur',
+    photoURL: user.photoURL || null,
     email: user.email,
     phoneNumber: user.phoneNumber,
     phoneVerified: !!user.phoneNumber,
