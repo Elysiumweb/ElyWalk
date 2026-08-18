@@ -8,3 +8,10 @@ app/android/.gradle/
 *.iml
 .idea/
 .DS_Store
+
+# Artefacts de build Cordova/Capacitor (Android)
+app/android/capacitor-cordova-android-plugins/build/
+
+# Variables d'environnement locales
+app/.env
+app/.env.local
