@@ -4,8 +4,8 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import Sheet from '../components/Sheet';
 import Avatar from '../components/Avatar';
-import { logout, startPhoneLink, frAuthError, updateAuthProfile, type PhoneSession } from '../lib/auth-service';
-import { updateUserFields, setReferredBy, maybeCreateReferralClaim } from '../lib/db';
+import { logout, updateAuthProfile } from '../lib/auth-service';
+import { updateUserFields, setReferredBy } from '../lib/db';
 import { uploadAvatar } from '../lib/avatar';
 import { isPresidentUid } from '../lib/constants';
 import { fmtCoins } from '../lib/coins';
@@ -15,10 +15,6 @@ export default function ProfilePage() {
   const { toast } = useToast();
   const navigate = useNavigate();
 
-  const [phoneOpen, setPhoneOpen] = useState(false);
-  const [phone, setPhone] = useState('');
-  const [smsCode, setSmsCode] = useState('');
-  const [session, setSession] = useState<PhoneSession | null>(null);
   const [busy, setBusy] = useState(false);
 
   const [referralOpen, setReferralOpen] = useState(false);
@@ -35,50 +31,13 @@ export default function ProfilePage() {
 
   const isAdmin = isPresidentUid(profile?.uid);
 
-  const sendSms = async () => {
-    setBusy(true);
-    try {
-      if (!phone.trim().startsWith('+')) {
-        throw new Error('Format international requis, ex. +33612345678');
-      }
-      const s = await startPhoneLink(phone.trim(), 'recaptcha-container-profile');
-      setSession(s);
-      toast('Code SMS envoyé.', 'success');
-    } catch (e) {
-      toast(frAuthError(e), 'error');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const confirmSms = async () => {
-    if (!session || !profile) return;
-    setBusy(true);
-    try {
-      await session.confirm(smsCode.trim());
-      await updateUserFields(profile.uid, {
-        phoneNumber: phone.trim(),
-        phoneVerified: true,
-      });
-      await maybeCreateReferralClaim({ ...profile, phoneNumber: phone.trim(), phoneVerified: true });
-      toast('Téléphone vérifié ✓', 'success');
-      setPhoneOpen(false);
-      setSession(null);
-      setSmsCode('');
-    } catch (e) {
-      toast(frAuthError(e), 'error');
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const saveReferral = async () => {
     if (!profile) return;
     setBusy(true);
     try {
       const ok = await setReferredBy(profile.uid, referralCode);
       if (!ok) throw new Error('Code invalide ou parrain déjà défini.');
-      toast('Parrain enregistré ! Vérifiez vos téléphones pour valider le bonus.', 'success');
+      toast('Parrain enregistré ! Le bonus est vérifié automatiquement.', 'success');
       setReferralOpen(false);
     } catch (e) {
       toast((e as Error).message, 'error');
@@ -193,7 +152,7 @@ export default function ProfilePage() {
           <div className="display" style={{ fontSize: 17 }} data-testid="profile-name">
             {profile.displayName}
           </div>
-          <div style={{ color: 'var(--muted)', fontSize: 13 }}>{profile.email || profile.phoneNumber}</div>
+          <div style={{ color: 'var(--muted)', fontSize: 13 }}>{profile.email || 'Aucun e-mail'}</div>
           <div style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {isAdmin && (
               <span className="badge">👑 {profile.role === 'president' ? 'Président' : 'Co-Président'}</span>
@@ -209,32 +168,22 @@ export default function ProfilePage() {
       <div className="section-gap" />
 
       <div className="card">
-        <div className="card-title">Téléphone</div>
-        <div className="list-row">
-          <div className="row-main">
-            <div className="row-title" style={{ fontSize: 14 }}>
-              {profile.phoneNumber || 'Aucun numéro'}
-            </div>
-            <div className="row-sub">Requis pour valider un parrainage</div>
-          </div>
-          {profile.phoneVerified ? (
-            <span className="badge badge-success" data-testid="phone-verified-badge">Vérifié ✓</span>
-          ) : (
-            <button className="btn btn-gold btn-sm" onClick={() => setPhoneOpen(true)} data-testid="verify-phone-button">
-              Vérifier
-            </button>
-          )}
-        </div>
-      </div>
-
-      <div className="card">
         <div className="card-title">Parrainage</div>
         <div className="list-row">
           <div className="row-main">
             <div className="row-title" style={{ fontSize: 14 }}>Mon code : {profile.referralCode}</div>
-            <div className="row-sub">+10 EC par filleul (téléphones vérifiés des deux côtés)</div>
+            <div className="row-sub">
+              +10 EC par filleul — bonus refusé si le filleul utilise le même
+              appareil (HWID) ou la même adresse IP que vous.
+            </div>
           </div>
         </div>
+        {profile.referralRejected && (
+          <div className="row-sub" style={{ color: '#ff8b8b', marginTop: 6 }} data-testid="referral-rejected-note">
+            ⚠️ Parrainage non éligible : même appareil ou même adresse IP
+            détecté(e) entre votre parrain et vous.
+          </div>
+        )}
         {!profile.referredBy && (
           <button className="btn btn-outline" onClick={() => setReferralOpen(true)} data-testid="enter-referral-button">
             J’ai un code de parrainage
@@ -314,45 +263,6 @@ export default function ProfilePage() {
         <button className="btn btn-gold" onClick={saveProfile} disabled={busy} data-testid="save-profile-button">
           {busy ? '...' : 'Enregistrer'}
         </button>
-      </Sheet>
-
-      <Sheet open={phoneOpen} onClose={() => setPhoneOpen(false)} title="Vérifier mon téléphone" testId="phone-sheet">
-        {!session ? (
-          <>
-            <div className="field">
-              <label>Numéro de téléphone</label>
-              <input
-                className="input"
-                type="tel"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="+33612345678"
-                data-testid="profile-phone-input"
-              />
-            </div>
-            <button className="btn btn-gold" onClick={sendSms} disabled={busy} data-testid="profile-send-sms-button">
-              {busy ? '...' : 'Recevoir le code SMS'}
-            </button>
-          </>
-        ) : (
-          <>
-            <div className="field">
-              <label>Code reçu par SMS</label>
-              <input
-                className="input"
-                inputMode="numeric"
-                value={smsCode}
-                onChange={(e) => setSmsCode(e.target.value)}
-                placeholder="123456"
-                data-testid="profile-sms-code-input"
-              />
-            </div>
-            <button className="btn btn-gold" onClick={confirmSms} disabled={busy} data-testid="profile-confirm-sms-button">
-              {busy ? '...' : 'Valider'}
-            </button>
-          </>
-        )}
-        <div id="recaptcha-container-profile" />
       </Sheet>
 
       <Sheet open={referralOpen} onClose={() => setReferralOpen(false)} title="Code de parrainage" testId="referral-sheet">

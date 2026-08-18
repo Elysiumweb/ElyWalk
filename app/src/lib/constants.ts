@@ -37,6 +37,3 @@ export const STEP_TIERS: { min: number; max: number; coins: number }[] = [
 ];
 
 export const DAILY_STEP_GOAL = 10000;
-
-// --- reCAPTCHA (auth téléphone web) ---
-export const RECAPTCHA_SITE_KEY = '6Lc_koktAAAAAG2n551aIeGJbJVWKD9mvGiUwTH_';

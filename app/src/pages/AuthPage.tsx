@@ -5,12 +5,10 @@ import {
   registerWithEmail,
   loginWithEmail,
   loginWithGoogle,
-  startPhoneSignIn,
   frAuthError,
-  type PhoneSession,
 } from '../lib/auth-service';
 
-type Mode = 'login' | 'register' | 'phone';
+type Mode = 'login' | 'register';
 
 export default function AuthPage() {
   const { setPendingReferralCode, setPendingDisplayName } = useAuth();
@@ -22,10 +20,6 @@ export default function AuthPage() {
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [referral, setReferral] = useState('');
-
-  const [phone, setPhone] = useState('');
-  const [smsCode, setSmsCode] = useState('');
-  const [phoneSession, setPhoneSession] = useState<PhoneSession | null>(null);
 
   const run = async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -56,23 +50,6 @@ export default function AuthPage() {
       await loginWithGoogle();
     });
 
-  const sendSms = () =>
-    run(async () => {
-      if (!phone.trim().startsWith('+')) {
-        throw new Error('Utilisez le format international, ex. +33612345678');
-      }
-      const session = await startPhoneSignIn(phone.trim(), 'recaptcha-container');
-      setPhoneSession(session);
-      toast('Code SMS envoyé.', 'success');
-    });
-
-  const confirmSms = () =>
-    run(async () => {
-      if (!phoneSession) return;
-      setPendingReferralCode(referral.trim() || null);
-      await phoneSession.confirm(smsCode.trim());
-    });
-
   return (
     <div className="auth-screen">
       <img src="/deco-1.webp" className="auth-deco-top" alt="" />
@@ -96,120 +73,62 @@ export default function AuthPage() {
         >
           Inscription
         </button>
-        <button
-          className={`chip ${mode === 'phone' ? 'chip-active' : ''}`}
-          onClick={() => setMode('phone')}
-          data-testid="auth-mode-phone"
-        >
-          Téléphone
-        </button>
       </div>
 
-      {mode !== 'phone' && (
-        <>
-          {mode === 'register' && (
-            <div className="field">
-              <label>Nom / Pseudo</label>
-              <input
-                className="input"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Votre pseudo"
-                data-testid="auth-name-input"
-              />
-            </div>
-          )}
-          <div className="field">
-            <label>Adresse e-mail</label>
-            <input
-              className="input"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="vous@exemple.com"
-              data-testid="auth-email-input"
-            />
-          </div>
-          <div className="field">
-            <label>Mot de passe</label>
-            <input
-              className="input"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              data-testid="auth-password-input"
-            />
-          </div>
-          {mode === 'register' && (
-            <div className="field">
-              <label>Code de parrainage (optionnel)</label>
-              <input
-                className="input"
-                value={referral}
-                onChange={(e) => setReferral(e.target.value.toUpperCase())}
-                placeholder="Ex. A3F7K9"
-                data-testid="auth-referral-input"
-              />
-            </div>
-          )}
-          <button className="btn btn-gold" onClick={submitEmail} disabled={busy} data-testid="auth-submit-button">
-            {busy ? '...' : mode === 'register' ? "S'inscrire" : 'Se connecter'}
-          </button>
-        </>
+      {mode === 'register' && (
+        <div className="field">
+          <label>Nom / Pseudo</label>
+          <input
+            className="input"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Votre pseudo"
+            data-testid="auth-name-input"
+          />
+        </div>
       )}
-
-      {mode === 'phone' && (
-        <>
-          {!phoneSession ? (
-            <>
-              <div className="field">
-                <label>Numéro de téléphone</label>
-                <input
-                  className="input"
-                  type="tel"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="+33612345678"
-                  data-testid="auth-phone-input"
-                />
-              </div>
-              <button className="btn btn-gold" onClick={sendSms} disabled={busy} data-testid="auth-send-sms-button">
-                {busy ? '...' : 'Recevoir le code SMS'}
-              </button>
-            </>
-          ) : (
-            <>
-              <div className="field">
-                <label>Code reçu par SMS</label>
-                <input
-                  className="input"
-                  inputMode="numeric"
-                  value={smsCode}
-                  onChange={(e) => setSmsCode(e.target.value)}
-                  placeholder="123456"
-                  data-testid="auth-sms-code-input"
-                />
-              </div>
-              <button className="btn btn-gold" onClick={confirmSms} disabled={busy} data-testid="auth-confirm-sms-button">
-                {busy ? '...' : 'Valider le code'}
-              </button>
-              <div className="section-gap" />
-              <button className="btn btn-ghost" onClick={() => setPhoneSession(null)} data-testid="auth-change-phone-button">
-                Changer de numéro
-              </button>
-            </>
-          )}
-        </>
+      <div className="field">
+        <label>Adresse e-mail</label>
+        <input
+          className="input"
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="vous@exemple.com"
+          data-testid="auth-email-input"
+        />
+      </div>
+      <div className="field">
+        <label>Mot de passe</label>
+        <input
+          className="input"
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="••••••••"
+          data-testid="auth-password-input"
+        />
+      </div>
+      {mode === 'register' && (
+        <div className="field">
+          <label>Code de parrainage (optionnel)</label>
+          <input
+            className="input"
+            value={referral}
+            onChange={(e) => setReferral(e.target.value.toUpperCase())}
+            placeholder="Ex. A3F7K9"
+            data-testid="auth-referral-input"
+          />
+        </div>
       )}
+      <button className="btn btn-gold" onClick={submitEmail} disabled={busy} data-testid="auth-submit-button">
+        {busy ? '...' : mode === 'register' ? "S'inscrire" : 'Se connecter'}
+      </button>
 
       <div className="divider">ou</div>
       <button className="btn btn-outline" onClick={submitGoogle} disabled={busy} data-testid="auth-google-button">
         <GoogleG /> Continuer avec Google
       </button>
-
-      {/* Conteneur reCAPTCHA invisible (auth téléphone web) */}
-      <div id="recaptcha-container" />
     </div>
   );
 }
