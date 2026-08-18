@@ -86,7 +86,7 @@ export default function FriendsPage() {
         </div>
         <p style={{ color: 'var(--muted)', fontSize: 12, marginTop: 6 }}>
           Partagez ce code : il sert aussi de code de parrainage (+10 EC par
-          filleul éligible — appareil et adresse IP différents requis).
+          filleul éligible).
         </p>
       </div>
 
