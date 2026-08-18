@@ -173,8 +173,7 @@ export default function ProfilePage() {
           <div className="row-main">
             <div className="row-title" style={{ fontSize: 14 }}>Mon code : {profile.referralCode}</div>
             <div className="row-sub">
-              +10 EC par filleul — bonus refusé si le filleul utilise le même
-              appareil (HWID) ou la même adresse IP que vous.
+              +10 EC par filleul
             </div>
           </div>
         </div>
