@@ -5,8 +5,12 @@ export interface UserProfile {
   displayName: string;
   photoURL?: string | null;
   email: string | null;
-  phoneNumber: string | null;
-  phoneVerified: boolean;
+  // --- Anti-fraude parrainage (IP + HWID) ---
+  signupIp?: string | null; // IP publique à la création du compte
+  lastIp?: string | null; // Dernière IP connue
+  hwid?: string | null; // Identifiant matériel à la création du compte
+  hwids?: string[]; // Tous les HWID utilisés par ce compte
+  referralRejected?: boolean; // Parrainage refusé (même IP ou même HWID)
   elycoins: number;
   totalSteps: number;
   totalCalories: number;
@@ -72,6 +76,8 @@ export interface ReferralClaim {
   sponsorUid: string;
   referredUid: string;
   referredName: string;
+  referredIp?: string | null; // IP du filleul au moment de la réclamation
+  referredHwid?: string | null; // HWID du filleul au moment de la réclamation
   claimed: boolean;
   createdAt: number;
 }

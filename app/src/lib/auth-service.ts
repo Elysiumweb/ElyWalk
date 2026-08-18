@@ -5,14 +5,9 @@ import {
   signInWithEmailAndPassword,
   signInWithPopup,
   signInWithCredential,
-  signInWithPhoneNumber,
-  linkWithPhoneNumber,
   GoogleAuthProvider,
-  PhoneAuthProvider,
-  RecaptchaVerifier,
   updateProfile,
   signOut,
-  type ConfirmationResult,
   type UserCredential,
 } from 'firebase/auth';
 import { auth } from './firebase';
@@ -49,103 +44,6 @@ export async function loginWithGoogle(): Promise<UserCredential> {
   return signInWithPopup(auth, provider);
 }
 
-// ============ Téléphone ============
-
-export interface PhoneSession {
-  confirm: (code: string) => Promise<UserCredential | void>;
-}
-
-let webRecaptcha: RecaptchaVerifier | null = null;
-
-function getWebRecaptcha(containerId: string): RecaptchaVerifier {
-  if (!webRecaptcha) {
-    webRecaptcha = new RecaptchaVerifier(auth, containerId, { size: 'invisible' });
-  }
-  return webRecaptcha;
-}
-
-/** Connexion (ou inscription) par numéro de téléphone. */
-export async function startPhoneSignIn(
-  phoneNumber: string,
-  recaptchaContainerId: string
-): Promise<PhoneSession> {
-  if (isNative()) {
-    const verificationId = await nativeSendCode(() =>
-      FirebaseAuthentication.signInWithPhoneNumber({ phoneNumber })
-    );
-    return {
-      confirm: async (code: string) => {
-        // Confirme côté natif puis synchronise la session avec le SDK JS.
-        await FirebaseAuthentication.confirmVerificationCode({
-          verificationId,
-          verificationCode: code,
-        });
-        const credential = PhoneAuthProvider.credential(verificationId, code);
-        return signInWithCredential(auth, credential);
-      },
-    };
-  }
-  const verifier = getWebRecaptcha(recaptchaContainerId);
-  const confirmation: ConfirmationResult = await signInWithPhoneNumber(auth, phoneNumber, verifier);
-  return {
-    confirm: (code: string) => confirmation.confirm(code),
-  };
-}
-
-/** Lie un numéro de téléphone au compte connecté (vérification du téléphone). */
-export async function startPhoneLink(
-  phoneNumber: string,
-  recaptchaContainerId: string
-): Promise<PhoneSession> {
-  if (isNative()) {
-    const verificationId = await nativeSendCode(() =>
-      FirebaseAuthentication.linkWithPhoneNumber({ phoneNumber })
-    );
-    return {
-      confirm: async (code: string) => {
-        await FirebaseAuthentication.confirmVerificationCode({
-          verificationId,
-          verificationCode: code,
-        });
-      },
-    };
-  }
-  const user = auth.currentUser;
-  if (!user) throw new Error('Non connecté.');
-  const verifier = getWebRecaptcha(recaptchaContainerId);
-  const confirmation = await linkWithPhoneNumber(user, phoneNumber, verifier);
-  return {
-    confirm: (code: string) => confirmation.confirm(code),
-  };
-}
-
-/** Attend l'événement phoneCodeSent du plugin natif et renvoie le verificationId. */
-async function nativeSendCode(trigger: () => Promise<void>): Promise<string> {
-  return new Promise<string>(async (resolve, reject) => {
-    const timeout = setTimeout(() => {
-      FirebaseAuthentication.removeAllListeners();
-      reject(new Error("Délai dépassé pour l'envoi du SMS."));
-    }, 60000);
-    await FirebaseAuthentication.addListener('phoneCodeSent', (event) => {
-      clearTimeout(timeout);
-      FirebaseAuthentication.removeAllListeners();
-      resolve(event.verificationId);
-    });
-    await FirebaseAuthentication.addListener('phoneVerificationFailed', (event) => {
-      clearTimeout(timeout);
-      FirebaseAuthentication.removeAllListeners();
-      reject(new Error(event.message));
-    });
-    try {
-      await trigger();
-    } catch (e) {
-      clearTimeout(timeout);
-      FirebaseAuthentication.removeAllListeners();
-      reject(e);
-    }
-  });
-}
-
 // ============ Déconnexion ============
 
 export async function updateAuthProfile(fields: {
@@ -177,10 +75,6 @@ export function frAuthError(e: unknown): string {
     'auth/too-many-requests': 'Trop de tentatives. Réessayez plus tard.',
     'auth/operation-not-allowed':
       'Méthode de connexion non activée dans Firebase (Console > Authentication > Sign-in method).',
-    'auth/invalid-phone-number': 'Numéro de téléphone invalide (format +33...).',
-    'auth/invalid-verification-code': 'Code de vérification incorrect.',
-    'auth/credential-already-in-use': 'Ce numéro est déjà lié à un autre compte.',
-    'auth/provider-already-linked': 'Un numéro est déjà lié à ce compte.',
     'auth/network-request-failed': 'Erreur réseau. Vérifiez votre connexion.',
   };
   if (map[code]) return map[code];

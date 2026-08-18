@@ -25,6 +25,7 @@ import {
   COINS_PER_EURO,
 } from './constants';
 import { coinsForSteps, caloriesForSteps, dateStr, yesterdayStr } from './coins';
+import { getDeviceSignals } from './device';
 import type {
   UserProfile,
   CoinTransaction,
@@ -71,6 +72,9 @@ export async function ensureUserDoc(
     if (referredBy === user.uid) referredBy = null;
   }
 
+  // Signaux appareil à l'inscription (anti-fraude parrainage).
+  const signals = await getDeviceSignals();
+
   const code = genReferralCode(user.uid);
   const profile: UserProfile = {
     uid: user.uid,
@@ -78,8 +82,10 @@ export async function ensureUserDoc(
       displayNameOverride || user.displayName || user.email?.split('@')[0] || 'Marcheur',
     photoURL: user.photoURL || null,
     email: user.email,
-    phoneNumber: user.phoneNumber,
-    phoneVerified: !!user.phoneNumber,
+    signupIp: signals.ip,
+    lastIp: signals.ip,
+    hwid: signals.hwid,
+    hwids: signals.hwid ? [signals.hwid] : [],
     elycoins: 0,
     totalSteps: 0,
     totalCalories: 0,
@@ -135,29 +141,100 @@ export async function setReferredBy(uid: string, code: string): Promise<boolean>
   if (!sponsorUid || sponsorUid === uid) return false;
   const me = await getUserProfile(uid);
   if (!me || me.referredBy) return false;
-  await updateUserFields(uid, { referredBy: sponsorUid });
+  await updateUserFields(uid, { referredBy: sponsorUid, referralRejected: false });
   return true;
 }
 
+// ---- Anti-fraude parrainage (IP + HWID) ----
+
+function knownIps(p: UserProfile | null): string[] {
+  const ips = new Set<string>();
+  if (p?.signupIp) ips.add(p.signupIp);
+  if (p?.lastIp) ips.add(p.lastIp);
+  return [...ips];
+}
+
+function knownHwids(p: UserProfile | null): string[] {
+  const hwids = new Set<string>();
+  if (p?.hwid) hwids.add(p.hwid);
+  (p?.hwids || []).forEach((h) => h && hwids.add(h));
+  return [...hwids];
+}
+
 /**
- * Le filleul crée la réclamation de bonus quand parrain ET filleul
- * ont leur téléphone vérifié.
+ * Vérifie que le filleul et le parrain n'utilisent pas la même adresse IP
+ * ni le même appareil (HWID). Retourne la raison du refus, ou null si OK.
+ */
+function referralFraudReason(
+  sponsor: UserProfile,
+  myIp: string | null,
+  myHwid: string | null
+): 'hwid' | 'ip' | null {
+  if (myHwid && knownHwids(sponsor).includes(myHwid)) return 'hwid';
+  if (myIp && knownIps(sponsor).includes(myIp)) return 'ip';
+  return null;
+}
+
+/**
+ * Le filleul crée la réclamation de bonus de parrainage.
+ * Anti-fraude : refusé si le filleul partage l'adresse IP ou le HWID
+ * (identifiant matériel) du parrain — cela bloque la création de
+ * multiples comptes utilisés pour s'auto-parrainer.
  */
 export async function maybeCreateReferralClaim(me: UserProfile): Promise<void> {
-  if (!me.referredBy || !me.phoneVerified) return;
+  if (!me.referredBy || me.referralRejected) return;
   const claimRef = doc(db, 'referralClaims', me.uid);
   const existing = await getDoc(claimRef);
   if (existing.exists()) return;
   const sponsor = await getUserProfile(me.referredBy);
-  if (!sponsor || !sponsor.phoneVerified) return;
+  if (!sponsor) return;
+
+  const signals = await getDeviceSignals();
+  const reason = referralFraudReason(sponsor, signals.ip, signals.hwid);
+  if (reason) {
+    // Même appareil ou même connexion : pas de bonus.
+    await updateUserFields(me.uid, { referralRejected: true }).catch(() => undefined);
+    console.warn('[Referral] bonus refusé :', reason === 'hwid' ? 'même HWID' : 'même IP');
+    return;
+  }
+
   const claim: ReferralClaim = {
     sponsorUid: me.referredBy,
     referredUid: me.uid,
     referredName: me.displayName,
+    referredIp: signals.ip,
+    referredHwid: signals.hwid,
     claimed: false,
     createdAt: Date.now(),
   };
   await setDoc(claimRef, claim).catch(() => undefined);
+  // Mémoriser les signaux utilisés côté filleul (vérifications futures).
+  await updateUserFields(me.uid, {
+    ...(signals.ip ? { lastIp: signals.ip } : {}),
+    ...(signals.hwid ? { hwids: [...new Set([...(me.hwids || []), signals.hwid])] } : {}),
+    referralRejected: false,
+  }).catch(() => undefined);
+}
+
+/**
+ * Mémorise les signaux appareil du compte connecté (IP + HWID).
+ * Appelé à chaque connexion pour garder l'historique à jour.
+ */
+export async function recordDeviceSignals(uid: string): Promise<void> {
+  const signals = await getDeviceSignals();
+  const me = await getUserProfile(uid);
+  if (!me) return;
+  const fields: Partial<UserProfile> = {};
+  if (signals.ip) {
+    fields.lastIp = signals.ip;
+    if (!me.signupIp) fields.signupIp = signals.ip;
+  }
+  if (signals.hwid) {
+    fields.hwids = [...new Set([...(me.hwids || []), signals.hwid])];
+    if (!me.hwid) fields.hwid = signals.hwid;
+  }
+  if (Object.keys(fields).length === 0) return;
+  await updateUserFields(uid, fields).catch(() => undefined);
 }
 
 /** Le parrain encaisse ses bonus de parrainage en attente. Retourne le nb encaissé. */

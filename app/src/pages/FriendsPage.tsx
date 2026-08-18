@@ -85,8 +85,8 @@ export default function FriendsPage() {
           {profile?.referralCode}
         </div>
         <p style={{ color: 'var(--muted)', fontSize: 12, marginTop: 6 }}>
-          Partagez ce code : il sert aussi de code de parrainage (+10 EC si vos
-          téléphones sont vérifiés).
+          Partagez ce code : il sert aussi de code de parrainage (+10 EC par
+          filleul éligible — appareil et adresse IP différents requis).
         </p>
       </div>
 

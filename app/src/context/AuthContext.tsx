@@ -13,6 +13,7 @@ import {
   watchUserProfile,
   maybeCreateReferralClaim,
   claimReferralBonuses,
+  recordDeviceSignals,
 } from '../lib/db';
 import type { UserProfile } from '../lib/types';
 
@@ -66,6 +67,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
         await ensureUserDoc(user, pendingReferralCode || undefined, pendingDisplayName || undefined);
         if (cancelled) return;
+        // Anti-fraude : mémoriser les signaux appareil (IP + HWID).
+        recordDeviceSignals(user.uid).catch(() => undefined);
         // Bonus de parrainage : côté filleul puis côté parrain.
         claimReferralBonuses(user.uid).catch(() => undefined);
       } catch (e) {
@@ -80,14 +83,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid]);
 
-  // Dès que le profil change (ex: téléphone vérifié), tente de créer la
-  // réclamation de parrainage côté filleul.
+  // Dès qu'un parrain est défini, tente de créer la réclamation de
+  // parrainage côté filleul (vérification anti-fraude IP + HWID incluse).
   useEffect(() => {
-    if (profile?.phoneVerified && profile.referredBy) {
+    if (profile?.referredBy) {
       maybeCreateReferralClaim(profile).catch(() => undefined);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile?.phoneVerified, profile?.referredBy]);
+  }, [profile?.uid, profile?.referredBy]);
 
   const setCode = useCallback((code: string | null) => setPendingReferralCode(code), []);
 
