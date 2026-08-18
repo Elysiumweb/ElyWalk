@@ -5,6 +5,7 @@ import {
   doc,
   getDocs,
   onSnapshot,
+  updateDoc,
   type Unsubscribe,
 } from 'firebase/firestore';
 import { db } from './firebase';
@@ -17,6 +18,10 @@ export interface Establishment {
   logoDataUrl: string | null;
   lat: number;
   lng: number;
+  openingHours?: string;
+  website?: string;
+  phone?: string;
+  offerText?: string;
   createdBy: string;
   createdAt: number;
 }
@@ -60,6 +65,10 @@ export async function createEstablishment(
   data: Omit<Establishment, 'id' | 'createdAt'>
 ): Promise<void> {
   await addDoc(collection(db, 'establishments'), { ...data, createdAt: Date.now() });
+}
+
+export async function updateEstablishment(id: string, data: Partial<Establishment>): Promise<void> {
+  await updateDoc(doc(db, 'establishments', id), data);
 }
 
 export async function deleteEstablishment(id: string): Promise<void> {

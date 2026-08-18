@@ -17,6 +17,8 @@ export default function MapPage() {
   const userMarkerRef = useRef<L.Marker | null>(null);
   const [selected, setSelected] = useState<Establishment | null>(null);
   const [locating, setLocating] = useState(false);
+  const [establishments,setEstablishments]=useState<Establishment[]>([]); const [search,setSearch]=useState('');
+  const [userPos,setUserPos]=useState<{lat:number;lng:number}|null>(null);
 
   // Initialisation de la carte
   useEffect(() => {
@@ -46,6 +48,7 @@ export default function MapPage() {
   // Marqueurs des établissements partenaires
   useEffect(() => {
     const unsub = watchEstablishments((list) => {
+      setEstablishments(list);
       const map = mapRef.current;
       if (!map) return;
       markersRef.current.forEach((m) => m.remove());
@@ -97,6 +100,7 @@ export default function MapPage() {
       }
       const map = mapRef.current;
       if (!map) return;
+      setUserPos({lat,lng});
       map.setView([lat, lng], 17);
       if (userMarkerRef.current) userMarkerRef.current.remove();
       userMarkerRef.current = L.marker([lat, lng], {
@@ -114,6 +118,9 @@ export default function MapPage() {
     }
   };
 
+  const distance=(e:Establishment)=>userPos?Math.round(L.latLng(userPos.lat,userPos.lng).distanceTo(L.latLng(e.lat,e.lng)))/1000:null;
+  const nearby=establishments.filter(e=>`${e.name} ${e.address} ${e.description}`.toLowerCase().includes(search.toLowerCase())).sort((a,b)=>(distance(a)??99999)-(distance(b)??99999));
+  const openMaps=(e:Establishment)=>window.open(`https://www.google.com/maps/dir/?api=1&destination=${e.lat},${e.lng}`,'_blank','noopener');
   return (
     <div className="map-screen" data-testid="map-screen">
       <div className="map-header">
@@ -123,6 +130,7 @@ export default function MapPage() {
         </div>
       </div>
 
+      <div className="map-search"><input className="input" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Rechercher un partenaire…"/><div className="nearby-list">{nearby.slice(0,5).map(e=><button key={e.id} onClick={()=>{setSelected(e);mapRef.current?.setView([e.lat,e.lng],16)}}><b>{e.name}</b><span>{distance(e)!==null?`${distance(e)!.toFixed(1)} km`:e.address}</span></button>)}</div></div>
       <div ref={containerRef} className="map-container" data-testid="map-container" />
 
       <button
@@ -160,7 +168,7 @@ export default function MapPage() {
             </button>
           </div>
           <p style={{ fontSize: 13.5, marginTop: 10, color: 'var(--white)' }}>{selected.description}</p>
-          <span className="badge" style={{ marginTop: 10 }}>Partenaire Elysium</span>
+          <div className="partner-details">{selected.openingHours&&<span>🕐 {selected.openingHours}</span>}{selected.phone&&<a href={`tel:${selected.phone}`}>☎ {selected.phone}</a>}{selected.website&&<a href={selected.website} target="_blank" rel="noreferrer">Site web</a>}{selected.offerText&&<strong>Offre : {selected.offerText}</strong>}</div><button className="btn btn-gold btn-sm" style={{marginTop:10}} onClick={()=>openMaps(selected)}>Itinéraire / ouvrir dans Maps</button>
         </div>
       )}
     </div>

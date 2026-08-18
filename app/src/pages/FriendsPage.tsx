@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import Sheet from '../components/Sheet';
@@ -9,6 +10,11 @@ import {
   respondFriendRequest,
   watchFriendships,
   getProfiles,
+  watchOutgoingRequests,
+  searchUsersByName,
+  removeFriendship,
+  sendFriendReaction,
+  watchFriendReactions,
 } from '../lib/db';
 import Avatar from '../components/Avatar';
 import { fmtNumber, dateStr } from '../lib/coins';
@@ -17,8 +23,12 @@ import type { UserProfile, FriendRequest } from '../lib/types';
 export default function FriendsPage() {
   const { profile } = useAuth();
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [friends, setFriends] = useState<UserProfile[]>([]);
   const [requests, setRequests] = useState<FriendRequest[]>([]);
+  const [outgoing, setOutgoing] = useState<FriendRequest[]>([]);
+  const [searchResults, setSearchResults] = useState<UserProfile[]>([]);
+  const [reactions,setReactions]=useState<{id:string;fromName:string;emoji:string;message:string}[]>([]);
   const [addOpen, setAddOpen] = useState(false);
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
@@ -32,10 +42,9 @@ export default function FriendsPage() {
       setFriends(profiles);
       setLoading(false);
     });
-    return () => {
-      unsub1();
-      unsub2();
-    };
+    const unsub3 = watchOutgoingRequests(profile.uid, setOutgoing);
+    const unsub4 = watchFriendReactions(profile.uid, setReactions);
+    return () => { unsub1(); unsub2(); unsub3(); unsub4(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile?.uid]);
 
@@ -65,6 +74,9 @@ export default function FriendsPage() {
     }
   };
 
+  const doSearch = async () => { setSearchResults(await searchUsersByName(code)); };
+  const remove = async (uid:string) => { if(!profile||!confirm('Supprimer cet ami ?'))return; await removeFriendship(profile.uid,uid); toast('Ami supprimé.','info'); };
+  const share = async () => { if(!profile)return; const text=`Rejoins-moi sur ElyWalk : ${location.origin}/?ref=${profile.referralCode}`; if(navigator.share)await navigator.share({text});else{await navigator.clipboard.writeText(text);toast('Lien copié !','success')} };
   const today = dateStr();
 
   return (
@@ -84,10 +96,7 @@ export default function FriendsPage() {
         <div className="display" style={{ fontSize: 22, color: 'var(--gold)', letterSpacing: '0.2em' }} data-testid="my-friend-code">
           {profile?.referralCode}
         </div>
-        <p style={{ color: 'var(--muted)', fontSize: 12, marginTop: 6 }}>
-          Partagez ce code : il sert aussi de code de parrainage (+10 EC par
-          filleul éligible).
-        </p>
+        <p style={{ color: 'var(--muted)', fontSize: 12, marginTop: 6 }}>Partagez ce code : il sert aussi de code de parrainage (+10 EC par filleul éligible).</p><button className="btn btn-outline btn-sm" style={{marginTop:10}} onClick={share}>Partager / copier</button>
       </div>
 
       {requests.length > 0 && (
@@ -111,6 +120,9 @@ export default function FriendsPage() {
         </div>
       )}
 
+      {reactions.length>0&&<div className="card"><div className="card-title">Encouragements reçus</div>{reactions.map(r=><div className="list-row" key={r.id}><span style={{fontSize:24}}>{r.emoji}</span><div className="row-main"><div className="row-title">{r.fromName}</div><div className="row-sub">{r.message||'vous encourage !'}</div></div></div>)}</div>}
+      {outgoing.length>0&&<div className="card"><div className="card-title">Demandes envoyées</div>{outgoing.map(r=><div className="list-row" key={r.id}><div className="row-main"><div className="row-title">{r.toName}</div><div className="row-sub">En attente</div></div></div>)}</div>}
+
       <div className="card">
         <div className="card-title">Mes amis ({friends.length})</div>
         {loading ? (
@@ -125,13 +137,13 @@ export default function FriendsPage() {
             <div className="list-row" key={f.uid} data-testid="friend-row">
               <Avatar name={f.displayName} photoURL={f.photoURL} size={42} />
               <div className="row-main">
-                <div className="row-title">{f.displayName}</div>
+                <button className="link-title" onClick={()=>navigate(`/user/${f.uid}`)}>{f.displayName}</button>
                 <div className="row-sub">
                   🔥 {f.streak} j d’affilée · {fmtNumber(f.todayDate === today ? f.todaySteps : 0)} pas
                   aujourd’hui · {fmtNumber(f.totalCalories)} kcal au total
                 </div>
               </div>
-              <div className="row-value">{fmtNumber(f.totalSteps)} pas</div>
+              <button className="icon-danger" onClick={()=>profile&&sendFriendReaction(profile,f.uid,'👏',prompt('Petit message (optionnel)')||'').then(()=>toast('Encouragement envoyé !','success'))} aria-label="Encourager">👏</button><button className="icon-danger" onClick={()=>remove(f.uid)} aria-label="Supprimer">✕</button>
             </div>
           ))
         )}
@@ -148,9 +160,8 @@ export default function FriendsPage() {
             data-testid="friend-code-input"
           />
         </div>
-        <button className="btn btn-gold" onClick={onAdd} disabled={busy} data-testid="send-friend-request-button">
-          {busy ? '...' : 'Envoyer la demande'}
-        </button>
+        <div className="two-col"><button className="btn btn-gold" onClick={onAdd} disabled={busy} data-testid="send-friend-request-button">{busy ? '...' : 'Ajouter par code'}</button><button className="btn btn-outline" onClick={doSearch}>Chercher pseudo</button></div>
+        {searchResults.map(u=><div className="list-row" key={u.uid}><Avatar name={u.displayName} photoURL={u.photoURL}/><div className="row-main"><div className="row-title">{u.displayName}</div></div><button className="btn btn-gold btn-sm" onClick={()=>profile&&sendFriendRequest(profile,u).then(()=>toast('Demande envoyée','success'))}>Ajouter</button></div>)}
       </Sheet>
     </div>
   );

@@ -39,6 +39,7 @@ export default function WalletPage() {
   const submit = async (type: 'paypal' | 'donation') => {
     if (!profile) return;
     const coins = Math.floor(Number(amount));
+    if (!confirm(`Confirmer l’opération de ${fmtCoins(coins)} ElyCoins ?`)) return;
     setBusy(true);
     try {
       if (!coins || coins <= 0) throw new Error('Montant invalide.');

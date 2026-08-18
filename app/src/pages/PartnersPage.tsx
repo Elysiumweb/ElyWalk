@@ -1,8 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
-import { createPartnerRequest } from '../lib/db';
+import { createPartnerRequest, listPartnerOffers, redeemPartnerOffer } from '../lib/db';
+import type { PartnerOffer } from '../lib/types';
+import { fmtCoins } from '../lib/coins';
 
 export default function PartnersPage() {
   const { profile } = useAuth();
@@ -13,6 +15,9 @@ export default function PartnersPage() {
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
+  const [offers, setOffers] = useState<PartnerOffer[]>([]);
+  useEffect(()=>{listPartnerOffers().then(setOffers).catch(()=>undefined)},[]);
+  const redeem = async (offer: PartnerOffer) => { if(!profile||!confirm(`Dépenser ${fmtCoins(offer.coins)} EC pour « ${offer.title} » ?`))return; setBusy(true); try{await redeemPartnerOffer(profile,offer);toast('Offre réservée ! Présentez la demande au partenaire.','success')}catch(e){toast((e as Error).message,'error')}finally{setBusy(false)} };
 
   const submit = async () => {
     if (!profile) return;
@@ -45,10 +50,7 @@ export default function PartnersPage() {
 
       <div className="card">
         <div className="card-title">Offres partenaires</div>
-        <div className="empty-state" data-testid="partner-offers-empty-state">
-          <div className="display">Aucune offre pour le moment</div>
-          Les offres de nos partenaires apparaîtront ici. Complétez-les pour gagner des ElyCoins.
-        </div>
+        {offers.length===0?<div className="empty-state" data-testid="partner-offers-empty-state"><div className="display">Aucune offre pour le moment</div>De nouvelles offres seront publiées prochainement.</div>:offers.map(o=><div className="list-row" key={o.id}><div className="row-main"><div className="row-title">{o.title}</div><div className="row-sub">{o.partnerName} · {o.description}</div></div><button className="btn btn-gold btn-sm" disabled={busy} onClick={()=>redeem(o)}>{fmtCoins(o.coins)} EC</button></div>)}
       </div>
 
       <div className="card" data-testid="partner-request-card">

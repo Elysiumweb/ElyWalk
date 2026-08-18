@@ -1,4 +1,4 @@
-import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { firebaseApp } from './firebase';
 
 /** Compresse une image en JPEG carré (recadrage centré). */
@@ -53,11 +53,16 @@ function blobToDataUrl(blob: Blob): Promise<string> {
  * Envoie la photo vers Firebase Storage, ou bascule sur une data-URL
  * compacte si le bucket n'est pas encore configuré.
  */
+export async function deleteAvatar(uid: string): Promise<void> {
+  await deleteObject(ref(getStorage(firebaseApp), `avatars/${uid}`)).catch(() => undefined);
+  await deleteObject(ref(getStorage(firebaseApp), `avatars/${uid}.jpg`)).catch(() => undefined);
+}
+
 export async function uploadAvatar(uid: string, file: Blob): Promise<string> {
   const blob = await compressImage(file, 256, 0.74);
   try {
     const storage = getStorage(firebaseApp);
-    const r = ref(storage, `avatars/${uid}.jpg`);
+    const r = ref(storage, `avatars/${uid}`);
     await uploadBytes(r, blob, { contentType: 'image/jpeg', cacheControl: 'public,max-age=3600' });
     return await getDownloadURL(r);
   } catch (e) {

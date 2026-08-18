@@ -12,12 +12,24 @@
 		"classpath": "com.capacitorjs.plugins.app.AppPlugin"
 	},
 	{
+		"pkg": "@capacitor/device",
+		"classpath": "com.capacitorjs.plugins.device.DevicePlugin"
+	},
+	{
 		"pkg": "@capacitor/geolocation",
 		"classpath": "com.capacitorjs.plugins.geolocation.GeolocationPlugin"
 	},
 	{
+		"pkg": "@capacitor/local-notifications",
+		"classpath": "com.capacitorjs.plugins.localnotifications.LocalNotificationsPlugin"
+	},
+	{
 		"pkg": "@capacitor/preferences",
 		"classpath": "com.capacitorjs.plugins.preferences.PreferencesPlugin"
+	},
+	{
+		"pkg": "@capacitor/push-notifications",
+		"classpath": "com.capacitorjs.plugins.pushnotifications.PushNotificationsPlugin"
 	},
 	{
 		"pkg": "@capgo/capacitor-pedometer",

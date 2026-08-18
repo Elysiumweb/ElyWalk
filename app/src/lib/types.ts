@@ -23,6 +23,33 @@ export interface UserProfile {
   paypalEmail: string | null;
   role: Role;
   createdAt: number;
+  dailyStepGoal?: number;
+  strideLengthCm?: number;
+  bio?: string;
+  onboardingDone?: boolean;
+  lastAdSlot?: string;
+  lastAdRewardAt?: unknown;
+  lastReferralClaim?: string;
+}
+
+export interface DailySteps {
+  date: string;
+  steps: number;
+  coins: number;
+  calories: number;
+  validatedAt: number;
+}
+
+export interface PartnerOffer {
+  id?: string;
+  establishmentId?: string | null;
+  title: string;
+  description: string;
+  partnerName: string;
+  coins: number;
+  active: boolean;
+  website?: string | null;
+  createdAt: number;
 }
 
 export interface CoinTransaction {
