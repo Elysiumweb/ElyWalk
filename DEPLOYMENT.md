@@ -35,7 +35,7 @@ Les règles empêchent la modification arbitraire du solde, imposent une validat
 
 ## Avant publication
 
-- Remplacer/valider dans `LegalPage.tsx` les coordonnées légales, le responsable de traitement et l’adresse de contact de l’association.
-- Configurer l’adresse e-mail d’assistance Play Store et la fiche de sécurité des données.
+- Les mentions légales utilisent les informations de l’association Elysium (RNA W772011943, siège à Combs-la-Ville, directeur de publication Nathan Martins). Les mettre à jour dans `LegalPage.tsx` en cas de changement.
+- Configurer `contact@elysium-esport.fr` comme adresse d’assistance Play Store et compléter la fiche de sécurité des données.
 - Vérifier les modèles d’e-mails Firebase Authentication et les domaines autorisés.
 - Créer les offres dans la collection `partnerOffers` (`title`, `description`, `partnerName`, `coins`, `active`, `createdAt`).
