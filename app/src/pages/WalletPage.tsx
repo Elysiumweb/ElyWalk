@@ -98,7 +98,7 @@ export default function WalletPage() {
         <div className="card" data-testid="president-excluded-notice">
           <p style={{ color: 'var(--muted)', fontSize: 13 }}>
             👑 En tant que {profile?.role === 'president' ? 'Président' : 'Co-Président'}, vous êtes
-            exclu de la conversion en argent et des avantages partenaires — mais vos ElyCoins
+            exclu de la conversion en argent et des avantages partenaires mais vos ElyCoins
             comptent au classement ! Les donations restent possibles.
           </p>
         </div>
