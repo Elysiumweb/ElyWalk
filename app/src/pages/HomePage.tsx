@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import ProgressRing from '../components/ProgressRing';
@@ -15,6 +16,7 @@ type PermState = 'granted' | 'denied' | 'prompt' | 'unavailable';
 export default function HomePage() {
   const { profile } = useAuth();
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [steps, setSteps] = useState(0);
   const [perm, setPerm] = useState<PermState>('unavailable');
   const [showTiers, setShowTiers] = useState(false);
@@ -75,7 +77,6 @@ export default function HomePage() {
       // Annonce interstitielle avant le crédit.
       await showInterstitial();
       const result = await validateSteps(profile.uid, stepsToValidate);
-      await pedometer.resetToday();
       toast(`+${fmtCoins(result.coins)} ElyCoins · Série de ${result.streak} jour${result.streak > 1 ? 's' : ''} !`, 'success');
     } catch (e) {
       toast((e as Error).message, 'error');
@@ -123,7 +124,7 @@ export default function HomePage() {
 
       <div className="gold-hero">
         <img src="/deco-1.webp" className="hero-deco" alt="" />
-        <ProgressRing progress={steps / DAILY_STEP_GOAL}>
+        <ProgressRing progress={steps / (profile?.dailyStepGoal || DAILY_STEP_GOAL)}>
           <div className="display" style={{ fontSize: 34, color: '#fff' }} data-testid="today-steps-value">
             {fmtNumber(steps)}
           </div>
@@ -148,8 +149,8 @@ export default function HomePage() {
           </div>
           <div className="stat">
             <div className="stat-icon"><StepsIcon /></div>
-            <div className="stat-value" data-testid="stat-total-steps">{fmtNumber(profile?.totalSteps || 0)}</div>
-            <div className="stat-label">pas au total</div>
+            <div className="stat-value" data-testid="stat-total-steps">{(steps * (profile?.strideLengthCm || 75) / 100000).toFixed(2)}</div>
+            <div className="stat-label">km aujourd’hui</div>
           </div>
         </div>
       </div>
@@ -185,9 +186,10 @@ export default function HomePage() {
         {busyAd ? 'Chargement de la pub...' : `Regarder une pub (+${fmtCoins(AD_REWARD_COINS)} EC)`}
       </button>
       <div className="section-gap" />
-      <button className="btn btn-ghost" onClick={() => setShowTiers(true)} data-testid="show-tiers-button">
-        Voir le barème des gains
-      </button>
+      <button className="btn btn-ghost" onClick={() => setShowTiers(true)} data-testid="show-tiers-button">Voir le barème des gains</button>
+      <div className="section-gap" />
+      <button className="btn btn-ghost" onClick={() => navigate('/history')}>Historique, objectifs & badges</button>
+      <div className="card" style={{marginTop:12}}><div className="card-title">Défis</div><div className="badge-grid"><span className="badge">{(profile?.streak||0)>=7?'🏅':'🔒'} Série 7 jours</span><span className="badge">{(profile?.streak||0)>=30?'🏆':'🔒'} Série 30 jours</span><span className="badge">{(profile?.totalSteps||0)>=100000?'🥾':'🔒'} 100 000 pas</span></div></div>
 
       <Sheet open={showTiers} onClose={() => setShowTiers(false)} title="Barème quotidien" testId="tiers-sheet">
         {STEP_TIERS.map((t) => (

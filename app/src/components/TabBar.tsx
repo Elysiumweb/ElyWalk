@@ -1,4 +1,7 @@
+import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import { watchIncomingRequests } from '../lib/db';
 
 const tabs = [
   { to: '/', label: 'Accueil', testId: 'tab-home', icon: HomeIcon },
@@ -10,6 +13,8 @@ const tabs = [
 ];
 
 export default function TabBar() {
+  const { profile } = useAuth(); const [pending,setPending]=useState(0);
+  useEffect(()=>profile?watchIncomingRequests(profile.uid,r=>setPending(r.length)):undefined,[profile?.uid]);
   return (
     <nav className="tabbar" data-testid="bottom-tab-bar">
       {tabs.map((t) => (
@@ -20,7 +25,7 @@ export default function TabBar() {
           data-testid={t.testId}
           className={({ isActive }) => `tab ${isActive ? 'tab-active' : ''}`}
         >
-          <t.icon />
+          <span className="tab-icon"><t.icon />{t.to==='/friends'&&pending>0&&<b className="tab-badge">{pending}</b>}</span>
           <span>{t.label}</span>
         </NavLink>
       ))}

@@ -5,6 +5,7 @@ import {
   registerWithEmail,
   loginWithEmail,
   loginWithGoogle,
+  resetPassword,
   frAuthError,
 } from '../lib/auth-service';
 
@@ -49,6 +50,12 @@ export default function AuthPage() {
       setPendingReferralCode(referral.trim() || null);
       await loginWithGoogle();
     });
+
+  const forgotPassword = () => run(async () => {
+    if (!email.includes('@')) throw new Error('Saisissez d’abord votre adresse e-mail.');
+    await resetPassword(email);
+    toast('E-mail de réinitialisation envoyé.', 'success');
+  });
 
   return (
     <div className="auth-screen">
@@ -124,6 +131,8 @@ export default function AuthPage() {
       <button className="btn btn-gold" onClick={submitEmail} disabled={busy} data-testid="auth-submit-button">
         {busy ? '...' : mode === 'register' ? "S'inscrire" : 'Se connecter'}
       </button>
+      {mode === 'login' && <button className="text-button" onClick={forgotPassword} disabled={busy} data-testid="forgot-password-button">Mot de passe oublié ?</button>}
+      {mode === 'register' && <p className="legal-consent">En créant un compte, vous acceptez les <a href="/legal/terms">CGU</a> et la <a href="/legal/privacy">politique de confidentialité</a>.</p>}
 
       <div className="divider">ou</div>
       <button className="btn btn-outline" onClick={submitGoogle} disabled={busy} data-testid="auth-google-button">

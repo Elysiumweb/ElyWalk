@@ -1,0 +1,6 @@
+import { useEffect, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { getUserProfile } from '../lib/db';
+import type { UserProfile } from '../lib/types';
+import Avatar from '../components/Avatar'; import { fmtCoins, fmtNumber, dateStr } from '../lib/coins';
+export default function PublicProfilePage(){const {uid}=useParams();const nav=useNavigate();const [p,setP]=useState<UserProfile|null>(null);useEffect(()=>{if(uid)getUserProfile(uid).then(setP)},[uid]);return <div className="screen"><div className="screen-header"><h1 className="screen-title">Profil public</h1><button className="btn btn-ghost btn-sm" onClick={()=>nav(-1)}>Retour</button></div>{p?<><div className="gold-hero profile-public"><Avatar name={p.displayName} photoURL={p.photoURL} size={76}/><h2>{p.displayName}</h2><p>{p.bio||'Membre de la communauté ElyWalk'}</p></div><div className="stat-grid"><div className="stat"><div className="stat-value">{fmtNumber(p.todayDate===dateStr()?p.todaySteps:0)}</div><div className="stat-label">pas aujourd’hui</div></div><div className="stat"><div className="stat-value">{p.streak}</div><div className="stat-label">série</div></div><div className="stat"><div className="stat-value">{fmtCoins(p.elycoins)}</div><div className="stat-label">EC</div></div></div></>:<div className="empty-state">Profil introuvable.</div>}</div>}

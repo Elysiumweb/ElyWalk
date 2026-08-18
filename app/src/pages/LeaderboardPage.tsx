@@ -1,22 +1,28 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { getLeaderboard } from '../lib/db';
+import { getLeaderboard, listDailySteps, watchFriendships } from '../lib/db';
 import Avatar from '../components/Avatar';
 import { fmtCoins, fmtNumber } from '../lib/coins';
 import { isPresidentUid, PRESIDENT_UID } from '../lib/constants';
 import type { UserProfile } from '../lib/types';
 
 export default function LeaderboardPage() {
-  const { profile } = useAuth();
-  const [rows, setRows] = useState<UserProfile[]>([]);
+  const { profile } = useAuth(); const navigate=useNavigate();
+  const [rows, setRows] = useState<UserProfile[]>([]); const [mode,setMode]=useState<'coins'|'today'|'steps'|'week'|'month'|'friends'>('coins'); const [friendIds,setFriendIds]=useState<string[]>([]); const [periodScores,setPeriodScores]=useState<Record<string,{week:number;month:number}>>({});
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    getLeaderboard(50)
-      .then(setRows)
-      .finally(() => setLoading(false));
-  }, []);
+  const load = async () => {
+    setLoading(true); const users=await getLeaderboard(50); setRows(users);
+    const now=Date.now(), week=now-7*86400000, month=now-30*86400000; const scores:Record<string,{week:number;month:number}>={};
+    await Promise.all(users.map(async u=>{const days=await listDailySteps(u.uid,30);scores[u.uid]={week:days.filter(d=>d.validatedAt>=week).reduce((s,d)=>s+d.steps,0),month:days.filter(d=>d.validatedAt>=month).reduce((s,d)=>s+d.steps,0)}}));
+    setPeriodScores(scores); setLoading(false);
+  };
+  useEffect(() => { load().catch(()=>setLoading(false)); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(()=>profile?watchFriendships(profile.uid,setFriendIds):undefined,[profile?.uid]);
 
+  const score=(u:UserProfile)=>mode==='today'?(u.todaySteps||0):mode==='steps'?u.totalSteps:mode==='week'?(periodScores[u.uid]?.week||0):mode==='month'?(periodScores[u.uid]?.month||0):u.elycoins;
+  const ranked=(mode==='friends'?rows.filter(u=>u.uid===profile?.uid||friendIds.includes(u.uid)):[...rows]).sort((a,b)=>score(b)-score(a));
   return (
     <div className="screen" data-testid="leaderboard-screen">
       <div className="screen-header">
@@ -26,9 +32,10 @@ export default function LeaderboardPage() {
         </div>
       </div>
 
+      <div className="chip-row"><button className={`chip ${mode==='coins'?'chip-active':''}`} onClick={()=>setMode('coins')}>ElyCoins</button><button className={`chip ${mode==='today'?'chip-active':''}`} onClick={()=>setMode('today')}>Pas du jour</button><button className={`chip ${mode==='steps'?'chip-active':''}`} onClick={()=>setMode('steps')}>Pas cumulés</button><button className={`chip ${mode==='week'?'chip-active':''}`} onClick={()=>setMode('week')}>7 jours</button><button className={`chip ${mode==='month'?'chip-active':''}`} onClick={()=>setMode('month')}>30 jours</button><button className={`chip ${mode==='friends'?'chip-active':''}`} onClick={()=>setMode('friends')}>Mes amis</button><button className="chip" onClick={load}>Actualiser</button></div>
       {loading ? (
         <div className="card"><div className="empty-state">Chargement...</div></div>
-      ) : rows.length === 0 ? (
+      ) : ranked.length === 0 ? (
         <div className="card">
           <div className="empty-state" data-testid="leaderboard-empty-state">
             <div className="display">Aucun marcheur</div>
@@ -37,10 +44,10 @@ export default function LeaderboardPage() {
         </div>
       ) : (
         <>
-          {rows.length >= 1 && (
+          {ranked.length >= 1 && (
             <div className="podium" data-testid="leaderboard-podium">
               {[1, 0, 2].map((idx) => {
-                const u = rows[idx];
+                const u = ranked[idx];
                 const cls = idx === 0 ? 'first' : idx === 1 ? 'second' : 'third';
                 if (!u) return <div className="podium-col" key={idx} />;
                 return (
@@ -61,7 +68,7 @@ export default function LeaderboardPage() {
             </div>
           )}
           <div className="card">
-            {rows.map((u, i) => (
+            {ranked.map((u, i) => (
               <div
                 className="list-row"
                 key={u.uid}
@@ -73,19 +80,19 @@ export default function LeaderboardPage() {
                 </div>
                 <Avatar name={u.displayName} photoURL={u.photoURL} size={42} />
                 <div className="row-main">
-                  <div className="row-title">
+                  <button className="link-title" onClick={() => navigate(`/user/${u.uid}`)}>
                     {u.displayName}{' '}
                     {isPresidentUid(u.uid) && (
                       <span className="badge" style={{ marginLeft: 4 }}>
                         👑 {u.uid === PRESIDENT_UID ? 'Président' : 'Co-Président'}
                       </span>
                     )}
-                  </div>
+                  </button>
                   <div className="row-sub">
                     {fmtNumber(u.totalSteps)} pas · 🔥 {u.streak} j
                   </div>
                 </div>
-                <div className="row-value">{fmtCoins(u.elycoins)} EC</div>
+                <div className="row-value">{mode==='coins'||mode==='friends'?`${fmtCoins(u.elycoins)} EC`:`${fmtNumber(score(u))} pas`}</div>
               </div>
             ))}
           </div>

@@ -13,6 +13,9 @@ import {
   onSnapshot,
   runTransaction,
   increment,
+  serverTimestamp,
+  deleteDoc,
+  writeBatch,
   type Unsubscribe,
 } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
@@ -35,6 +38,8 @@ import type {
   Friendship,
   ReferralClaim,
   Role,
+  DailySteps,
+  PartnerOffer,
 } from './types';
 
 // ============ Profil utilisateur ============
@@ -98,6 +103,9 @@ export async function ensureUserDoc(
     paypalEmail: null,
     role: roleForUid(user.uid),
     createdAt: Date.now(),
+    dailyStepGoal: 10000,
+    strideLengthCm: 75,
+    onboardingDone: false,
   };
   await setDoc(ref, profile);
   await setDoc(doc(db, 'referralCodes', code), { uid: user.uid }).catch(() => undefined);
@@ -253,7 +261,7 @@ export async function claimReferralBonuses(uid: string): Promise<number> {
         const fresh = await tx.get(claimSnap.ref);
         if (!fresh.exists() || (fresh.data() as ReferralClaim).claimed) return;
         tx.update(claimSnap.ref, { claimed: true });
-        tx.update(doc(db, 'users', uid), { elycoins: increment(REFERRAL_BONUS) });
+        tx.update(doc(db, 'users', uid), { elycoins: increment(REFERRAL_BONUS), lastReferralClaim: claimSnap.id });
         const txRef = doc(collection(db, 'users', uid, 'transactions'));
         tx.set(txRef, {
           type: 'referral',
@@ -279,6 +287,9 @@ export interface ValidationResult {
 
 /** Crédite les ElyCoins du jour (une seule validation par jour). */
 export async function validateSteps(uid: string, steps: number): Promise<ValidationResult> {
+  if (!Number.isInteger(steps) || steps < 0 || steps > 60000) {
+    throw new Error('Nombre de pas incohérent (maximum quotidien : 60 000).');
+  }
   const today = dateStr();
   const yesterday = yesterdayStr();
   const coins = coinsForSteps(steps);
@@ -299,7 +310,7 @@ export async function validateSteps(uid: string, steps: number): Promise<Validat
       totalCalories: increment(calories),
       streak,
       lastValidatedDate: today,
-      todaySteps: 0,
+      todaySteps: Math.floor(steps),
       todayDate: today,
     });
     tx.set(doc(db, 'users', uid, 'dailySteps', today), {
@@ -322,8 +333,13 @@ export async function validateSteps(uid: string, steps: number): Promise<Validat
 // ============ Récompense publicitaire ============
 
 export async function creditAdReward(uid: string): Promise<void> {
+  const now = new Date();
+  const slot = `${uid}_${dateStr(now)}_${String(now.getHours()).padStart(2, '0')}`;
   await runTransaction(db, async (tx) => {
-    tx.update(doc(db, 'users', uid), { elycoins: increment(AD_REWARD_COINS) });
+    const claimRef = doc(db, 'adClaims', slot);
+    if ((await tx.get(claimRef)).exists()) throw new Error('Une seule récompense publicitaire est autorisée par heure.');
+    tx.set(claimRef, { uid, slot, coins: AD_REWARD_COINS, createdAt: Date.now() });
+    tx.update(doc(db, 'users', uid), { elycoins: increment(AD_REWARD_COINS), lastAdSlot: slot, lastAdRewardAt: serverTimestamp() });
     const txRef = doc(collection(db, 'users', uid, 'transactions'));
     tx.set(txRef, {
       type: 'ad',
@@ -362,7 +378,7 @@ export async function requestConversion(
       coins,
       euros: coins / COINS_PER_EURO,
       paypalEmail: type === 'paypal' ? paypalEmail || null : null,
-      status: type === 'donation' ? 'received' : 'pending',
+      status: 'pending',
       createdAt: Date.now(),
     } satisfies Withdrawal);
     const txRef = doc(collection(db, 'users', profile.uid, 'transactions'));
@@ -436,11 +452,22 @@ export async function listAllWithdrawals(): Promise<Withdrawal[]> {
     .sort((a, b) => b.createdAt - a.createdAt);
 }
 
-export async function updateWithdrawalStatus(
-  id: string,
-  status: Withdrawal['status']
-): Promise<void> {
-  await updateDoc(doc(db, 'withdrawals', id), { status });
+export async function updateWithdrawalStatus(id: string, status: Withdrawal['status']): Promise<void> {
+  await runTransaction(db, async (tx) => {
+    const wRef = doc(db, 'withdrawals', id);
+    const snap = await tx.get(wRef);
+    if (!snap.exists()) throw new Error('Opération introuvable.');
+    const withdrawal = snap.data() as Withdrawal;
+    if (withdrawal.status !== 'pending') throw new Error('Cette opération a déjà été traitée.');
+    tx.update(wRef, { status, processedAt: Date.now() });
+    if (status === 'rejected') {
+      tx.update(doc(db, 'users', withdrawal.uid), { elycoins: increment(withdrawal.coins) });
+      tx.set(doc(collection(db, 'users', withdrawal.uid, 'transactions')), {
+        type: withdrawal.type, coins: withdrawal.coins,
+        note: `Remboursement automatique — opération refusée`, createdAt: Date.now(),
+      } satisfies CoinTransaction);
+    }
+  });
 }
 
 // ============ Amis ============
@@ -522,4 +549,89 @@ export async function getLeaderboard(top = 50): Promise<UserProfile[]> {
   const q = query(collection(db, 'users'), orderBy('elycoins', 'desc'), limit(top));
   const snaps = await getDocs(q);
   return snaps.docs.map((d) => d.data() as UserProfile);
+}
+
+export async function listDailySteps(uid: string, count = 30): Promise<DailySteps[]> {
+  const snaps = await getDocs(query(collection(db, 'users', uid, 'dailySteps'), orderBy('validatedAt', 'desc'), limit(count)));
+  return snaps.docs.map(d => ({ date: d.id, ...(d.data() as Omit<DailySteps, 'date'>) })).reverse();
+}
+
+export function watchOutgoingRequests(uid: string, cb: (reqs: FriendRequest[]) => void): Unsubscribe {
+  return onSnapshot(query(collection(db, 'friendRequests'), where('from', '==', uid), where('status', '==', 'pending')),
+    s => cb(s.docs.map(d => ({ id: d.id, ...(d.data() as FriendRequest) }))));
+}
+
+export async function searchUsersByName(name: string): Promise<UserProfile[]> {
+  const term = name.trim();
+  if (term.length < 2) return [];
+  const snaps = await getDocs(query(collection(db, 'users'), orderBy('displayName'), limit(50)));
+  return snaps.docs.map(d => d.data() as UserProfile).filter(p => p.displayName.toLocaleLowerCase('fr').includes(term.toLocaleLowerCase('fr'))).slice(0, 10);
+}
+
+export async function sendFriendReaction(from: UserProfile, toUid: string, emoji: string, message = ''): Promise<void> {
+  if (!['👏','🔥','💛','👋'].includes(emoji)) throw new Error('Réaction invalide.');
+  await addDoc(collection(db, 'friendReactions'), { from: from.uid, fromName: from.displayName, to: toUid, emoji, message: message.slice(0, 160), createdAt: Date.now() });
+}
+
+export function watchFriendReactions(uid: string, cb: (items: {id:string;fromName:string;emoji:string;message:string}[]) => void): Unsubscribe {
+  return onSnapshot(query(collection(db, 'friendReactions'), where('to','==',uid), limit(20)), s => cb(s.docs.map(d => ({id:d.id,...d.data()} as {id:string;fromName:string;emoji:string;message:string}))));
+}
+
+export async function removeFriendship(uid: string, friendUid: string): Promise<void> {
+  const snaps = await getDocs(query(collection(db, 'friendships'), where('members', 'array-contains', uid)));
+  const match = snaps.docs.find(d => (d.data() as Friendship).members.includes(friendUid));
+  if (match) await deleteDoc(match.ref);
+}
+
+export async function createPartnerOffer(offer: Omit<PartnerOffer,'id'|'createdAt'>): Promise<void> {
+  await addDoc(collection(db,'partnerOffers'),{...offer,createdAt:Date.now()});
+}
+
+export async function listPartnerOffers(): Promise<PartnerOffer[]> {
+  const snaps = await getDocs(query(collection(db, 'partnerOffers'), where('active', '==', true)));
+  return snaps.docs.map(d => ({ id: d.id, ...(d.data() as PartnerOffer) }));
+}
+
+export async function redeemPartnerOffer(profile: UserProfile, offer: PartnerOffer): Promise<void> {
+  if (!offer.id || offer.coins <= 0) throw new Error('Offre invalide.');
+  await runTransaction(db, async tx => {
+    const userRef = doc(db, 'users', profile.uid);
+    const userSnap = await tx.get(userRef);
+    const fresh = userSnap.data() as UserProfile;
+    if (fresh.elycoins < offer.coins) throw new Error('Solde insuffisant.');
+    tx.update(userRef, { elycoins: increment(-offer.coins) });
+    tx.set(doc(collection(db, 'withdrawals')), {
+      uid: profile.uid, userName: profile.displayName, type: 'partner', coins: offer.coins,
+      euros: offer.coins / COINS_PER_EURO, paypalEmail: null, status: 'pending', createdAt: Date.now(),
+      offerId: offer.id, offerTitle: offer.title,
+    });
+    tx.set(doc(collection(db, 'users', profile.uid, 'transactions')), {
+      type: 'partner', coins: -offer.coins, note: `Offre partenaire : ${offer.title}`, createdAt: Date.now(),
+    } satisfies CoinTransaction);
+  });
+}
+
+export async function exportAccountData(uid: string): Promise<Record<string, unknown>> {
+  const [profile, daily, transactions, withdrawals] = await Promise.all([
+    getUserProfile(uid), listDailySteps(uid, 3650), listMyTransactions(uid), listMyWithdrawals(uid),
+  ]);
+  return { exportedAt: new Date().toISOString(), profile, dailySteps: daily, transactions, withdrawals };
+}
+
+export async function deleteAccountData(uid: string): Promise<void> {
+  const refs = [collection(db, 'users', uid, 'dailySteps'), collection(db, 'users', uid, 'transactions')];
+  for (const ref of refs) {
+    const snaps = await getDocs(ref);
+    for (let i = 0; i < snaps.docs.length; i += 400) {
+      const batch = writeBatch(db); snaps.docs.slice(i, i + 400).forEach(d => batch.delete(d.ref)); await batch.commit();
+    }
+  }
+  const friendships = await getDocs(query(collection(db, 'friendships'), where('members', 'array-contains', uid)));
+  for (const f of friendships.docs) await deleteDoc(f.ref);
+  for (const field of ['from','to'] as const) { const requests=await getDocs(query(collection(db,'friendRequests'),where(field,'==',uid))); for(const r of requests.docs) await deleteDoc(r.ref); }
+  const withdrawals=await getDocs(query(collection(db,'withdrawals'),where('uid','==',uid))); for(const w of withdrawals.docs) await updateDoc(w.ref,{userName:'Compte supprimé',paypalEmail:null,deletedUser:true});
+  const partners=await getDocs(query(collection(db,'partnerRequests'),where('uid','==',uid))); for(const p of partners.docs) await updateDoc(p.ref,{userName:'Compte supprimé',contactEmail:'supprimé',message:'Données supprimées',deletedUser:true});
+  await deleteDoc(doc(db, 'referralClaims', uid)).catch(() => undefined);
+  await deleteDoc(doc(db, 'referralCodes', (await getUserProfile(uid))?.referralCode || '_')).catch(() => undefined);
+  await deleteDoc(doc(db, 'users', uid));
 }

@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { App as CapApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -16,9 +16,21 @@ import ProfilePage from './pages/ProfilePage';
 import PartnersPage from './pages/PartnersPage';
 import AdminPage from './pages/AdminPage';
 import MapPage from './pages/MapPage';
+import LegalPage from './pages/LegalPage';
+import HistoryPage from './pages/HistoryPage';
+import PublicProfilePage from './pages/PublicProfilePage';
+import WhatsNewPage from './pages/WhatsNewPage';
+import ProductStatus from './components/ProductStatus';
+import { setupNotifications } from './lib/notifications';
 
 function Shell() {
-  const { user, loading } = useAuth();
+  const { user, loading, setPendingReferralCode } = useAuth();
+  const location = useLocation();
+
+  useEffect(() => {
+    const ref = new URLSearchParams(location.search).get('ref');
+    if (ref) setPendingReferralCode(ref.toUpperCase());
+  }, [location.search, setPendingReferralCode]);
 
   // Démarre le service de pas dès la connexion (survît à la fermeture de l'app).
   useEffect(() => {
@@ -28,6 +40,9 @@ function Shell() {
       if (p === 'granted') await pedometer.start();
     })();
   }, [user?.uid]);
+
+  useEffect(() => { if (user) setupNotifications(user.uid).catch(console.warn); }, [user?.uid]);
+  useEffect(() => { const open=(raw:string)=>{const url=new URL(raw);const ref=url.searchParams.get('ref')||(url.protocol==='elywalk:'?url.searchParams.get('code'):null);if(ref)setPendingReferralCode(ref.toUpperCase())}; CapApp.getLaunchUrl().then(r=>r?.url&&open(r.url));const sub=CapApp.addListener('appUrlOpen',e=>open(e.url));return()=>{sub.then(h=>h.remove())}; }, [setPendingReferralCode]);
 
   // Annonce à l'ouverture + au retour sur l'application (App Open Ad).
   useEffect(() => {
@@ -65,9 +80,8 @@ function Shell() {
     );
   }
 
-  if (!user) {
-    return <AuthPage />;
-  }
+  if (location.pathname.startsWith('/legal/')) return <Routes><Route path="/legal/:doc" element={<LegalPage />} /></Routes>;
+  if (!user) return <AuthPage />;
 
   return (
     <div className="app-shell">
@@ -80,8 +94,13 @@ function Shell() {
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/partners" element={<PartnersPage />} />
         <Route path="/admin" element={<AdminPage />} />
+        <Route path="/history" element={<HistoryPage />} />
+        <Route path="/user/:uid" element={<PublicProfilePage />} />
+        <Route path="/whats-new" element={<WhatsNewPage />} />
+        <Route path="/legal/:doc" element={<LegalPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      <ProductStatus />
       <TabBar />
     </div>
   );
@@ -89,12 +108,12 @@ function Shell() {
 
 export default function App() {
   return (
-    <HashRouter>
+    <BrowserRouter>
       <ToastProvider>
         <AuthProvider>
           <Shell />
         </AuthProvider>
       </ToastProvider>
-    </HashRouter>
+    </BrowserRouter>
   );
 }

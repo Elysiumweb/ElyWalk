@@ -37,6 +37,16 @@ body {
 }
 
 input, textarea { user-select: text; }
+a { color: var(--gold); }
+.text-button,.link-title { background:none;border:0;color:var(--gold);font:inherit;cursor:pointer;text-align:left; }
+.text-button { width:100%;padding:12px;text-align:center; }
+.legal-consent,.onboarding-copy { color:var(--muted);font-size:12px;text-align:center;margin:12px 0; }
+.legal-page p { color:#d5d2c8;line-height:1.75;margin-bottom:20px;user-select:text; }.legal-page h2{font-size:15px;color:var(--gold);margin:18px 0 8px}
+.offline-banner,.verification-banner { position:fixed;z-index:180;top:0;left:0;right:0;text-align:center;padding:8px;background:#8b3e38;color:white;font-size:12px; }.verification-banner{background:#5d552e}.verification-banner button{background:none;border:0;color:white;text-decoration:underline}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:10px}.badge-grid{display:flex;gap:8px;flex-wrap:wrap}.legal-links{text-align:center;margin-top:14px;font-size:12px}
+.step-chart{height:180px;display:flex;align-items:flex-end;gap:5px;overflow-x:auto;padding-top:20px}.chart-column{min-width:22px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:160px}.chart-column div{width:16px;background:var(--gold);border-radius:5px 5px 0 0}.chart-column span,.chart-column small{font-size:9px;color:var(--muted)}
+.tab-icon{position:relative;line-height:0}.tab-badge{position:absolute;top:-8px;right:-10px;background:var(--danger);color:white;border-radius:9px;padding:2px 5px;font-size:9px;line-height:1}.icon-danger{background:none;border:0;color:var(--danger);padding:8px}.profile-public{text-align:center}.profile-public .avatar{margin:auto}.profile-public h2{margin:10px}.profile-public p{color:var(--muted)}
+.map-search{position:absolute;z-index:500;top:82px;left:12px;right:12px}.nearby-list{background:rgba(17,17,17,.95);border-radius:10px;max-height:150px;overflow:auto}.nearby-list:empty{display:none}.nearby-list button{display:flex;width:100%;justify-content:space-between;background:none;border:0;color:white;padding:8px 12px}.nearby-list span{color:var(--muted);font-size:11px}.partner-details{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;font-size:12px}.partner-details span,.partner-details a,.partner-details strong{color:var(--gold)}.whats-new{padding-left:22px;color:#ddd}.whats-new li{margin:12px 0}
 
 h1, h2, h3, .display { font-family: var(--font-display); letter-spacing: 0.04em; }
 

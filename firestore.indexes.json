@@ -1,0 +1,8 @@
+{
+  "indexes": [
+    {"collectionGroup":"friendRequests","queryScope":"COLLECTION","fields":[{"fieldPath":"to","order":"ASCENDING"},{"fieldPath":"status","order":"ASCENDING"}]},
+    {"collectionGroup":"friendRequests","queryScope":"COLLECTION","fields":[{"fieldPath":"from","order":"ASCENDING"},{"fieldPath":"to","order":"ASCENDING"},{"fieldPath":"status","order":"ASCENDING"}]},
+    {"collectionGroup":"referralClaims","queryScope":"COLLECTION","fields":[{"fieldPath":"sponsorUid","order":"ASCENDING"},{"fieldPath":"claimed","order":"ASCENDING"}]}
+  ],
+  "fieldOverrides": []
+}

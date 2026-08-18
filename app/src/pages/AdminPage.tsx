@@ -11,6 +11,7 @@ import {
 import {
   createEstablishment,
   deleteEstablishment,
+  updateEstablishment,
   listEstablishments,
   geocodeAddress,
   resizeLogoToDataUrl,
@@ -118,7 +119,9 @@ export default function AdminPage() {
     }
   };
 
+  const editEstablishment = async (e: Establishment) => { const description=prompt('Nouvelle description',e.description); if(description===null)return; const openingHours=prompt('Horaires',e.openingHours||'')||''; const website=prompt('Site web',e.website||'')||''; const phone=prompt('Téléphone',e.phone||'')||''; const offerText=prompt('Offre ElyCoins / réduction',e.offerText||'')||''; await updateEstablishment(e.id!,{description,openingHours,website,phone,offerText}); toast('Fiche mise à jour.','success'); reload(); };
   const removeEstablishment = async (id: string) => {
+    if (!confirm('Supprimer définitivement cet établissement ?')) return;
     try {
       await deleteEstablishment(id);
       toast('Établissement supprimé.', 'info');
@@ -228,8 +231,8 @@ export default function AdminPage() {
                   </span>
                   {w.status === 'pending' && (
                     <>
-                      <button className="btn btn-gold btn-sm" onClick={() => setWdStatus(w.id!, 'paid')} data-testid="admin-mark-paid-button">
-                        Marquer payé
+                      <button className="btn btn-gold btn-sm" onClick={() => setWdStatus(w.id!, w.type === 'donation' ? 'received' : 'paid')} data-testid="admin-mark-paid-button">
+                        {w.type === 'donation' ? 'Marquer reçu' : 'Marquer payé'}
                       </button>
                       <button className="btn btn-danger btn-sm" onClick={() => setWdStatus(w.id!, 'rejected')} data-testid="admin-reject-withdrawal-button">
                         Refuser
@@ -321,7 +324,7 @@ export default function AdminPage() {
                     <div className="row-title">{e.name}</div>
                     <div className="row-sub">{e.address}</div>
                   </div>
-                  <button className="btn btn-danger btn-sm" onClick={() => removeEstablishment(e.id!)} data-testid="delete-establishment-button">
+                  <button className="btn btn-ghost btn-sm" onClick={() => editEstablishment(e)}>Modifier</button><button className="btn btn-danger btn-sm" onClick={() => removeEstablishment(e.id!)} data-testid="delete-establishment-button">
                     Supprimer
                   </button>
                 </div>

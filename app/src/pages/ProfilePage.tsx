@@ -4,9 +4,9 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import Sheet from '../components/Sheet';
 import Avatar from '../components/Avatar';
-import { logout, updateAuthProfile } from '../lib/auth-service';
-import { updateUserFields, setReferredBy } from '../lib/db';
-import { uploadAvatar } from '../lib/avatar';
+import { logout, updateAuthProfile, changePassword, deleteAuthAccount, reauthenticateAccount, frAuthError } from '../lib/auth-service';
+import { updateUserFields, setReferredBy, exportAccountData, deleteAccountData } from '../lib/db';
+import { uploadAvatar, deleteAvatar } from '../lib/avatar';
 import { isPresidentUid } from '../lib/constants';
 import { fmtCoins } from '../lib/coins';
 
@@ -16,6 +16,9 @@ export default function ProfilePage() {
   const navigate = useNavigate();
 
   const [busy, setBusy] = useState(false);
+  const [securityOpen, setSecurityOpen] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [nextPassword, setNextPassword] = useState('');
 
   const [referralOpen, setReferralOpen] = useState(false);
   const [referralCode, setReferralCode] = useState('');
@@ -120,9 +123,11 @@ export default function ProfilePage() {
     }
   };
 
-  const onLogout = async () => {
-    await logout();
-  };
+  const onLogout = async () => { if (confirm('Voulez-vous vraiment vous déconnecter ?')) await logout(); };
+  const onChangePassword = async () => { setBusy(true); try { await changePassword(currentPassword, nextPassword); toast('Mot de passe modifié.','success'); setSecurityOpen(false); } catch(e){toast(frAuthError(e),'error')} finally{setBusy(false)} };
+  const onExport = async () => { if(!profile)return; const data=await exportAccountData(profile.uid); const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'})); a.download=`elywalk-export-${profile.uid}.json`; a.click(); URL.revokeObjectURL(a.href); };
+  const onDelete = async () => { if(!profile||!confirm('Suppression définitive : vos données et votre compte seront effacés. Continuer ?'))return; const pwd=prompt('Pour confirmer, saisissez votre mot de passe (laissez vide pour Google)')||undefined; setBusy(true); try { if(pwd) await reauthenticateAccount(pwd); await deleteAvatar(profile.uid); await deleteAccountData(profile.uid); await deleteAuthAccount(); } catch(e){toast(frAuthError(e),'error')} finally{setBusy(false)} };
+  const onShare = async () => { if(!profile)return; const url=`${location.origin}/?ref=${profile.referralCode}`; const text=`Rejoins-moi sur ElyWalk avec le code ${profile.referralCode}`; if(navigator.share) await navigator.share({title:'ElyWalk',text,url}); else {await navigator.clipboard.writeText(`${text} ${url}`);toast('Lien copié !','success')} };
 
   if (!profile) return null;
 
@@ -172,10 +177,9 @@ export default function ProfilePage() {
         <div className="list-row">
           <div className="row-main">
             <div className="row-title" style={{ fontSize: 14 }}>Mon code : {profile.referralCode}</div>
-            <div className="row-sub">
-              +10 EC par filleul
-            </div>
+            <div className="row-sub">+10 EC par filleul</div>
           </div>
+          <button className="btn btn-ghost btn-sm" onClick={onShare}>Partager</button>
         </div>
         {profile.referralRejected && (
           <div className="row-sub" style={{ color: '#ff8b8b', marginTop: 6 }} data-testid="referral-rejected-note">
@@ -203,6 +207,13 @@ export default function ProfilePage() {
         </div>
       </div>
 
+      <div className="card"><div className="card-title">Compte & données</div>
+        <button className="btn btn-ghost" onClick={()=>setSecurityOpen(true)}>Changer le mot de passe</button><div className="section-gap" />
+        <button className="btn btn-outline" onClick={onExport}>Exporter mes données (RGPD)</button><div className="section-gap" />
+        <button className="btn btn-danger" onClick={onDelete} disabled={busy}>Supprimer définitivement mon compte</button>
+        <div className="legal-links"><a href="/legal/terms">CGU</a> · <a href="/legal/privacy">Confidentialité</a> · <a href="/legal/notices">Mentions légales</a> · <a href="mailto:contact@elysium-france.org?subject=Feedback%20ElyWalk">Donner mon avis</a> · <button className="text-button" style={{display:'inline',padding:0,width:'auto'}} onClick={()=>navigate('/whats-new')}>Nouveautés</button><br/>ElyWalk 1.1.0</div>
+      </div>
+
       {isAdmin && (
         <button className="btn btn-gold" onClick={() => navigate('/admin')} data-testid="admin-button">
           👑 Administration Elysium
@@ -212,6 +223,8 @@ export default function ProfilePage() {
       <button className="btn btn-danger" onClick={onLogout} data-testid="logout-button">
         Se déconnecter
       </button>
+
+      <Sheet open={securityOpen} onClose={()=>setSecurityOpen(false)} title="Changer le mot de passe"><div className="field"><label>Mot de passe actuel</label><input className="input" type="password" value={currentPassword} onChange={e=>setCurrentPassword(e.target.value)}/></div><div className="field"><label>Nouveau mot de passe</label><input className="input" type="password" value={nextPassword} onChange={e=>setNextPassword(e.target.value)}/></div><button className="btn btn-gold" onClick={onChangePassword} disabled={busy||nextPassword.length<6}>Enregistrer</button></Sheet>
 
       <Sheet open={editOpen} onClose={() => setEditOpen(false)} title="Modifier mon profil" testId="edit-profile-sheet">
         <div className="profile-edit-photo">
