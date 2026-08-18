@@ -12,7 +12,20 @@
           "package_name": "com.example.elywalk"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "260136634782-qbbhal9kpf75h1pck18r4pdrbuuce5ca.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.elywalk",
+            "certificate_hash": "c4279ab9312a394405ed5f9d2934e99c2c068791"
+          }
+        },
+        {
+          "client_id": "260136634782-5m082318t0n172nd7ratsb8vn3e3kmt8.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyAeAsfLWZejW5pKInlPBvYgXiQQxO59x9Q"
@@ -20,7 +33,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "260136634782-5m082318t0n172nd7ratsb8vn3e3kmt8.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }
