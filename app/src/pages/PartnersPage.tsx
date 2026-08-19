@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import { createPartnerRequest, listPartnerOffers, redeemPartnerOffer } from '../lib/db';
@@ -10,6 +10,8 @@ export default function PartnersPage() {
   const { profile } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
+  const location = useLocation();
+  const goBack = () => location.key === 'default' ? navigate('/wallet', { replace: true }) : navigate(-1);
   const [organization, setOrganization] = useState('');
   const [contactEmail, setContactEmail] = useState('');
   const [message, setMessage] = useState('');
@@ -43,7 +45,7 @@ export default function PartnersPage() {
           <h1 className="screen-title">Partenaires</h1>
           <div className="screen-sub">Offres &amp; partenariats Elysium</div>
         </div>
-        <button className="btn btn-ghost btn-sm" onClick={() => navigate(-1)} data-testid="partners-back-button">
+        <button className="btn btn-ghost btn-sm" onClick={goBack} data-testid="partners-back-button">
           Retour
         </button>
       </div>

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import {
@@ -27,6 +27,8 @@ export default function AdminPage() {
   const { profile } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
+  const location = useLocation();
+  const goBack = () => location.key === 'default' ? navigate('/profile', { replace: true }) : navigate(-1);
   const [tab, setTab] = useState<Tab>('partners');
   const [partnerReqs, setPartnerReqs] = useState<PartnerRequest[]>([]);
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
@@ -138,7 +140,7 @@ export default function AdminPage() {
           <h1 className="screen-title">👑 Administration</h1>
           <div className="screen-sub">Espace Président / Co-Président</div>
         </div>
-        <button className="btn btn-ghost btn-sm" onClick={() => navigate(-1)} data-testid="admin-back-button">
+        <button className="btn btn-ghost btn-sm" onClick={goBack} data-testid="admin-back-button">
           Retour
         </button>
       </div>
