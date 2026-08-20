@@ -1,3 +1,5 @@
+Le vrai fichier google-services.json avec Oauth se trouve sur le serveur et n'est pas disponible ici. 
+
 {
   "project_info": {
     "project_number": "260136634782",
@@ -12,20 +14,7 @@
           "package_name": "com.elysium.elywalk"
         }
       },
-      "oauth_client": [
-        {
-          "client_id": "260136634782-qbbhal9kpf75h1pck18r4pdrbuuce5ca.apps.googleusercontent.com",
-          "client_type": 1,
-          "android_info": {
-            "package_name": "com.elysium.elywalk",
-            "certificate_hash": "c4279ab9312a394405ed5f9d2934e99c2c068791"
-          }
-        },
-        {
-          "client_id": "260136634782-5m082318t0n172nd7ratsb8vn3e3kmt8.apps.googleusercontent.com",
-          "client_type": 3
-        }
-      ],
+      "oauth_client": [],
       "api_key": [
         {
           "current_key": "AIzaSyAeAsfLWZejW5pKInlPBvYgXiQQxO59x9Q"
@@ -33,12 +22,7 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": [
-            {
-              "client_id": "260136634782-5m082318t0n172nd7ratsb8vn3e3kmt8.apps.googleusercontent.com",
-              "client_type": 3
-            }
-          ]
+          "other_platform_oauth_client": []
         }
       }
     }
