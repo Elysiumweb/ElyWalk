@@ -42,10 +42,11 @@ npx wrangler secret put GOOGLE_APPLICATION_CREDENTIALS   # coller le JSON comple
 
 # 2) Secret partagé pour /fcm/send (générer une chaîne aléatoire)
 npx wrangler secret put API_SECRET
-
-# 3) Clés publiques AdMob SSV (console AdMob → Récompensées → Vérification côté serveur)
-npx wrangler secret put SSV_KEYS    # ex. : [{"keyId":"123","pem":"-----BEGIN PUBLIC KEY-----..."}]
 ```
+
+> Plus besoin de configurer les clés SSV : le Worker les récupère automatiquement
+> depuis le serveur de clés Google (`https://gstatic.com/admob/reward/verifier-keys.json`),
+> avec cache d'une heure (rotation des clés gérée automatiquement).
 
 ```bash
 npx wrangler deploy
@@ -71,13 +72,15 @@ Le client (voir `app/src/lib/attestation.ts`) demande un jeton, l'envoie à
 ### AdMob SSV (F05)
 1. Console AdMob → bloc **Récompensées** → *Vérification côté serveur* : renseigner
    l'URL `https://<votre-worker>.workers.dev/ssv`.
-2. Télécharger les **clés publiques** et les coller dans le secret `SSV_KEYS`.
-3. Côté app, passer `userId` (= uid) lors de `prepareRewardVideoAd` pour que
-   `custom_data` soit renvoyé au callback.
+2. Les **clés publiques** sont récupérées automatiquement par le Worker depuis le
+   serveur de clés Google (aucun secret à configurer).
+3. Côté app, `showRewardedAd(uid)` transmet l'uid via `ssv.userId` → paramètre
+   `user_id` du callback. Le Worker crédite le bon compte après vérification.
 
-> ⚠️ Les callbacks SSV ne partent que sur les annonces de **production**.
-> Valider la vérification de signature avec l'outil de test de la console AdMob
-> avant de supprimer le crédit côté client.
+> ⚠️ Les callbacks SSV ne partent que sur les annonces de **production** (pas en
+> mode test). Utiliser l'outil de validation de la console AdMob pour tester
+> l'endpoint. Tant que `ATTESTATION_WORKER_URL` est vide côté app, le crédit reste
+> client (fallback) ; une fois l'URL renseignée, le crédit passe côté serveur.
 
 ## Sécurité
 
@@ -86,5 +89,6 @@ Le client (voir `app/src/lib/attestation.ts`) demande un jeton, l'envoie à
   les collections de confiance (`friendRequests`, `withdrawals`).
 - `/verify-integrity` est sans secret : le jeton Play Integrity est opaque et vérifié
   côté Google ; un attaquant ne peut pas l'inventer.
-- `/ssv` est appelé par Google avec une signature RSA ; sans clé publique valide,
-  rien n'est crédité.
+- `/ssv` est appelé par Google avec une signature **ECDSA P-256** ; le Worker la
+  vérifie avec les clés publiques officielles avant de créditer. Sans signature
+  valide, rien n'est crédité.

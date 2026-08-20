@@ -125,9 +125,11 @@ export async function showInterstitial(): Promise<void> {
 
 /**
  * Affiche une annonce vidéo avec récompense.
+ * Transmet l'identifiant utilisateur via `ssv.userId` afin que le callback
+ * AdMob SSV (vérifié côté serveur) puisse créditer le bon compte.
  * Résout `true` uniquement si l'utilisateur a gagné la récompense.
  */
-export async function showRewardedAd(): Promise<boolean> {
+export async function showRewardedAd(uid: string): Promise<boolean> {
   if (!isNative()) return false;
   await initAds();
   if (!canShowAds()) return false;
@@ -150,7 +152,10 @@ export async function showRewardedAd(): Promise<boolean> {
       );
       handles.push(await AdMob.addListener(RewardAdPluginEvents.Dismissed, () => finish(rewarded)));
       handles.push(await AdMob.addListener(RewardAdPluginEvents.FailedToShow, () => finish(false)));
-      await AdMob.prepareRewardVideoAd({ adId: AD_UNIT_REWARDED });
+      await AdMob.prepareRewardVideoAd({
+        adId: AD_UNIT_REWARDED,
+        ssv: { userId: uid },
+      });
       await AdMob.showRewardVideoAd();
       setTimeout(() => finish(rewarded), 120000);
     } catch (e) {

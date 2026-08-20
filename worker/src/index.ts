@@ -20,7 +20,6 @@ export interface Env {
   GOOGLE_APPLICATION_CREDENTIALS: string; // JSON du compte de service (secret)
   API_SECRET: string; // secret partagé pour /fcm/send
   PACKAGE_NAME: string; // com.elysium.elywalk
-  SSV_KEYS?: string; // JSON des clés publiques AdMob SSV : [{ keyId, pem }]
 }
 
 interface ServiceAccount {
@@ -239,41 +238,107 @@ async function verifyPlayIntegrity(
 // ---------------------------------------------------------------------------
 // F05 — AdMob Server-Side Verification (SSV)
 // ---------------------------------------------------------------------------
-interface SsvKey {
-  keyId: string | number;
-  pem: string;
+// La signature SSV de Google est une signature **ECDSA P-256 (SHA-256)** au
+// format DER. Les clés publiques sont servies par Google (rotation automatique)
+// — inutile de les configurer manuellement dans un secret.
+const SSV_KEYS_URL = 'https://gstatic.com/admob/reward/verifier-keys.json';
+const AD_REWARD_COINS = 0.1; // récompense fixe en ElyCoins (voir constants.ts)
+
+let ssvKeysCache: { fetchedAt: number; keys: Map<number, string> } | null = null;
+
+/** Récupère (avec cache 1 h) les clés publiques AdMob : keyId -> base64 (SPKI). */
+async function fetchSsvKeys(): Promise<Map<number, string>> {
+  if (ssvKeysCache && Date.now() - ssvKeysCache.fetchedAt < 3600_000) {
+    return ssvKeysCache.keys;
+  }
+  const res = await fetch(SSV_KEYS_URL);
+  if (!res.ok) throw new Error(`SSV keys fetch failed: HTTP ${res.status}`);
+  const data = (await res.json()) as { keys?: Array<{ keyId: number; base64?: string }> };
+  const map = new Map<number, string>();
+  for (const k of data.keys || []) {
+    if (k.base64) map.set(k.keyId, k.base64);
+  }
+  ssvKeysCache = { fetchedAt: Date.now(), keys: map };
+  return map;
 }
 
-function canonicalSsvString(url: URL): string {
-  const params = new URLSearchParams(url.search);
-  params.delete('signature');
-  params.delete('key_id');
-  const entries = [...params.entries()].sort(([a], [b]) => a.localeCompare(b));
-  return entries.map(([k, v]) => `${k}=${v}`).join('&');
+/** Décode du base64 (standard) vers des octets. */
+function b64decode(b64: string): Uint8Array {
+  const raw = atob(b64);
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+  return bytes;
 }
 
-async function verifySsvSignature(
-  url: URL,
-  keys: SsvKey[]
-): Promise<{ ok: boolean; reason?: string }> {
-  const keyId = url.searchParams.get('key_id');
-  const signature = url.searchParams.get('signature');
-  if (!keyId || !signature) return { ok: false, reason: 'missing key_id/signature' };
-  const key = keys.find((k) => String(k.keyId) === keyId);
-  if (!key) return { ok: false, reason: 'unknown key_id' };
+/**
+ * Contenu signé : la query string **brute** (dans l'ordre reçu, encore encodée),
+ * sans les deux derniers paramètres `&signature=...&key_id=...`.
+ */
+function ssvContentToVerify(url: URL): Uint8Array {
+  const raw = url.search.startsWith('?') ? url.search.slice(1) : url.search;
+  const i = raw.indexOf('signature=');
+  if (i === -1) throw new Error('missing signature parameter');
+  return new TextEncoder().encode(raw.slice(0, i - 1)); // -1 pour retirer le '&'
+}
 
-  const message = new TextEncoder().encode(canonicalSsvString(url));
-  const sig = pemToBytes(signature.replace(/-/g, '+').replace(/_/g, '/'));
+/** Extrait la signature (base64url) et la décode en octets. */
+function ssvSignatureBytes(url: URL): Uint8Array {
+  const raw = url.search.startsWith('?') ? url.search.slice(1) : url.search;
+  const i = raw.indexOf('signature=');
+  if (i === -1) throw new Error('missing signature parameter');
+  const after = raw.slice(i + 'signature='.length);
+  const j = after.indexOf('&key_id=');
+  const sigStr = j === -1 ? after : after.slice(0, j);
+  const b64 = sigStr.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+  return b64decode(padded);
+}
+
+/** Convertit une signature ECDSA DER en format brut r||s (64 octets) pour Web Crypto. */
+function derToRaw(der: Uint8Array): Uint8Array {
+  if (der[0] !== 0x30) throw new Error('not a DER sequence');
+  let pos = 2;
+  if (der[1] & 0x80) pos += der[1] & 0x7f; // longueur longue (rare)
+  if (der[pos] !== 0x02) throw new Error('bad DER r');
+  const rLen = der[pos + 1];
+  const r = der.slice(pos + 2, pos + 2 + rLen);
+  pos += 2 + rLen;
+  if (der[pos] !== 0x02) throw new Error('bad DER s');
+  const sLen = der[pos + 1];
+  const s = der.slice(pos + 2, pos + 2 + sLen);
+
+  const to32 = (v: Uint8Array): Uint8Array => {
+    let start = 0;
+    while (start < v.length - 32 && v[start] === 0) start++;
+    const out = new Uint8Array(32);
+    out.set(v.slice(start), 32 - (v.length - start));
+    return out;
+  };
+  const raw = new Uint8Array(64);
+  raw.set(to32(r), 0);
+  raw.set(to32(s), 32);
+  return raw;
+}
+
+/** Vérifie la signature ECDSA P-256 d'un callback SSV. */
+async function verifySsv(url: URL): Promise<{ ok: boolean; reason?: string }> {
+  const keyId = Number(url.searchParams.get('key_id'));
+  if (!Number.isInteger(keyId)) return { ok: false, reason: 'missing key_id' };
+  const keys = await fetchSsvKeys();
+  const spkiB64 = keys.get(keyId);
+  if (!spkiB64) return { ok: false, reason: 'unknown key_id' };
 
   try {
-    const cryptoKey = await crypto.subtle.importKey(
+    const key = await crypto.subtle.importKey(
       'spki',
-      pemToBytes(key.pem),
-      { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+      b64decode(spkiB64),
+      { name: 'ECDSA', namedCurve: 'P-256' },
       false,
       ['verify']
     );
-    const ok = await crypto.subtle.verify('RSASSA-PKCS1-v1_5', cryptoKey, sig, message);
+    const sig = derToRaw(ssvSignatureBytes(url));
+    const content = ssvContentToVerify(url);
+    const ok = await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, key, sig, content);
     return { ok };
   } catch (e) {
     return { ok: false, reason: `verify error: ${(e as Error).message}` };
@@ -497,17 +562,15 @@ export default {
 
       // F05 — AdMob SSV (appelé par Google, pas d'auth applicative)
       if (request.method === 'GET' && path === '/ssv') {
-        const keys: SsvKey[] = env.SSV_KEYS ? JSON.parse(env.SSV_KEYS) : [];
-        if (keys.length === 0) return json({ ok: false, reason: 'SSV not configured' }, 503);
-        const check = await verifySsvSignature(url, keys);
+        const check = await verifySsv(url);
         if (!check.ok) return json(check, 400);
 
-        const uid = url.searchParams.get('custom_data') || '';
+        // L'identifiant utilisateur est transmis par l'app via `ssv.userId`
+        // (paramètre `user_id` du callback), avec repli sur `custom_data`.
+        const uid = url.searchParams.get('user_id') || url.searchParams.get('custom_data') || '';
         const tx = url.searchParams.get('transaction_id') || '';
-        const amount = Number(url.searchParams.get('reward_amount') || '0');
-        const coins = Math.round(amount * 10) / 10 || 0.1;
-        if (!uid || !tx) return json({ ok: false, reason: 'missing custom_data/transaction_id' }, 400);
-        const credited = await creditAdReward(sa, uid, coins, tx);
+        if (!uid || !tx) return json({ ok: false, reason: 'missing user_id/transaction_id' }, 400);
+        const credited = await creditAdReward(sa, uid, AD_REWARD_COINS, tx);
         return json({ ok: true, credited });
       }
 

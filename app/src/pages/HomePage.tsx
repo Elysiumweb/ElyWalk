@@ -8,7 +8,7 @@ import { pedometer } from '../lib/pedometer';
 import { showInterstitial, showRewardedAd } from '../lib/ads';
 import { validateSteps, creditAdReward, syncTodaySteps } from '../lib/db';
 import { coinsForSteps, caloriesForSteps, fmtCoins, fmtNumber, dateStr } from '../lib/coins';
-import { DAILY_STEP_GOAL, STEP_TIERS, AD_REWARD_COINS } from '../lib/constants';
+import { DAILY_STEP_GOAL, STEP_TIERS, AD_REWARD_COINS, ATTESTATION_WORKER_URL } from '../lib/constants';
 import { Capacitor } from '@capacitor/core';
 
 type PermState = 'granted' | 'denied' | 'prompt' | 'unavailable';
@@ -93,10 +93,17 @@ export default function HomePage() {
         toast('Les publicités sont disponibles uniquement sur l’application Android.', 'error');
         return;
       }
-      const rewarded = await showRewardedAd();
+      const rewarded = await showRewardedAd(profile.uid);
       if (rewarded) {
-        await creditAdReward(profile.uid);
-        toast(`+${fmtCoins(AD_REWARD_COINS)} ElyCoins !`, 'success');
+        if (ATTESTATION_WORKER_URL) {
+          // SSV active : la récompense est créditée par le serveur (callback
+          // AdMob vérifié) pour éviter toute fraude côté client.
+          toast('Récompense en cours de vérification (serveur)…', 'success');
+        } else {
+          // Fallback temporaire (SSV non configurée) : crédit client borné.
+          await creditAdReward(profile.uid);
+          toast(`+${fmtCoins(AD_REWARD_COINS)} ElyCoins !`, 'success');
+        }
       } else {
         toast('Publicité non terminée — aucune récompense.', 'error');
       }

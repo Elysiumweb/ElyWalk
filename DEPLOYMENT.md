@@ -73,9 +73,11 @@ npm install
 npx wrangler login
 npx wrangler secret put GOOGLE_APPLICATION_CREDENTIALS   # JSON du compte de service
 npx wrangler secret put API_SECRET
-npx wrangler secret put SSV_KEYS
 npx wrangler deploy
 ```
+
+Les clés publiques AdMob SSV sont récupérées automatiquement par le Worker depuis
+le serveur de clés Google (aucun secret SSV à configurer).
 
 Côté app, renseigner `ATTESTATION_WORKER_URL` dans `app/src/lib/constants.ts` et
 installer le plugin d'intégrité :
