@@ -143,6 +143,7 @@ export default function ProfilePage() {
   const onPrivacyOptions = async () => { await showPrivacyOptionsForm(); };
   const onExport = async () => { if(!profile)return; const data=await exportAccountData(profile.uid); const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'})); a.download=`elywalk-export-${profile.uid}.json`; a.click(); URL.revokeObjectURL(a.href); };
   const onDelete = async () => { if(!profile||!confirm('Suppression définitive : vos données et votre compte seront effacés. Continuer ?'))return; const pwd=prompt('Pour confirmer, saisissez votre mot de passe (laissez vide pour Google)')||undefined; setBusy(true); try { if(pwd) await reauthenticateAccount(pwd); await deleteAvatar(profile.uid); await deleteAccountData(profile.uid); await deleteAuthAccount(); } catch(e){toast(frAuthError(e),'error')} finally{setBusy(false)} };
+  const copyText = async (value: string, label: string) => { await navigator.clipboard.writeText(value); toast(`${label} copié !`, 'success'); };
   const onShare = async () => { if(!profile)return; const url=`${location.origin}/?ref=${profile.referralCode}`; const text=`Rejoins-moi sur ElyWalk avec le code ${profile.referralCode}`; if(navigator.share) await navigator.share({title:'ElyWalk',text,url}); else {await navigator.clipboard.writeText(`${text} ${url}`);toast('Lien copié !','success')} };
 
   if (!profile) return null;
@@ -173,7 +174,7 @@ export default function ProfilePage() {
           <div className="display" style={{ fontSize: 17 }} data-testid="profile-name">
             {profile.displayName}
           </div>
-          <div style={{ color: 'var(--muted)', fontSize: 13 }}>{profile.email || 'Aucun e-mail'}</div>
+          {profile.email ? <button type="button" className="copy-value" onClick={() => copyText(profile.email!, 'E-mail')} title="Copier l’e-mail">{profile.email} <span aria-hidden="true">⧉</span></button> : <div style={{ color: 'var(--muted)', fontSize: 13 }}>Aucun e-mail</div>}
           <div style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {isAdmin && (
               <span className="badge">👑 {profile.role === 'president' ? 'Président' : 'Co-Président'}</span>
@@ -190,13 +191,10 @@ export default function ProfilePage() {
 
       <div className="card">
         <div className="card-title">Parrainage</div>
-        <div className="list-row">
-          <div className="row-main">
-            <div className="row-title" style={{ fontSize: 14 }}>Mon code : {profile.referralCode}</div>
-            <div className="row-sub">+10 EC par filleul</div>
-          </div>
-          <button className="btn btn-ghost btn-sm" onClick={onShare}>Partager</button>
-        </div>
+        <button type="button" className="referral-code" onClick={() => copyText(profile.referralCode, 'Code')} aria-label={`Copier le code ${profile.referralCode}`}>
+          <span>Mon code</span><strong>{profile.referralCode}</strong><small>Toucher pour copier · +10 EC par filleul</small>
+        </button>
+        <button type="button" className="btn btn-outline btn-sm" onClick={onShare}>Partager le lien</button>
         {profile.referralRejected && (
           <div className="row-sub" style={{ color: '#ff8b8b', marginTop: 6 }} data-testid="referral-rejected-note">
             ⚠️ Parrainage non éligible : même appareil ou même adresse IP

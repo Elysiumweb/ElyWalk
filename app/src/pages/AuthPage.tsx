@@ -21,6 +21,9 @@ export default function AuthPage() {
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [referral, setReferral] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const passwordScore = [password.length >= 8, /[a-z]/.test(password) && /[A-Z]/.test(password), /\d/.test(password), /[^A-Za-z0-9]/.test(password)].filter(Boolean).length;
+  const strengthLabel = ['Très faible', 'Faible', 'Moyen', 'Bon', 'Fort'][passwordScore];
 
   const run = async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -107,27 +110,32 @@ export default function AuthPage() {
       </div>
       <div className="field">
         <label>Mot de passe</label>
-        <input
-          className="input"
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="••••••••"
-          data-testid="auth-password-input"
-        />
-      </div>
-      {mode === 'register' && (
-        <div className="field">
-          <label>Code de parrainage (optionnel)</label>
+        <div className="password-field">
           <input
             className="input"
-            value={referral}
-            onChange={(e) => setReferral(e.target.value.toUpperCase())}
-            placeholder="Ex. A3F7K9"
-            data-testid="auth-referral-input"
+            type={showPassword ? 'text' : 'password'}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="••••••••"
+            data-testid="auth-password-input"
           />
+          <button type="button" className="password-toggle" onClick={() => setShowPassword(v => !v)} aria-label={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'} aria-pressed={showPassword}>
+            {showPassword ? 'Masquer' : 'Afficher'}
+          </button>
         </div>
-      )}
+        {mode === 'register' && password && <div className={`password-strength strength-${passwordScore}`}><span style={{width:`${Math.max(15,passwordScore*25)}%`}} />Force : {strengthLabel}</div>}
+      </div>
+      <div className="field">
+        <label>Code de parrainage (optionnel)</label>
+        <input
+          className="input"
+          value={referral}
+          onChange={(e) => setReferral(e.target.value.toUpperCase())}
+          placeholder="Ex. A3F7K9"
+          data-testid="auth-referral-input"
+        />
+        {mode === 'login' && <small className="field-help">Utilisé si Google crée un nouveau compte.</small>}
+      </div>
       <button className="btn btn-gold" onClick={submitEmail} disabled={busy} data-testid="auth-submit-button">
         {busy ? '...' : mode === 'register' ? "S'inscrire" : 'Se connecter'}
       </button>

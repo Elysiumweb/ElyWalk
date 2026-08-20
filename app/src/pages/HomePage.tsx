@@ -116,6 +116,7 @@ export default function HomePage() {
 
   const potentialCoins = coinsForSteps(steps);
   const calories = caloriesForSteps(steps);
+  const dailyGoal = profile?.dailyStepGoal || DAILY_STEP_GOAL;
 
   return (
     <div className="screen" data-testid="home-screen">
@@ -131,12 +132,12 @@ export default function HomePage() {
 
       <div className="gold-hero">
         <img src="/deco-1.webp" className="hero-deco" alt="" />
-        <ProgressRing progress={steps / (profile?.dailyStepGoal || DAILY_STEP_GOAL)}>
+        <ProgressRing progress={steps / dailyGoal}>
           <div className="display" style={{ fontSize: 34, color: '#fff' }} data-testid="today-steps-value">
             {fmtNumber(steps)}
           </div>
-          <div style={{ color: 'var(--muted)', fontSize: 12, marginTop: 2 }}>
-            pas aujourd’hui
+          <div className="goal-label">
+            sur {fmtNumber(dailyGoal)} pas
           </div>
           <div style={{ color: 'var(--gold)', fontSize: 13, marginTop: 6, fontFamily: 'var(--font-display)' }}>
             ≈ {potentialCoins} EC
@@ -162,6 +163,13 @@ export default function HomePage() {
         </div>
       </div>
 
+      {!isNative && (
+        <div className="card web-counter-note" data-testid="web-counter-note">
+          <div className="card-title">Compteur en mode aperçu</div>
+          <p>Le navigateur ne peut pas accéder au capteur de pas Android. Ouvrez ElyWalk sur votre téléphone pour compter automatiquement votre activité.</p>
+        </div>
+      )}
+
       {isNative && perm !== 'granted' && (
         <div className="card" data-testid="permission-card">
           <div className="card-title">Activer le comptage des pas</div>
@@ -176,26 +184,25 @@ export default function HomePage() {
         </div>
       )}
 
-      <button
-        className="btn btn-gold"
-        onClick={onValidate}
-        disabled={busyValidate || alreadyValidated || !profile}
-        data-testid="validate-steps-button"
-      >
-        {alreadyValidated
-          ? 'Pas validés aujourd’hui ✓'
-          : busyValidate
-            ? 'Validation...'
-            : `Valider mes pas (+${potentialCoins} EC)`}
-      </button>
-      <div className="section-gap" />
-      <button className="btn btn-outline" onClick={onWatchAd} disabled={busyAd} data-testid="watch-ad-button">
-        {busyAd ? 'Chargement de la pub...' : `Regarder une pub (+${fmtCoins(AD_REWARD_COINS)} EC)`}
-      </button>
-      <div className="section-gap" />
-      <button className="btn btn-ghost" onClick={() => setShowTiers(true)} data-testid="show-tiers-button">Voir le barème des gains</button>
-      <div className="section-gap" />
-      <button className="btn btn-ghost" onClick={() => navigate('/history')}>Historique, objectifs & badges</button>
+      <section className={`daily-action ${alreadyValidated ? 'daily-action-done' : ''}`} aria-live="polite">
+        {alreadyValidated && <div className="validation-success"><span>✓</span><div><strong>Journée validée</strong><small>Revenez demain pour poursuivre votre série.</small></div></div>}
+        <button
+          type="button"
+          className="btn btn-gold"
+          onClick={onValidate}
+          disabled={busyValidate || alreadyValidated || !profile}
+          data-testid="validate-steps-button"
+        >
+          {alreadyValidated ? 'Pas validés aujourd’hui ✓' : busyValidate ? 'Validation...' : `Valider mes pas (+${potentialCoins} EC)`}
+        </button>
+        <div className="secondary-actions">
+          <button type="button" className="text-button" onClick={onWatchAd} disabled={busyAd} data-testid="watch-ad-button">
+            {busyAd ? 'Chargement...' : `Voir une pub · +${fmtCoins(AD_REWARD_COINS)} EC`}
+          </button>
+          <button type="button" className="text-button" onClick={() => setShowTiers(true)} data-testid="show-tiers-button">Barème des gains</button>
+        </div>
+      </section>
+      <button type="button" className="btn btn-ghost" onClick={() => navigate('/history')}>Historique, objectifs & badges</button>
       <div className="card" style={{marginTop:12}}><div className="card-title">Défis</div><div className="badge-grid"><span className="badge">{(profile?.streak||0)>=7?'🏅':'🔒'} Série 7 jours</span><span className="badge">{(profile?.streak||0)>=30?'🏆':'🔒'} Série 30 jours</span><span className="badge">{(profile?.totalSteps||0)>=100000?'🥾':'🔒'} 100 000 pas</span></div></div>
 
       <Sheet open={showTiers} onClose={() => setShowTiers(false)} title="Barème quotidien" testId="tiers-sheet">
