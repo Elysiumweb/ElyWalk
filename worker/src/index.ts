@@ -320,15 +320,15 @@ function derToRaw(der: Uint8Array): Uint8Array {
   return raw;
 }
 
-/** Vérifie la signature ECDSA P-256 d'un callback SSV. */
+/** Vérifie la signature ECDSA P-256 d'un callback SSV. Ne lève jamais d'exception. */
 async function verifySsv(url: URL): Promise<{ ok: boolean; reason?: string }> {
-  const keyId = Number(url.searchParams.get('key_id'));
-  if (!Number.isInteger(keyId)) return { ok: false, reason: 'missing key_id' };
-  const keys = await fetchSsvKeys();
-  const spkiB64 = keys.get(keyId);
-  if (!spkiB64) return { ok: false, reason: 'unknown key_id' };
-
   try {
+    const keyId = Number(url.searchParams.get('key_id'));
+    if (!Number.isInteger(keyId)) return { ok: false, reason: 'missing key_id' };
+    const keys = await fetchSsvKeys();
+    const spkiB64 = keys.get(keyId);
+    if (!spkiB64) return { ok: false, reason: 'unknown key_id' };
+
     const key = await crypto.subtle.importKey(
       'spki',
       b64decode(spkiB64),
@@ -541,10 +541,51 @@ export default {
     const path = url.pathname;
 
     try {
-      const sa = parseServiceAccount(env);
+      // État de santé — ne nécessite PAS le compte de service.
       if (request.method === 'GET' && path === '/') {
-        return json({ ok: true, service: 'elywalk-backend', package: env.PACKAGE_NAME });
+        let saOk = false;
+        try {
+          parseServiceAccount(env);
+          saOk = true;
+        } catch {
+          saOk = false;
+        }
+        return json({ ok: true, service: 'elywalk-backend', package: env.PACKAGE_NAME, serviceAccountConfigured: saOk });
       }
+
+      // F05 — AdMob SSV (appelé par Google).
+      // La vérification de signature n'a PAS besoin du compte de service :
+      // on vérifie d'abord, et on crédite ensuite (best-effort).
+      if (request.method === 'GET' && path === '/ssv') {
+        const check = await verifySsv(url);
+        if (!check.ok) {
+          console.warn('[ssv] invalid signature:', check.reason);
+          return json({ ok: false, reason: check.reason }, 400);
+        }
+
+        let credited = false;
+        let creditReason: string | undefined;
+        try {
+          const sa = parseServiceAccount(env);
+          // L'identifiant utilisateur est transmis par l'app via `ssv.userId`
+          // (paramètre `user_id` du callback), avec repli sur `custom_data`.
+          const uid = url.searchParams.get('user_id') || url.searchParams.get('custom_data') || '';
+          const tx = url.searchParams.get('transaction_id') || '';
+          if (uid && tx) {
+            credited = await creditAdReward(sa, uid, AD_REWARD_COINS, tx);
+          } else {
+            creditReason = 'missing user_id/transaction_id';
+          }
+        } catch (e) {
+          creditReason = (e as Error).message;
+        }
+
+        // Toujours 200 si la signature est valide : c'est ce que teste AdMob.
+        return json({ ok: true, verified: true, credited, creditReason });
+      }
+
+      // ---- Les routes suivantes nécessitent le compte de service. ----
+      const sa = parseServiceAccount(env);
 
       // F05 — Play Integrity
       if (request.method === 'POST' && path === '/verify-integrity') {
@@ -558,20 +599,6 @@ export default {
           }).catch(() => undefined);
         }
         return json(verdict);
-      }
-
-      // F05 — AdMob SSV (appelé par Google, pas d'auth applicative)
-      if (request.method === 'GET' && path === '/ssv') {
-        const check = await verifySsv(url);
-        if (!check.ok) return json(check, 400);
-
-        // L'identifiant utilisateur est transmis par l'app via `ssv.userId`
-        // (paramètre `user_id` du callback), avec repli sur `custom_data`.
-        const uid = url.searchParams.get('user_id') || url.searchParams.get('custom_data') || '';
-        const tx = url.searchParams.get('transaction_id') || '';
-        if (!uid || !tx) return json({ ok: false, reason: 'missing user_id/transaction_id' }, 400);
-        const credited = await creditAdReward(sa, uid, AD_REWARD_COINS, tx);
-        return json({ ok: true, credited });
       }
 
       // F11 — Envoi de push protégé
