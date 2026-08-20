@@ -17,7 +17,7 @@ export default function MapPage() {
   const userMarkerRef = useRef<L.Marker | null>(null);
   const [selected, setSelected] = useState<Establishment | null>(null);
   const [locating, setLocating] = useState(false);
-  const [establishments,setEstablishments]=useState<Establishment[]>([]); const [search,setSearch]=useState('');
+  const [establishments,setEstablishments]=useState<Establishment[]>([]); const [search,setSearch]=useState(''); const [partnersLoaded,setPartnersLoaded]=useState(false);
   const [userPos,setUserPos]=useState<{lat:number;lng:number}|null>(null);
 
   // Initialisation de la carte
@@ -49,6 +49,7 @@ export default function MapPage() {
   useEffect(() => {
     const unsub = watchEstablishments((list) => {
       setEstablishments(list);
+      setPartnersLoaded(true);
       const map = mapRef.current;
       if (!map) return;
       markersRef.current.forEach((m) => m.remove());
@@ -132,6 +133,7 @@ export default function MapPage() {
 
       <div className="map-search"><input className="input" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Rechercher un partenaire…"/><div className="nearby-list">{nearby.slice(0,5).map(e=><button key={e.id} onClick={()=>{setSelected(e);mapRef.current?.setView([e.lat,e.lng],16)}}><b>{e.name}</b><span>{distance(e)!==null?`${distance(e)!.toFixed(1)} km`:e.address}</span></button>)}</div></div>
       <div ref={containerRef} className="map-container" data-testid="map-container" />
+      {partnersLoaded && establishments.length === 0 && <div className="map-empty" role="status"><strong>Aucun partenaire sur la carte</strong><span>De nouveaux lieux seront ajoutés prochainement.</span></div>}
 
       <button
         className="map-locate-btn"

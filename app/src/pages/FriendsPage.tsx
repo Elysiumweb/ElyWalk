@@ -26,6 +26,7 @@ export default function FriendsPage() {
   const navigate = useNavigate();
   const [friends, setFriends] = useState<UserProfile[]>([]);
   const [requests, setRequests] = useState<FriendRequest[]>([]);
+  const [requestProfiles, setRequestProfiles] = useState<Record<string, UserProfile>>({});
   const [outgoing, setOutgoing] = useState<FriendRequest[]>([]);
   const [searchResults, setSearchResults] = useState<UserProfile[]>([]);
   const [reactions,setReactions]=useState<{id:string;fromName:string;emoji:string;message:string}[]>([]);
@@ -74,6 +75,12 @@ export default function FriendsPage() {
     }
   };
 
+  useEffect(() => {
+    const ids = [...new Set(requests.map(r => r.from))];
+    if (!ids.length) { setRequestProfiles({}); return; }
+    getProfiles(ids).then(items => setRequestProfiles(Object.fromEntries(items.map(item => [item.uid, item]))));
+  }, [requests]);
+
   const doSearch = async () => { setSearchResults(await searchUsersByName(code)); };
   const remove = async (uid:string) => { if(!profile||!confirm('Supprimer cet ami ?'))return; await removeFriendship(profile.uid,uid); toast('Ami supprimé.','info'); };
   const share = async () => { if(!profile)return; const text=`Rejoins-moi sur ElyWalk : ${location.origin}/?ref=${profile.referralCode}`; if(navigator.share)await navigator.share({text});else{await navigator.clipboard.writeText(text);toast('Lien copié !','success')} };
@@ -104,7 +111,7 @@ export default function FriendsPage() {
           <div className="card-title">Demandes reçues</div>
           {requests.map((r) => (
             <div className="list-row" key={r.id} data-testid="friend-request-row">
-              <div className="avatar">{r.fromName.charAt(0).toUpperCase()}</div>
+              <Avatar name={r.fromName} photoURL={requestProfiles[r.from]?.photoURL} size={42} />
               <div className="row-main">
                 <div className="row-title">{r.fromName}</div>
                 <div className="row-sub">veut devenir votre ami</div>

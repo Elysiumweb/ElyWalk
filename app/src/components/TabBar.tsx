@@ -24,9 +24,10 @@ export default function TabBar() {
           end={t.to === '/'}
           data-testid={t.testId}
           className={({ isActive }) => `tab ${isActive ? 'tab-active' : ''}`}
+          aria-label={t.label}
         >
-          <span className="tab-icon"><t.icon />{t.to==='/friends'&&pending>0&&<b className="tab-badge">{pending}</b>}</span>
-          <span>{t.label}</span>
+          <span className="tab-icon" aria-hidden="true"><t.icon />{t.to==='/friends'&&pending>0&&<b className="tab-badge">{pending}</b>}</span>
+          <span className="tab-label">{t.label}</span>
         </NavLink>
       ))}
     </nav>

@@ -68,6 +68,9 @@ export default function WalletPage() {
     }
   };
 
+  const transactionIcon = (type: CoinTransaction['type']) => ({ steps: '👟', ad: '▶', referral: '🤝', paypal: '↗', donation: '♥', partner: '✦' }[type]);
+  const formatDateTime = (value: number) => new Date(value).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' });
+
   const statusBadge = (s: Withdrawal['status']) => {
     if (s === 'paid') return <span className="badge badge-success">Payé</span>;
     if (s === 'rejected') return <span className="badge badge-danger">Refusé</span>;
@@ -105,21 +108,14 @@ export default function WalletPage() {
         </div>
       )}
 
-      {!isExcluded && (
-        <button className="btn btn-gold" onClick={() => setPaypalOpen(true)} data-testid="paypal-withdraw-button">
-          Retirer via PayPal
-        </button>
-      )}
-      <div className="section-gap" />
-      <button className="btn btn-outline" onClick={() => setDonateOpen(true)} data-testid="donate-button">
-        Faire une donation à Elysium
-      </button>
-      <div className="section-gap" />
-      <button className="btn btn-ghost" onClick={() => navigate('/partners')} data-testid="partner-offers-button">
-        Offres partenaires
-      </button>
-
-      <div style={{ height: 16 }} />
+      <div className="card wallet-actions">
+        <div className="card-title">Actions</div>
+        {!isExcluded && <button type="button" className="btn btn-gold" onClick={() => setPaypalOpen(true)} data-testid="paypal-withdraw-button">Retirer via PayPal</button>}
+        <div className="secondary-actions">
+          <button type="button" className="text-button" onClick={() => setDonateOpen(true)} data-testid="donate-button">Faire un don</button>
+          <button type="button" className="text-button" onClick={() => navigate('/partners')} data-testid="partner-offers-button">Offres partenaires</button>
+        </div>
+      </div>
       <div className="card">
         <div className="chip-row">
           <button
@@ -147,9 +143,10 @@ export default function WalletPage() {
           ) : (
             transactions.map((t) => (
               <div className="list-row" key={t.id} data-testid="transaction-row">
+                <span className="transaction-icon" aria-hidden="true">{transactionIcon(t.type)}</span>
                 <div className="row-main">
                   <div className="row-title" style={{ fontSize: 14 }}>{t.note}</div>
-                  <div className="row-sub">{new Date(t.createdAt).toLocaleDateString('fr-FR')}</div>
+                  <div className="row-sub">{formatDateTime(t.createdAt)}</div>
                 </div>
                 <div className="row-value" style={{ color: t.coins >= 0 ? 'var(--success)' : 'var(--danger)' }}>
                   {t.coins >= 0 ? '+' : ''}{fmtCoins(t.coins)} EC
@@ -171,7 +168,7 @@ export default function WalletPage() {
                     {w.type === 'paypal' ? `PayPal · ${w.paypalEmail}` : w.type === 'donation' ? 'Donation Elysium' : 'Partenaire'}
                   </div>
                   <div className="row-sub">
-                    {fmtCoins(w.coins)} EC · {new Date(w.createdAt).toLocaleDateString('fr-FR')}
+                    {fmtCoins(w.coins)} EC · {formatDateTime(w.createdAt)}
                   </div>
                 </div>
                 {statusBadge(w.status)}
