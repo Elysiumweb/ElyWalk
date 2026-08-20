@@ -13,7 +13,6 @@
 name = "elywalk-backend"
 main = "src/index.ts"
 compatibility_date = "2025-01-01"
-compatibility_flags = ["nodejs_compat"]
 
 # Variables non sensibles (surchargeables). Les secrets se gèrent via wrangler.
 [vars]

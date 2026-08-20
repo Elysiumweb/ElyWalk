@@ -4,6 +4,12 @@ Remplace les Cloud Functions Firebase (qui exigent le plan payant **Blaze**) par
 **Cloudflare Worker**, gratuit à l'échelle de l'application (100 000 requêtes/jour
 offertes, tâches planifiées incluses).
 
+> **Aucune dépendance runtime.** Le Worker appelle directement les **API REST** Google
+> (Firestore REST, FCM HTTP v1, Play Integrity, AdMob SSV) avec des jetons OAuth2
+> signés en RS256 via Web Crypto (natif dans Workers). `firebase-admin` (SDK Node) est
+> volontairement exclu : il s'appuie sur gRPC et des APIs Node incompatibles avec
+> l'isolat Workers (il ne se résout pas au build et échouerait à l'exécution).
+
 ## Endpoints
 
 | Méthode | Chemin | Rôle |
@@ -15,16 +21,16 @@ offertes, tâches planifiées incluses).
 | `GET` | `/cron/process-notifications` | Consomme `friendRequests` + `withdrawals` → push (F11) |
 | `GET` | `/cron/process-payouts` | File de retraits (F06) |
 
-Le Worker utilise l'**Admin SDK Firebase** (qui contourne les règles Firestore) :
-c'est le seul composant de confiance qui peut créditer un solde sur une preuve
-externe (intégrité Play ou callback SSV signé). Le client ne peut pas forger ces
-écritures.
+Le Worker possède les droits d'un **compte de service Firebase** (contournement des
+règles Firestore) : c'est le seul composant de confiance qui peut créditer un solde
+sur une preuve externe (intégrité Play ou callback SSV signé). Le client ne peut pas
+forger ces écritures.
 
-## Déploiement (une seule fois)
+## Déploiement
 
 ```bash
 cd worker
-npm install
+npm install                 # installe wrangler + typescript (dev uniquement)
 npx wrangler login          # compte Cloudflare gratuit
 ```
 
@@ -45,9 +51,9 @@ npx wrangler secret put SSV_KEYS    # ex. : [{"keyId":"123","pem":"-----BEGIN PU
 npx wrangler deploy
 ```
 
-Les tâches planifiées (`[triggers] crons` de `wrangler.toml`) sont actives après
-le premier déploiement. Les endpoints `/cron/*` sont aussi appelables manuellement
-pour tester.
+Les tâches planifiées (`[triggers] crons` de `wrangler.toml`) sont actives après le
+premier déploiement. Les endpoints `/cron/*` sont aussi appelables manuellement
+pour tester (ex. `curl https://<votre-worker>.workers.dev/cron/process-notifications`).
 
 ## Prérequis côté Google
 

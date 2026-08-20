@@ -1,26 +1,21 @@
 /**
  * ElyWalk — Backend de confiance (Cloudflare Workers, 100 % gratuit)
  * ===================================================================
- * Remplace les Cloud Functions Firebase (plan payant Blaze) par un Worker
- * Cloudflare, gratuit à cette échelle.
+ * AUCUNE dépendance runtime : utilise directement les API REST Google
+ * (Firestore REST, FCM HTTP v1, Play Integrity, AdMob SSV) avec des jetons
+ * OAuth2 signés via Web Crypto (natif dans Workers).
+ *
+ * `firebase-admin` (SDK Node) est volontairement exclu : il s'appuie sur gRPC
+ * et des APIs Node natives incompatibles avec l'isolat Workers.
  *
  * Endpoints :
- *   POST /verify-integrity         — vérifie un jeton Play Integrity (F05)
- *   GET  /ssv                      — callback AdMob Server-Side Verification (F05)
- *   POST /fcm/send                 — envoi de push FCM (protégé par API_SECRET)
- *   GET  /cron/process-notifications — consomme friendRequests/withdrawals → FCM (F11)
- *   GET  /cron/process-payouts       — traite la file de retraits (F06)
- *   GET  /                          — état de santé
- *
- * L'Admin SDK Firebase contourne les règles Firestore : le Worker est donc le
- * seul composant de confiance capable de créditer un solde sur preuve externe
- * (intégrité Play ou callback SSV signé).
+ *   POST /verify-integrity            — vérifie un jeton Play Integrity (F05)
+ *   GET  /ssv                         — callback AdMob Server-Side Verification (F05)
+ *   POST /fcm/send                    — envoi d'un push FCM (protégé par API_SECRET)
+ *   GET  /cron/process-notifications  — consomme friendRequests/withdrawals → FCM (F11)
+ *   GET  /cron/process-payouts        — traite la file de retraits (F06)
+ *   GET  /                            — état de santé
  */
-import { initializeApp, cert, getApps } from 'firebase-admin/app';
-import { getFirestore, FieldValue } from 'firebase-admin/firestore';
-import { getMessaging, type MulticastMessage } from 'firebase-admin/messaging';
-import { GoogleAuth } from 'google-auth-library';
-
 export interface Env {
   GOOGLE_APPLICATION_CREDENTIALS: string; // JSON du compte de service (secret)
   API_SECRET: string; // secret partagé pour /fcm/send
@@ -28,19 +23,16 @@ export interface Env {
   SSV_KEYS?: string; // JSON des clés publiques AdMob SSV : [{ keyId, pem }]
 }
 
-// ---------------------------------------------------------------------------
-// Initialisation Firebase Admin (idempotent, cache entre requêtes)
-// ---------------------------------------------------------------------------
-let inited = false;
-function initFirebase(env: Env) {
-  if (inited) return;
-  const sa = JSON.parse(env.GOOGLE_APPLICATION_CREDENTIALS);
-  if (getApps().length === 0) {
-    initializeApp({ credential: cert(sa), projectId: sa.project_id });
-  }
-  inited = true;
+interface ServiceAccount {
+  project_id: string;
+  client_email: string;
+  private_key: string;
+  token_uri: string;
 }
 
+// ---------------------------------------------------------------------------
+// Utilitaires
+// ---------------------------------------------------------------------------
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
@@ -52,6 +44,142 @@ const json = (body: unknown, status = 200) =>
     headers: { 'Content-Type': 'application/json', ...CORS },
   });
 
+function b64url(input: string | ArrayBuffer): string {
+  const bytes = typeof input === 'string' ? new TextEncoder().encode(input) : new Uint8Array(input);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function pemToBytes(pem: string): Uint8Array {
+  const b64 = pem
+    .replace(/-----BEGIN[^-]*-----/g, '')
+    .replace(/-----END[^-]*-----/g, '')
+    .replace(/\s+/g, '');
+  const raw = atob(b64);
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+  return bytes;
+}
+
+function parseServiceAccount(env: Env): ServiceAccount {
+  return JSON.parse(env.GOOGLE_APPLICATION_CREDENTIALS) as ServiceAccount;
+}
+
+// ---------------------------------------------------------------------------
+// OAuth2 : jeton d'accès depuis le compte de service (signature RS256 native)
+// ---------------------------------------------------------------------------
+const tokenCache = new Map<string, { token: string; exp: number }>();
+
+async function getAccessToken(sa: ServiceAccount, scope: string): Promise<string> {
+  const cached = tokenCache.get(scope);
+  if (cached && cached.exp > Date.now() / 1000 + 60) return cached.token;
+
+  const header = { alg: 'RS256', typ: 'JWT' };
+  const now = Math.floor(Date.now() / 1000);
+  const claims = {
+    iss: sa.client_email,
+    scope,
+    aud: sa.token_uri,
+    iat: now,
+    exp: now + 3600,
+  };
+  const unsigned = `${b64url(JSON.stringify(header))}.${b64url(JSON.stringify(claims))}`;
+
+  const key = await crypto.subtle.importKey(
+    'pkcs8',
+    pemToBytes(sa.private_key),
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const sig = await crypto.subtle.sign({ name: 'RSASSA-PKCS1-v1_5' }, key, new TextEncoder().encode(unsigned));
+  const jwt = `${unsigned}.${b64url(sig)}`;
+
+  const res = await fetch(sa.token_uri, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`,
+  });
+  if (!res.ok) throw new Error(`OAuth token request failed: HTTP ${res.status}`);
+  const data = (await res.json()) as { access_token: string };
+  tokenCache.set(scope, { token: data.access_token, exp: now + 3600 });
+  return data.access_token;
+}
+
+// ---------------------------------------------------------------------------
+// Firestore REST
+// ---------------------------------------------------------------------------
+const FIRESTORE = (project: string) =>
+  `https://firestore.googleapis.com/v1/projects/${project}/databases/(default)/documents`;
+const FIRESTORE_SCOPE = 'https://www.googleapis.com/auth/datastore';
+
+/** Exécute une requête structurée et renvoie les documents. */
+async function runQuery(
+  sa: ServiceAccount,
+  structuredQuery: unknown
+): Promise<Array<{ name: string; fields: Record<string, unknown> }>> {
+  const token = await getAccessToken(sa, FIRESTORE_SCOPE);
+  const res = await fetch(`${FIRESTORE(sa.project_id)}:runQuery`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ structuredQuery }),
+  });
+  if (!res.ok) throw new Error(`runQuery failed: HTTP ${res.status}`);
+  const results = (await res.json()) as Array<{ document?: { name: string; fields: Record<string, unknown> } }>;
+  return results
+    .filter((r) => r.document)
+    .map((r) => r.document as { name: string; fields: Record<string, unknown> });
+}
+
+/** Liste les jetons FCM d'un utilisateur. */
+async function listTokens(sa: ServiceAccount, uid: string): Promise<string[]> {
+  const token = await getAccessToken(sa, FIRESTORE_SCOPE);
+  const res = await fetch(
+    `${FIRESTORE(sa.project_id)}/users/${encodeURIComponent(uid)}/notificationTokens`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  if (!res.ok) return [];
+  const data = (await res.json()) as {
+    documents?: Array<{ fields?: { token?: { stringValue?: string } } }>;
+  };
+  return (data.documents || [])
+    .map((d) => d.fields?.token?.stringValue)
+    .filter((t): t is string => !!t);
+}
+
+/** Nom de ressource complet Firestore à partir d'un chemin relatif. */
+function docName(sa: ServiceAccount, relPath: string): string {
+  return `projects/${sa.project_id}/databases/(default)/documents/${relPath}`;
+}
+
+/** Met à jour des champs d'un document existant (PATCH). */
+async function patchFields(
+  sa: ServiceAccount,
+  fullName: string, // nom de ressource complet (projects/…/documents/…)
+  fields: Record<string, unknown>
+): Promise<void> {
+  const token = await getAccessToken(sa, FIRESTORE_SCOPE);
+  const mask = Object.keys(fields)
+    .map((f) => `updateMask.fieldPaths=${encodeURIComponent(f)}`)
+    .join('&');
+  const res = await fetch(`https://firestore.googleapis.com/v1/${fullName}?${mask}`, {
+    method: 'PATCH',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fields }),
+  });
+  if (!res.ok) throw new Error(`patch ${fullName} failed: HTTP ${res.status}`);
+}
+
+/** Champ booléen Firestore. */
+const fBool = (v: boolean) => ({ booleanValue: v });
+/** Champ chaîne Firestore. */
+const fString = (v: string) => ({ stringValue: v });
+/** Champ numérique (entier, en millisecondes ou montants entiers). */
+const fInt = (v: number) => ({ integerValue: String(Math.round(v)) });
+/** Champ numérique (flottant, pour les fractions d'ElyCoins). */
+const fDouble = (v: number) => ({ doubleValue: v });
+
 // ---------------------------------------------------------------------------
 // F05 — Play Integrity
 // ---------------------------------------------------------------------------
@@ -59,22 +187,14 @@ interface IntegrityVerdict {
   ok: boolean;
   reason?: string;
   packageName?: string;
-  requestHash?: string;
 }
 
-/** Appelle l'API Google Play Integrity pour décoder/vérifier un jeton. */
 async function verifyPlayIntegrity(
   token: string,
-  sa: Record<string, unknown>,
+  sa: ServiceAccount,
   packageName: string
 ): Promise<IntegrityVerdict> {
-  const auth = new GoogleAuth({
-    credentials: sa,
-    scopes: ['https://www.googleapis.com/auth/playintegrity'],
-  });
-  const client = await auth.getClient();
-  const { token: accessToken } = await client.getAccessToken();
-
+  const accessToken = await getAccessToken(sa, 'https://www.googleapis.com/auth/playintegrity');
   const res = await fetch(
     `https://playintegrity.googleapis.com/v1/${packageName}:decodeIntegrityToken`,
     {
@@ -86,12 +206,9 @@ async function verifyPlayIntegrity(
       body: JSON.stringify({ integrityToken: token }),
     }
   );
-  if (!res.ok) {
-    return { ok: false, reason: `decodeIntegrityToken HTTP ${res.status}` };
-  }
+  if (!res.ok) return { ok: false, reason: `decodeIntegrityToken HTTP ${res.status}` };
   const data = (await res.json()) as {
     tokenPayloadExternal?: {
-      requestDetails?: { requestPackageName?: string; nonce?: string };
       appIntegrity?: { appRecognitionVerdict?: string; packageName?: string };
       deviceIntegrity?: { deviceRecognitionVerdict?: string[] };
       accountDetails?: { appLicensingVerdict?: string };
@@ -116,11 +233,7 @@ async function verifyPlayIntegrity(
   if (!licensed) return { ok: false, reason: 'app not LICENSED' };
   if (!packageOk) return { ok: false, reason: 'package mismatch' };
 
-  return {
-    ok: true,
-    packageName: app.packageName,
-    requestHash: p.requestDetails?.nonce,
-  };
+  return { ok: true, packageName: app.packageName };
 }
 
 // ---------------------------------------------------------------------------
@@ -131,29 +244,12 @@ interface SsvKey {
   pem: string;
 }
 
-/**
- * Reconstruit la chaîne signée : paramètres triés par clé (hors `signature`
- * et `key_id`), au format `clé=valeur` joint par `&`.
- * NB : à valider avec l'outil de test SSV AdMob en production (les callbacks
- * SSV ne sont déclenchés que sur les annonces de production).
- */
 function canonicalSsvString(url: URL): string {
   const params = new URLSearchParams(url.search);
   params.delete('signature');
   params.delete('key_id');
   const entries = [...params.entries()].sort(([a], [b]) => a.localeCompare(b));
   return entries.map(([k, v]) => `${k}=${v}`).join('&');
-}
-
-function pemToArrayBuffer(pem: string): ArrayBuffer {
-  const b64 = pem
-    .replace(/-----BEGIN PUBLIC KEY-----/g, '')
-    .replace(/-----END PUBLIC KEY-----/g, '')
-    .replace(/\s+/g, '');
-  const raw = atob(b64);
-  const buf = new Uint8Array(raw.length);
-  for (let i = 0; i < raw.length; i++) buf[i] = raw.charCodeAt(i);
-  return buf.buffer;
 }
 
 async function verifySsvSignature(
@@ -167,14 +263,12 @@ async function verifySsvSignature(
   if (!key) return { ok: false, reason: 'unknown key_id' };
 
   const message = new TextEncoder().encode(canonicalSsvString(url));
-  const sigRaw = atob(signature.replace(/-/g, '+').replace(/_/g, '/'));
-  const sig = new Uint8Array(sigRaw.length);
-  for (let i = 0; i < sigRaw.length; i++) sig[i] = sigRaw.charCodeAt(i);
+  const sig = pemToBytes(signature.replace(/-/g, '+').replace(/_/g, '/'));
 
   try {
     const cryptoKey = await crypto.subtle.importKey(
       'spki',
-      pemToArrayBuffer(key.pem),
+      pemToBytes(key.pem),
       { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
       false,
       ['verify']
@@ -186,87 +280,165 @@ async function verifySsvSignature(
   }
 }
 
-/** Crédite (idempotent, par transaction_id) un gain de pub récompensée. */
+/** Crédite (atomique + idempotent) un gain de pub récompensée via commit. */
 async function creditAdReward(
+  sa: ServiceAccount,
   uid: string,
   coins: number,
   transactionId: string
 ): Promise<boolean> {
-  const db = getFirestore();
-  const idempotency = db.collection('ssvCredits').doc(transactionId);
-  const rewardDoc = db.doc(`users/${uid}/transactions/ad_ssv_${transactionId}`);
-
-  return db.runTransaction(async (tx) => {
-    const done = await tx.get(idempotency);
-    if (done.exists) return false;
-    tx.set(idempotency, { creditedAt: Date.now(), uid, coins });
-    tx.set(rewardDoc, {
-      type: 'ad',
-      coins,
-      note: 'Publicité récompensée (vérifiée serveur SSV)',
-      createdAt: Date.now(),
-    });
-    tx.update(db.doc(`users/${uid}`), { elycoins: FieldValue.increment(coins) });
-    return true;
+  const txId = transactionId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 120);
+  const base = `projects/${sa.project_id}/databases/(default)/documents`;
+  const body = {
+    writes: [
+      {
+        create: {
+          name: `${base}/ssvCredits/${txId}`,
+          fields: {
+            creditedAt: fInt(Date.now()),
+            uid: fString(uid),
+            coins: fDouble(coins),
+          },
+        },
+      },
+      {
+        create: {
+          name: `${base}/users/${uid}/transactions/ad_ssv_${txId}`,
+          fields: {
+            type: fString('ad'),
+            coins: fDouble(coins),
+            note: fString('Publicité récompensée (vérifiée serveur SSV)'),
+            createdAt: fInt(Date.now()),
+          },
+        },
+      },
+      {
+        update: {
+          name: `${base}/users/${uid}`,
+          updateTransforms: [{ fieldPath: 'elycoins', increment: { doubleValue: coins } }],
+        },
+      },
+    ],
+  };
+  const token = await getAccessToken(sa, FIRESTORE_SCOPE);
+  const res = await fetch(`https://firestore.googleapis.com/v1/${base}:commit`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
   });
+  // Le commit est atomique : si ssvCredits/{txId} existe déjà, ALREADY_EXISTS
+  // est renvoyé et RIEN n'est crédité une seconde fois.
+  return res.ok;
 }
 
 // ---------------------------------------------------------------------------
-// F11 — Envoi FCM
+// F11 — Envoi FCM (HTTP v1)
 // ---------------------------------------------------------------------------
-async function sendToUser(uid: string, title: string, body: string, data: Record<string, string>) {
-  const db = getFirestore();
-  const snap = await db.collection(`users/${uid}/notificationTokens`).get();
-  const tokens = snap.docs.map((d) => (d.data() as { token: string }).token);
-  if (tokens.length === 0) return { sent: 0, reason: 'no tokens' };
+const FCM_SCOPE = 'https://www.googleapis.com/auth/firebase.messaging';
 
-  const msg: MulticastMessage = {
-    tokens,
-    notification: { title, body },
-    data: { ...data, click_action: 'FLUTTER_NOTIFICATION_CLICK' },
-    android: { priority: 'high' },
-  };
-  const res = await getMessaging().sendEachForMulticast(msg);
-  return { sent: res.successCount, failures: res.failureCount };
+async function sendToUser(
+  sa: ServiceAccount,
+  uid: string,
+  title: string,
+  bodyText: string,
+  data: Record<string, string>
+): Promise<{ sent: number; failures: number }> {
+  const tokens = await listTokens(sa, uid);
+  if (tokens.length === 0) return { sent: 0, failures: 0 };
+
+  const accessToken = await getAccessToken(sa, FCM_SCOPE);
+  const projectId = sa.project_id;
+  let sent = 0;
+  let failures = 0;
+
+  for (const token of tokens) {
+    const res = await fetch(
+      `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: {
+            token,
+            notification: { title, body: bodyText },
+            data,
+            android: { priority: 'HIGH' },
+          },
+        }),
+      }
+    );
+    if (res.ok) sent++;
+    else failures++;
+  }
+  return { sent, failures };
 }
 
 // ---------------------------------------------------------------------------
 // F11 — Consommateur de notifications (cron)
 // ---------------------------------------------------------------------------
-async function processNotifications(): Promise<{ processed: number; sent: number }> {
-  const db = getFirestore();
+async function processNotifications(sa: ServiceAccount): Promise<{ processed: number; sent: number }> {
   let processed = 0;
   let sent = 0;
 
   // 1) Demandes d'amis en attente non notifiées
-  const reqs = await db
-    .collection('friendRequests')
-    .where('status', '==', 'pending')
-    .where('notified', '==', false)
-    .get();
-  for (const doc of reqs.docs) {
-    const r = doc.data() as { to: string; fromName: string };
-    const r1 = await sendToUser(r.to, 'Nouvelle demande d’ami', `${r.fromName} souhaite vous ajouter.`, { type: 'friend_request' });
-    sent += r1.sent || 0;
-    await doc.ref.update({ notified: true });
+  const reqs = await runQuery(sa, {
+    from: [{ collectionId: 'friendRequests' }],
+    where: {
+      compositeFilter: {
+        op: 'AND',
+        filters: [
+          { fieldFilter: { field: { fieldPath: 'status' }, op: 'EQUAL', value: { stringValue: 'pending' } } },
+          { fieldFilter: { field: { fieldPath: 'notified' }, op: 'EQUAL', value: { booleanValue: false } } },
+        ],
+      },
+    },
+  });
+  for (const doc of reqs) {
+    const to = (doc.fields.to as { stringValue?: string })?.stringValue;
+    const fromName = (doc.fields.fromName as { stringValue?: string })?.stringValue;
+    if (to) {
+      const r = await sendToUser(sa, to, 'Nouvelle demande d’ami', `${fromName || 'Quelqu’un'} souhaite vous ajouter.`, {
+        type: 'friend_request',
+      });
+      sent += r.sent;
+    }
+    await patchFields(sa, doc.name, { notified: fBool(true) });
     processed++;
   }
 
   // 2) Retraits traités non notifiés (payé / refusé)
-  const withdrawals = await db
-    .collection('withdrawals')
-    .where('status', 'in', ['paid', 'rejected'])
-    .where('notified', '==', false)
-    .get();
-  for (const doc of withdrawals.docs) {
-    const w = doc.data() as { uid: string; status: string; euros?: number };
-    const body =
-      w.status === 'paid'
-        ? `Votre retrait de ${w.euros ?? 0} € a été effectué.`
-        : 'Votre demande de retrait a été refusée (montant recrédité).';
-    const r1 = await sendToUser(w.uid, 'Retrait ElyWalk', body, { type: 'withdrawal', status: w.status });
-    sent += r1.sent || 0;
-    await doc.ref.update({ notified: true });
+  const withdrawals = await runQuery(sa, {
+    from: [{ collectionId: 'withdrawals' }],
+    where: {
+      compositeFilter: {
+        op: 'AND',
+        filters: [
+          {
+            fieldFilter: {
+              field: { fieldPath: 'status' },
+              op: 'IN',
+              value: { arrayValue: { values: [{ stringValue: 'paid' }, { stringValue: 'rejected' }] } },
+            },
+          },
+          { fieldFilter: { field: { fieldPath: 'notified' }, op: 'EQUAL', value: { booleanValue: false } } },
+        ],
+      },
+    },
+  });
+  for (const doc of withdrawals) {
+    const uid = (doc.fields.uid as { stringValue?: string })?.stringValue;
+    const status = (doc.fields.status as { stringValue?: string })?.stringValue;
+    const euros = (doc.fields.euros as { doubleValue?: number; integerValue?: string })?.doubleValue
+      ?? Number((doc.fields.euros as { integerValue?: string })?.integerValue ?? 0);
+    if (uid) {
+      const bodyText =
+        status === 'paid'
+          ? `Votre retrait de ${euros} € a été effectué.`
+          : 'Votre demande de retrait a été refusée (montant recrédité).';
+      const r = await sendToUser(sa, uid, 'Retrait ElyWalk', bodyText, { type: 'withdrawal', status: status || '' });
+      sent += r.sent;
+    }
+    await patchFields(sa, doc.name, { notified: fBool(true) });
     processed++;
   }
   return { processed, sent };
@@ -275,19 +447,19 @@ async function processNotifications(): Promise<{ processed: number; sent: number
 // ---------------------------------------------------------------------------
 // F06 — File de retraits (cron)
 // ---------------------------------------------------------------------------
-async function processPayouts(): Promise<{ processed: number }> {
-  const db = getFirestore();
+async function processPayouts(sa: ServiceAccount): Promise<{ processed: number }> {
   let processed = 0;
-  const queue = await db
-    .collection('withdrawals')
-    .where('status', '==', 'pending')
-    .get();
-  for (const doc of queue.docs) {
-    // Placeholder : brancher ici un prestataire de paiement (PayPal Payouts API)
-    // et n'exécuter que les retraits attestés (Play Integrity / SSV). Sans
-    // prestataire, le statut reste `pending` et l'admin (Président) décide.
-    // On marque simplement `readyForReview` pour le back-office.
-    await doc.ref.update({ readyForReview: true, reviewedAt: Date.now() });
+  const queue = await runQuery(sa, {
+    from: [{ collectionId: 'withdrawals' }],
+    where: {
+      fieldFilter: { field: { fieldPath: 'status' }, op: 'EQUAL', value: { stringValue: 'pending' } },
+    },
+  });
+  for (const doc of queue) {
+    await patchFields(sa, doc.name, {
+      readyForReview: fBool(true),
+      reviewedAt: fInt(Date.now()),
+    });
     processed++;
   }
   return { processed };
@@ -304,31 +476,27 @@ export default {
     const path = url.pathname;
 
     try {
+      const sa = parseServiceAccount(env);
       if (request.method === 'GET' && path === '/') {
-        initFirebase(env);
-        return json({ ok: true, service: 'elywalk-backend' });
+        return json({ ok: true, service: 'elywalk-backend', package: env.PACKAGE_NAME });
       }
 
       // F05 — Play Integrity
       if (request.method === 'POST' && path === '/verify-integrity') {
-        initFirebase(env);
         const body = (await request.json()) as { token?: string; uid?: string };
         if (!body.token) return json({ ok: false, reason: 'missing token' }, 400);
-        const sa = JSON.parse(env.GOOGLE_APPLICATION_CREDENTIALS);
         const verdict = await verifyPlayIntegrity(body.token, sa, env.PACKAGE_NAME);
         if (verdict.ok && body.uid) {
-          // Trace d'attestation (consultable par les règles Firestore si besoin).
-          await getFirestore().doc(`users/${body.uid}/attestations/playIntegrity`).set({
-            verifiedAt: Date.now(),
-            packageName: verdict.packageName,
-          });
+          // Trace d'attestation (consultable via les règles Firestore si besoin).
+          await patchFields(sa, docName(sa, `users/${body.uid}`), {
+            lastIntegrityCheck: fInt(Date.now()),
+          }).catch(() => undefined);
         }
         return json(verdict);
       }
 
       // F05 — AdMob SSV (appelé par Google, pas d'auth applicative)
       if (request.method === 'GET' && path === '/ssv') {
-        initFirebase(env);
         const keys: SsvKey[] = env.SSV_KEYS ? JSON.parse(env.SSV_KEYS) : [];
         if (keys.length === 0) return json({ ok: false, reason: 'SSV not configured' }, 503);
         const check = await verifySsvSignature(url, keys);
@@ -337,10 +505,9 @@ export default {
         const uid = url.searchParams.get('custom_data') || '';
         const tx = url.searchParams.get('transaction_id') || '';
         const amount = Number(url.searchParams.get('reward_amount') || '0');
-        // AD_REWARD_COINS = 0.1 EC ; ajuster selon votre barème.
         const coins = Math.round(amount * 10) / 10 || 0.1;
         if (!uid || !tx) return json({ ok: false, reason: 'missing custom_data/transaction_id' }, 400);
-        const credited = await creditAdReward(uid, coins, tx);
+        const credited = await creditAdReward(sa, uid, coins, tx);
         return json({ ok: true, credited });
       }
 
@@ -348,7 +515,6 @@ export default {
       if (request.method === 'POST' && path === '/fcm/send') {
         const auth = request.headers.get('Authorization') || '';
         if (auth !== `Bearer ${env.API_SECRET}`) return json({ ok: false, reason: 'unauthorized' }, 401);
-        initFirebase(env);
         const body = (await request.json()) as {
           uid: string;
           title: string;
@@ -358,21 +524,19 @@ export default {
         if (!body.uid || !body.title || !body.body) {
           return json({ ok: false, reason: 'missing fields' }, 400);
         }
-        const res = await sendToUser(body.uid, body.title, body.body, body.data || {});
+        const res = await sendToUser(sa, body.uid, body.title, body.body, body.data || {});
         return json({ ok: true, ...res });
       }
 
       // F11 — Consommateur de notifications (cron)
       if (request.method === 'GET' && path === '/cron/process-notifications') {
-        initFirebase(env);
-        const res = await processNotifications();
+        const res = await processNotifications(sa);
         return json({ ok: true, ...res });
       }
 
       // F06 — File de retraits (cron)
       if (request.method === 'GET' && path === '/cron/process-payouts') {
-        initFirebase(env);
-        const res = await processPayouts();
+        const res = await processPayouts(sa);
         return json({ ok: true, ...res });
       }
 
