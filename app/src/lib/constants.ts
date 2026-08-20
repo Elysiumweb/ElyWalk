@@ -6,6 +6,11 @@ export const AD_UNIT_REWARDED = 'ca-app-pub-6906841385343667/3683414466';
 export const AD_UNIT_APP_OPEN = 'ca-app-pub-6906841385343667/6616749893';
 export const AD_UNIT_INTERSTITIAL = 'ca-app-pub-6906841385343667/3494240028';
 
+// --- Attestation serveur (Play Integrity, F05) ---
+// URL du Worker Cloudflare de confiance (voir /worker/README.md). À renseigner
+// après déploiement du Worker. Vide => l'attestation est désactivée.
+export const ATTESTATION_WORKER_URL = ''; // ex. 'https://elywalk-backend.<compte>.workers.dev'
+
 // --- Rôles Elysium ---
 export const PRESIDENT_UID = 'BZ333LlhuJMoD4rXIquGE0zzjX43';
 export const CO_PRESIDENT_UID = '7XLpqYMKEMX5kLrQtts6NG3zRB32';

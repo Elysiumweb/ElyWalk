@@ -1,12 +1,14 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import Sheet from '../components/Sheet';
 import Avatar from '../components/Avatar';
-import { logout, updateAuthProfile, changePassword, deleteAuthAccount, reauthenticateAccount, frAuthError } from '../lib/auth-service';
+import { logout, updateAuthProfile, changePassword, changeEmail, deleteAuthAccount, reauthenticateAccount, frAuthError } from '../lib/auth-service';
 import { updateUserFields, setReferredBy, exportAccountData, deleteAccountData } from '../lib/db';
 import { uploadAvatar, deleteAvatar } from '../lib/avatar';
+import { getNotificationSettings, setReminderEnabled, setPushEnabled, type NotificationSettings } from '../lib/notifications';
+import { showPrivacyOptionsForm } from '../lib/ads';
 import { isPresidentUid } from '../lib/constants';
 import { fmtCoins } from '../lib/coins';
 
@@ -19,6 +21,16 @@ export default function ProfilePage() {
   const [securityOpen, setSecurityOpen] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');
   const [nextPassword, setNextPassword] = useState('');
+
+  const [emailOpen, setEmailOpen] = useState(false);
+  const [emailPassword, setEmailPassword] = useState('');
+  const [nextEmail, setNextEmail] = useState('');
+
+  const [notifSettings, setNotifSettings] = useState<NotificationSettings | null>(null);
+
+  useEffect(() => {
+    getNotificationSettings().then(setNotifSettings).catch(() => undefined);
+  }, []);
 
   const [referralOpen, setReferralOpen] = useState(false);
   const [referralCode, setReferralCode] = useState('');
@@ -125,6 +137,10 @@ export default function ProfilePage() {
 
   const onLogout = async () => { if (confirm('Voulez-vous vraiment vous déconnecter ?')) await logout(); };
   const onChangePassword = async () => { setBusy(true); try { await changePassword(currentPassword, nextPassword); toast('Mot de passe modifié.','success'); setSecurityOpen(false); } catch(e){toast(frAuthError(e),'error')} finally{setBusy(false)} };
+  const onChangeEmail = async () => { if(!profile)return; setBusy(true); try { await changeEmail(emailPassword, nextEmail); await updateUserFields(profile.uid, { email: nextEmail.trim() }); toast('Adresse e-mail mise à jour.','success'); setEmailOpen(false); setEmailPassword(''); setNextEmail(''); } catch(e){toast(frAuthError(e),'error')} finally{setBusy(false)} };
+  const onToggleReminder = async (v: boolean) => { await setReminderEnabled(v); setNotifSettings((s) => s ? { ...s, reminder: v } : s); };
+  const onTogglePush = async (v: boolean) => { if(!profile)return; await setPushEnabled(profile.uid, v); setNotifSettings((s) => s ? { ...s, push: v } : s); };
+  const onPrivacyOptions = async () => { await showPrivacyOptionsForm(); };
   const onExport = async () => { if(!profile)return; const data=await exportAccountData(profile.uid); const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'})); a.download=`elywalk-export-${profile.uid}.json`; a.click(); URL.revokeObjectURL(a.href); };
   const onDelete = async () => { if(!profile||!confirm('Suppression définitive : vos données et votre compte seront effacés. Continuer ?'))return; const pwd=prompt('Pour confirmer, saisissez votre mot de passe (laissez vide pour Google)')||undefined; setBusy(true); try { if(pwd) await reauthenticateAccount(pwd); await deleteAvatar(profile.uid); await deleteAccountData(profile.uid); await deleteAuthAccount(); } catch(e){toast(frAuthError(e),'error')} finally{setBusy(false)} };
   const onShare = async () => { if(!profile)return; const url=`${location.origin}/?ref=${profile.referralCode}`; const text=`Rejoins-moi sur ElyWalk avec le code ${profile.referralCode}`; if(navigator.share) await navigator.share({title:'ElyWalk',text,url}); else {await navigator.clipboard.writeText(`${text} ${url}`);toast('Lien copié !','success')} };
@@ -207,8 +223,44 @@ export default function ProfilePage() {
         </div>
       </div>
 
+      <div className="card">
+        <div className="card-title">Notifications</div>
+        {notifSettings && (
+          <>
+            <div className="list-row">
+              <div className="row-main">
+                <div className="row-title" style={{ fontSize: 14 }}>Rappel quotidien (20 h)</div>
+                <div className="row-sub">Notification locale de validation des pas</div>
+              </div>
+              <button
+                className={`btn btn-sm ${notifSettings.reminder ? 'btn-gold' : 'btn-ghost'}`}
+                onClick={() => onToggleReminder(!notifSettings.reminder)}
+                data-testid="toggle-reminder-button"
+              >
+                {notifSettings.reminder ? 'Activé' : 'Désactivé'}
+              </button>
+            </div>
+            <div className="list-row">
+              <div className="row-main">
+                <div className="row-title" style={{ fontSize: 14 }}>Notifications push</div>
+                <div className="row-sub">Demandes d’amis, retraits et actualités</div>
+              </div>
+              <button
+                className={`btn btn-sm ${notifSettings.push ? 'btn-gold' : 'btn-ghost'}`}
+                onClick={() => onTogglePush(!notifSettings.push)}
+                data-testid="toggle-push-button"
+              >
+                {notifSettings.push ? 'Activé' : 'Désactivé'}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+
       <div className="card"><div className="card-title">Compte & données</div>
-        <button className="btn btn-ghost" onClick={()=>setSecurityOpen(true)}>Changer le mot de passe</button><div className="section-gap" />
+        <button className="btn btn-ghost" onClick={()=>setSecurityOpen(true)}>Changer le mot de passe</button>
+        <button className="btn btn-ghost" onClick={()=>setEmailOpen(true)} data-testid="change-email-button">Changer l’adresse e-mail</button><div className="section-gap" />
+        <button className="btn btn-outline" onClick={onPrivacyOptions}>Confidentialité des annonces (AdMob)</button><div className="section-gap" />
         <button className="btn btn-outline" onClick={onExport}>Exporter mes données (RGPD)</button><div className="section-gap" />
         <button className="btn btn-danger" onClick={onDelete} disabled={busy}>Supprimer définitivement mon compte</button>
         <div className="legal-links"><a href="/legal/terms">CGU</a> · <a href="/legal/privacy">Confidentialité</a> · <a href="/legal/notices">Mentions légales</a> · <a href="mailto:contact@elysium-esport.fr?subject=Feedback%20ElyWalk">Donner mon avis</a> · <button className="text-button" style={{display:'inline',padding:0,width:'auto'}} onClick={()=>navigate('/whats-new')}>Nouveautés</button><br/>ElyWalk 1.1.0</div>
@@ -225,6 +277,13 @@ export default function ProfilePage() {
       </button>
 
       <Sheet open={securityOpen} onClose={()=>setSecurityOpen(false)} title="Changer le mot de passe"><div className="field"><label>Mot de passe actuel</label><input className="input" type="password" value={currentPassword} onChange={e=>setCurrentPassword(e.target.value)}/></div><div className="field"><label>Nouveau mot de passe</label><input className="input" type="password" value={nextPassword} onChange={e=>setNextPassword(e.target.value)}/></div><button className="btn btn-gold" onClick={onChangePassword} disabled={busy||nextPassword.length<6}>Enregistrer</button></Sheet>
+
+      <Sheet open={emailOpen} onClose={()=>setEmailOpen(false)} title="Changer l’adresse e-mail" testId="change-email-sheet">
+        <p className="onboarding-copy">Pour votre sécurité, confirmez votre mot de passe actuel puis saisissez la nouvelle adresse.</p>
+        <div className="field"><label>Mot de passe actuel</label><input className="input" type="password" value={emailPassword} onChange={e=>setEmailPassword(e.target.value)} data-testid="email-password-input"/></div>
+        <div className="field"><label>Nouvelle adresse e-mail</label><input className="input" type="email" value={nextEmail} onChange={e=>setNextEmail(e.target.value)} placeholder="vous@exemple.com" data-testid="new-email-input"/></div>
+        <button className="btn btn-gold" onClick={onChangeEmail} disabled={busy||emailPassword.length<1||!nextEmail.includes('@')} data-testid="save-email-button">Enregistrer</button>
+      </Sheet>
 
       <Sheet open={editOpen} onClose={() => setEditOpen(false)} title="Modifier mon profil" testId="edit-profile-sheet">
         <div className="profile-edit-photo">

@@ -42,6 +42,7 @@ a { color: var(--gold); }
 .text-button { width:100%;padding:12px;text-align:center; }
 .legal-consent,.onboarding-copy { color:var(--muted);font-size:12px;text-align:center;margin:12px 0; }
 .legal-page p { color:#d5d2c8;line-height:1.75;margin-bottom:20px;user-select:text; }.legal-page h2{font-size:15px;color:var(--gold);margin:18px 0 8px}
+.legal-page ul{padding-left:20px;margin-bottom:20px;color:#d5d2c8;line-height:1.7;user-select:text}.legal-page li{margin-bottom:6px}.legal-version{color:var(--muted);font-size:12px;text-align:center;margin-top:18px}
 .offline-banner,.verification-banner { position:fixed;z-index:180;top:0;left:0;right:0;text-align:center;padding:8px;background:#8b3e38;color:white;font-size:12px; }.verification-banner{background:#5d552e}.verification-banner button{background:none;border:0;color:white;text-decoration:underline}
 .two-col{display:grid;grid-template-columns:1fr 1fr;gap:10px}.badge-grid{display:flex;gap:8px;flex-wrap:wrap}.legal-links{text-align:center;margin-top:14px;font-size:12px}
 .step-chart{height:180px;display:flex;align-items:flex-end;gap:5px;overflow-x:auto;padding-top:20px}.chart-column{min-width:22px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:160px}.chart-column div{width:16px;background:var(--gold);border-radius:5px 5px 0 0}.chart-column span,.chart-column small{font-size:9px;color:var(--muted)}

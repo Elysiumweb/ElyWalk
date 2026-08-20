@@ -1,4 +1,4 @@
-package com.example.elywalk;
+package com.elysium.elywalk;
 
 import android.app.Notification;
 import android.app.NotificationChannel;

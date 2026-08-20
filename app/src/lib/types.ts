@@ -70,6 +70,8 @@ export interface Withdrawal {
   paypalEmail: string | null;
   status: 'pending' | 'paid' | 'rejected' | 'received';
   createdAt: number;
+  /** Consommé par le backend de confiance (push FCM). */
+  notified?: boolean;
 }
 
 export interface PartnerRequest {
@@ -91,6 +93,8 @@ export interface FriendRequest {
   toName: string;
   status: 'pending' | 'accepted' | 'rejected';
   createdAt: number;
+  /** Consommé par le backend de confiance (push FCM). */
+  notified?: boolean;
 }
 
 export interface Friendship {

@@ -1,0 +1,32 @@
+# ElyWalk — Backend de confiance (100 % gratuit, Cloudflare Workers)
+# ====================================================================
+# Remplace les Cloud Functions Firebase (qui nécessitent le plan payant Blaze).
+# Fournit :
+#   - /verify-integrity     : attestation Play Integrity (F05)
+#   - /ssv                  : callback AdMob Server-Side Verification (F05)
+#   - /fcm/send             : envoi de push FCM protégé (F11)
+#   - /cron/process-notifications : consommateur des jetons FCM (F11)
+#   - /cron/process-payouts       : traitement de la file de retraits (F06)
+#
+# Déploiement : npx wrangler deploy  (voir README.md pour les secrets)
+
+name = "elywalk-backend"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Variables non sensibles (surchargeables). Les secrets se gèrent via wrangler.
+[vars]
+PACKAGE_NAME = "com.elysium.elywalk"
+
+# Secrets à créer (voir README) :
+#   wrangler secret put GOOGLE_APPLICATION_CREDENTIALS  (JSON du compte de service)
+#   wrangler secret put API_SECRET                       (secret partagé /fcm/send)
+#   wrangler secret put SSV_KEYS                         (clés publiques AdMob SSV)
+
+# Tâches planifiées (gratuites, sans Cloud Functions)
+[triggers]
+crons = [
+  "*/5 * * * *", # file de notifications (demandes d'amis, retraits)
+  "0 * * * *",   # file de retraits
+]

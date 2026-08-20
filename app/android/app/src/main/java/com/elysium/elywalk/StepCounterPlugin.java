@@ -1,4 +1,4 @@
-package com.example.elywalk;
+package com.elysium.elywalk;
 
 import android.Manifest;
 import android.content.Intent;
