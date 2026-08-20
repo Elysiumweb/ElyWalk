@@ -380,6 +380,7 @@ export async function requestConversion(
       paypalEmail: type === 'paypal' ? paypalEmail || null : null,
       status: 'pending',
       createdAt: Date.now(),
+      notified: false,
     } satisfies Withdrawal);
     const txRef = doc(collection(db, 'users', profile.uid, 'transactions'));
     tx.set(txRef, {
@@ -495,6 +496,7 @@ export async function sendFriendRequest(me: UserProfile, target: UserProfile): P
     toName: target.displayName,
     status: 'pending',
     createdAt: Date.now(),
+    notified: false,
   } satisfies FriendRequest);
 }
 

@@ -24,7 +24,7 @@ import ProductStatus from './components/ProductStatus';
 import { setupNotifications } from './lib/notifications';
 
 function Shell() {
-  const { user, loading, setPendingReferralCode } = useAuth();
+  const { user, profile, loading, setPendingReferralCode } = useAuth();
   const location = useLocation();
 
   useEffect(() => {
@@ -44,9 +44,18 @@ function Shell() {
   useEffect(() => { if (user) setupNotifications(user.uid).catch(console.warn); }, [user?.uid]);
   useEffect(() => { const open=(raw:string)=>{const url=new URL(raw);const ref=url.searchParams.get('ref')||(url.protocol==='elywalk:'?url.searchParams.get('code'):null);if(ref)setPendingReferralCode(ref.toUpperCase())}; CapApp.getLaunchUrl().then(r=>r?.url&&open(r.url));const sub=CapApp.addListener('appUrlOpen',e=>open(e.url));return()=>{sub.then(h=>h.remove())}; }, [setPendingReferralCode]);
 
-  // Annonce à l'ouverture + au retour sur l'application (App Open Ad).
+  // Consentement RGPD (UMP) dès le lancement, AVANT toute publicité.
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
+    initAds().catch(console.warn);
+  }, []);
+
+  // Annonce à l'ouverture + au retour sur l'application (App Open Ad).
+  // Garde-fous : exemptée tant que l'onboarding n'est pas terminé, plafonnée
+  // quotidiennement et espacée d'un cooldown (voir ads.ts).
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    if (!profile?.onboardingDone) return;
     let firstLoad = true;
     (async () => {
       await initAds();
@@ -67,7 +76,7 @@ function Shell() {
     return () => {
       sub.then((h) => h.remove());
     };
-  }, []);
+  }, [profile?.onboardingDone]);
 
   if (loading) {
     return (

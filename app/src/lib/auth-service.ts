@@ -3,7 +3,7 @@ import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
 import {
   createUserWithEmailAndPassword, signInWithEmailAndPassword, signInWithPopup,
   signInWithCredential, GoogleAuthProvider, updateProfile, signOut,
-  sendPasswordResetEmail, sendEmailVerification, updatePassword, deleteUser,
+  sendPasswordResetEmail, sendEmailVerification, updatePassword, updateEmail, deleteUser,
   EmailAuthProvider, reauthenticateWithCredential, type UserCredential,
 } from 'firebase/auth';
 import { auth } from './firebase';
@@ -31,6 +31,18 @@ export async function changePassword(currentPassword: string, nextPassword: stri
   if (!user?.email) throw new Error('Cette action est disponible pour les comptes e-mail.');
   await reauthenticateWithCredential(user, EmailAuthProvider.credential(user.email, currentPassword));
   await updatePassword(user, nextPassword);
+}
+
+export async function changeEmail(currentPassword: string, nextEmail: string): Promise<void> {
+  const user = auth.currentUser;
+  if (!user?.email) throw new Error('Cette action est disponible pour les comptes e-mail.');
+  const isPasswordProvider = user.providerData.some((p) => p.providerId === 'password');
+  if (!isPasswordProvider) throw new Error('Le changement d’e-mail n’est pas disponible pour les comptes Google.');
+  const email = nextEmail.trim();
+  if (!/^\S+@\S+\.\S+$/.test(email)) throw new Error('Adresse e-mail invalide.');
+  await reauthenticateWithCredential(user, EmailAuthProvider.credential(user.email, currentPassword));
+  await updateEmail(user, email);
+  await sendEmailVerification(user);
 }
 export async function reauthenticateAccount(currentPassword: string): Promise<void> {
   const user = auth.currentUser;

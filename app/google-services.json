@@ -9,7 +9,7 @@
       "client_info": {
         "mobilesdk_app_id": "1:260136634782:android:791d77945d9cd98b306e8f",
         "android_client_info": {
-          "package_name": "com.example.elywalk"
+          "package_name": "com.elysium.elywalk"
         }
       },
       "oauth_client": [
@@ -17,7 +17,7 @@
           "client_id": "260136634782-qbbhal9kpf75h1pck18r4pdrbuuce5ca.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
-            "package_name": "com.example.elywalk",
+            "package_name": "com.elysium.elywalk",
             "certificate_hash": "c4279ab9312a394405ed5f9d2934e99c2c068791"
           }
         },
