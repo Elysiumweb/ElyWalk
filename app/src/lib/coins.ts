@@ -1,4 +1,5 @@
 import { STEP_TIERS, COINS_PER_EURO } from './constants';
+import type { HealthProfile } from './types';
 
 /** ElyCoins gagnés pour un nombre de pas quotidien donné. */
 export function coinsForSteps(steps: number): number {
@@ -7,9 +8,35 @@ export function coinsForSteps(steps: number): number {
   return tier ? tier.coins : 1;
 }
 
-/** Estimation des calories brûlées (~0,04 kcal / pas). */
-export function caloriesForSteps(steps: number): number {
-  return Math.round(steps * 0.04);
+/**
+ * Estimation des calories. Sans données santé, on conserve l'estimation
+ * historique de 0,04 kcal/pas. Avec un poids et une taille, la distance et
+ * le coût énergétique deviennent personnalisés (et restent une estimation).
+ */
+export function caloriesForSteps(steps: number, health?: HealthProfile, strideLengthCm = 75): number {
+  const safeSteps = Math.max(0, Math.floor(steps));
+  if (!health?.weightKg || !health.heightCm) return Math.round(safeSteps * 0.04);
+  const stride = Math.max(30, Math.min(150, strideLengthCm));
+  const distanceKm = safeSteps * stride / 100000;
+  // Marche à allure modérée : ~0,67 kcal/kg/km.
+  return Math.round(distanceKm * health.weightKg * 0.67);
+}
+
+export function nextStepTier(steps: number): { remaining: number; target: number; coins: number } | null {
+  const safe = Math.max(0, Math.floor(steps));
+  const next = STEP_TIERS.find((tier) => safe < tier.min);
+  return next ? { remaining: next.min - safe, target: next.min, coins: next.coins } : null;
+}
+
+export function formatDistance(meters: number, unit: 'metric' | 'imperial' = 'metric'): string {
+  const value = unit === 'imperial' ? meters / 1609.344 : meters / 1000;
+  return `${value.toLocaleString('fr-FR', { maximumFractionDigits: 2 })} ${unit === 'imperial' ? 'mi' : 'km'}`;
+}
+
+export function formatHeight(cm: number, unit: 'metric' | 'imperial' = 'metric'): string {
+  if (unit === 'metric') return `${Math.round(cm)} cm`;
+  const inches = Math.round(cm / 2.54);
+  return `${Math.floor(inches / 12)}’${inches % 12}”`;
 }
 
 /** Conversion ElyCoins -> euros. */

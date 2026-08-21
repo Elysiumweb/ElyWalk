@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
@@ -7,11 +7,20 @@ import Sheet from '../components/Sheet';
 import { pedometer } from '../lib/pedometer';
 import { showInterstitial, showRewardedAd } from '../lib/ads';
 import { validateSteps, creditAdReward, syncTodaySteps } from '../lib/db';
-import { coinsForSteps, caloriesForSteps, fmtCoins, fmtNumber, dateStr } from '../lib/coins';
+import { coinsForSteps, caloriesForSteps, fmtCoins, fmtNumber, dateStr, nextStepTier, formatDistance } from '../lib/coins';
+import { shareDailyStats } from '../lib/share';
 import { DAILY_STEP_GOAL, STEP_TIERS, AD_REWARD_COINS, ATTESTATION_WORKER_URL } from '../lib/constants';
 import { Capacitor } from '@capacitor/core';
 
 type PermState = 'granted' | 'denied' | 'prompt' | 'unavailable';
+
+function timestampMs(value: unknown): number | null {
+  if (!value) return null;
+  if (typeof value === 'object' && value !== null && 'toMillis' in value && typeof (value as { toMillis?: unknown }).toMillis === 'function') return (value as { toMillis: () => number }).toMillis();
+  if (typeof value === 'object' && value !== null && 'seconds' in value) return Number((value as { seconds: number }).seconds) * 1000;
+  const number = typeof value === 'number' ? value : Date.parse(String(value));
+  return Number.isFinite(number) ? number : null;
+}
 
 export default function HomePage() {
   const { profile } = useAuth();
@@ -22,10 +31,43 @@ export default function HomePage() {
   const [showTiers, setShowTiers] = useState(false);
   const [busyValidate, setBusyValidate] = useState(false);
   const [busyAd, setBusyAd] = useState(false);
+  const [celebration, setCelebration] = useState<string | null>(null);
+  const [clock, setClock] = useState(Date.now());
+  const previousSteps = useRef<number | null>(null);
+  const celebratedToday = useRef(false);
 
   const isNative = Capacitor.isNativePlatform();
   const today = dateStr();
   const alreadyValidated = profile?.lastValidatedDate === today;
+  const dailyGoal = profile?.dailyStepGoal || DAILY_STEP_GOAL;
+  const lastAdAt = timestampMs(profile?.lastAdRewardAt);
+  const adRemaining = lastAdAt ? Math.max(0, lastAdAt + 3600000 - clock) : 0;
+  const adAvailable = adRemaining === 0;
+  const adCountdown = `${String(Math.floor(adRemaining / 60000)).padStart(2, '0')}:${String(Math.floor(adRemaining / 1000) % 60).padStart(2, '0')}`;
+
+  const celebrate = (message: string) => {
+    setCelebration(message);
+    if ('vibrate' in navigator) navigator.vibrate?.([40, 50, 80]);
+    window.setTimeout(() => setCelebration(null), 4200);
+  };
+
+  useEffect(() => {
+    const id = window.setInterval(() => setClock(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    const celebrationKey = `elywalk.goalCelebrated.${today}`;
+    const crossed = previousSteps.current !== null && previousSteps.current < dailyGoal && steps >= dailyGoal;
+    const recoveredWhileClosed = steps >= dailyGoal && localStorage.getItem(celebrationKey) !== '1';
+    if ((crossed || recoveredWhileClosed) && !celebratedToday.current) {
+      celebratedToday.current = true;
+      localStorage.setItem(celebrationKey, '1');
+      celebrate('Objectif quotidien atteint !');
+    }
+    previousSteps.current = steps;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [steps, dailyGoal]);
 
   useEffect(() => {
     let unsub: (() => void) | undefined;
@@ -77,7 +119,8 @@ export default function HomePage() {
       // Annonce interstitielle avant le crédit.
       await showInterstitial();
       const result = await validateSteps(profile.uid, stepsToValidate);
-      toast(`+${fmtCoins(result.coins)} ElyCoins · Série de ${result.streak} jour${result.streak > 1 ? 's' : ''} !`, 'success');
+      toast(`+${fmtCoins(result.coins)} ElyCoins · Série de ${result.streak} jour${result.streak > 1 ? 's' : ''} !${result.freezeUsed ? ' Gel utilisé pour rattraper la journée manquée.' : ''}`, 'success');
+      if (result.streak === 7 || result.streak === 30) celebrate(`Palier de série atteint : ${result.streak} jours !`);
     } catch (e) {
       toast((e as Error).message, 'error');
     } finally {
@@ -86,7 +129,7 @@ export default function HomePage() {
   };
 
   const onWatchAd = async () => {
-    if (!profile || busyAd) return;
+    if (!profile || busyAd || !adAvailable) return;
     setBusyAd(true);
     try {
       if (!isNative) {
@@ -115,11 +158,13 @@ export default function HomePage() {
   };
 
   const potentialCoins = coinsForSteps(steps);
-  const calories = caloriesForSteps(steps);
-  const dailyGoal = profile?.dailyStepGoal || DAILY_STEP_GOAL;
-
+  const calories = caloriesForSteps(steps, profile?.health, profile?.strideLengthCm || 75);
+  const unitSystem = profile?.unitSystem || profile?.health?.unitSystem || 'metric';
+  const distanceMeters = steps * (profile?.strideLengthCm || 75) / 100;
+  const nextTier = nextStepTier(steps);
   return (
     <div className="screen" data-testid="home-screen">
+      {celebration && <div className="celebration-overlay" role="status" aria-live="polite"><div className="celebration-card pop-in"><div className="celebration-confetti">✦ ✧ ✦</div><strong>{celebration}</strong><span>Continuez comme ça, marcheur ElyWalk !</span><div className="celebration-actions"><button className="btn btn-gold" onClick={() => setCelebration(null)}>Super !</button><button className="btn btn-ghost" onClick={async () => { if (profile) await shareDailyStats(profile, steps, formatDistance(distanceMeters, unitSystem), calories); }}>Partager</button></div></div></div>}
       <div className="screen-header">
         <div>
           <h1 className="screen-title">ElyWalk</h1>
@@ -142,6 +187,7 @@ export default function HomePage() {
           <div style={{ color: 'var(--gold)', fontSize: 13, marginTop: 6, fontFamily: 'var(--font-display)' }}>
             ≈ {potentialCoins} EC
           </div>
+          <div className="next-tier-note">{nextTier ? `Encore ${fmtNumber(nextTier.remaining)} pas pour le palier ${fmtNumber(nextTier.target)} · ${nextTier.coins} EC` : 'Palier ElyCoins maximum atteint'}</div>
         </ProgressRing>
 
         <div className="stat-grid" style={{ marginTop: 16 }}>
@@ -157,8 +203,8 @@ export default function HomePage() {
           </div>
           <div className="stat">
             <div className="stat-icon"><StepsIcon /></div>
-            <div className="stat-value" data-testid="stat-total-steps">{(steps * (profile?.strideLengthCm || 75) / 100000).toFixed(2)}</div>
-            <div className="stat-label">km aujourd’hui</div>
+            <div className="stat-value" data-testid="stat-total-steps">{formatDistance(distanceMeters, unitSystem)}</div>
+            <div className="stat-label">distance aujourd’hui</div>
           </div>
         </div>
       </div>
@@ -196,14 +242,19 @@ export default function HomePage() {
           {alreadyValidated ? 'Pas validés aujourd’hui ✓' : busyValidate ? 'Validation...' : `Valider mes pas (+${potentialCoins} EC)`}
         </button>
         <div className="secondary-actions">
-          <button type="button" className="text-button" onClick={onWatchAd} disabled={busyAd} data-testid="watch-ad-button">
-            {busyAd ? 'Chargement...' : `Voir une pub · +${fmtCoins(AD_REWARD_COINS)} EC`}
+          <button type="button" className="text-button" onClick={onWatchAd} disabled={busyAd || !adAvailable} data-testid="watch-ad-button">
+            {busyAd ? 'Chargement...' : adAvailable ? `Voir une pub · +${fmtCoins(AD_REWARD_COINS)} EC` : `Prochaine pub dans ${adCountdown}`}
           </button>
           <button type="button" className="text-button" onClick={() => setShowTiers(true)} data-testid="show-tiers-button">Barème des gains</button>
         </div>
       </section>
-      <button type="button" className="btn btn-ghost" onClick={() => navigate('/history')}>Historique, objectifs & badges</button>
-      <div className="card" style={{marginTop:12}}><div className="card-title">Défis</div><div className="badge-grid"><span className="badge">{(profile?.streak||0)>=7?'🏅':'🔒'} Série 7 jours</span><span className="badge">{(profile?.streak||0)>=30?'🏆':'🔒'} Série 30 jours</span><span className="badge">{(profile?.totalSteps||0)>=100000?'🥾':'🔒'} 100 000 pas</span></div></div>
+      <div className="home-actions">
+        <button type="button" className="btn btn-ghost" onClick={() => navigate('/history')}>Historique, santé & calendrier</button>
+        <button type="button" className="btn btn-outline" onClick={() => navigate('/challenges')}>🏆 Ouvrir les défis datés</button>
+        <button type="button" className="btn btn-outline" onClick={() => navigate('/activity')}>▶ Commencer une sortie</button>
+        <button type="button" className="btn btn-outline" onClick={async () => { if (!profile) return; try { const result = await shareDailyStats(profile, steps, formatDistance(distanceMeters, unitSystem), calories); toast(result === 'shared' ? 'Carte partagée !' : 'Carte enregistrée dans vos téléchargements.', 'success'); } catch (e) { if ((e as Error).name !== 'AbortError') toast((e as Error).message, 'error'); } }}>Partager mes pas du jour</button>
+      </div>
+      <div className="card streak-freeze-card"><div className="card-title">Série protégée</div><div className="freeze-count">🧊 {profile?.streakFreezes ?? 1} gel disponible</div><p>Une journée manquée peut être rattrapée automatiquement le lendemain. Votre série ne repart plus forcément à 1.</p></div>
 
       <Sheet open={showTiers} onClose={() => setShowTiers(false)} title="Barème quotidien" testId="tiers-sheet">
         {STEP_TIERS.map((t) => (

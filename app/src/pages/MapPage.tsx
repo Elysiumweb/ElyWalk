@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Capacitor } from '@capacitor/core';
@@ -11,6 +12,7 @@ const DEFAULT_ZOOM = 6;
 
 export default function MapPage() {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const mapRef = useRef<L.Map | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const markersRef = useRef<L.Marker[]>([]);
@@ -127,8 +129,9 @@ export default function MapPage() {
       <div className="map-header">
         <div>
           <h1 className="screen-title">Carte</h1>
-          <div className="screen-sub">Découvrez les partenaires Elysium autour de vous</div>
+          <div className="screen-sub">Partenaires autour de vous · vos sorties GPS dans Sortie</div>
         </div>
+        <button className="btn btn-gold btn-sm" onClick={() => navigate('/activity')}>▶ Sortie</button>
       </div>
 
       <div className="map-search"><input className="input" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Rechercher un partenaire…"/><div className="nearby-list">{nearby.slice(0,5).map(e=><button key={e.id} onClick={()=>{setSelected(e);mapRef.current?.setView([e.lat,e.lng],16)}}><b>{e.name}</b><span>{distance(e)!==null?`${distance(e)!.toFixed(1)} km`:e.address}</span></button>)}</div></div>

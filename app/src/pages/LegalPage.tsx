@@ -98,8 +98,8 @@ const content: Record<string, LegalDoc> = {
         <h2>2. Données collectées</h2>
         <ul>
           <li><strong>Identité de compte</strong> : adresse e-mail, pseudo, photo de profil, identifiant Firebase.</li>
-          <li><strong>Activité physique</strong> : nombre de pas, distance, calories estimées, objectifs, historique de validation (données susceptibles de révéler votre état de santé).</li>
-          <li><strong>Localisation</strong> : uniquement lorsque vous utilisez la carte interactive, et seulement avec votre autorisation.</li>
+          <li><strong>Activité physique</strong> : nombre de pas, distance, calories estimées, objectifs, historique de validation, poids, taille et âge (données susceptibles de révéler votre état de santé).</li>
+          <li><strong>Localisation</strong> : uniquement lorsque vous utilisez la carte interactive ou démarrez une sortie GPS, avec votre autorisation. Les points de parcours sont privés et supprimables.</li>
           <li><strong>Identifiants techniques anti-fraude</strong> : adresse IP, identifiant d’appareil, identifiant publicitaire (soumis à consentement).</li>
           <li><strong>Relations sociales</strong> : demandes d’amis, réactions, profil public.</li>
           <li><strong>Opérations</strong> : transactions ElyCoins, demandes de retrait, adresse PayPal le cas échéant.</li>

@@ -68,6 +68,7 @@ public class StepCounterPlugin extends Plugin {
     @PluginMethod
     public void resetToday(PluginCall call) {
         StepStore.resetToday(getContext());
+        ElyWalkWidget.updateAll(getContext());
         JSObject ret = new JSObject();
         ret.put("todaySteps", 0);
         notifyListeners("steps", ret);
