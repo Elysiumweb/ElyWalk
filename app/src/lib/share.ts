@@ -101,8 +101,10 @@ const TILE = 256;
 const TILE_SERVERS = ['a', 'b', 'c', 'd'];
 
 function cartoUrl(z: number, x: number, y: number): string {
+  // Voyager : style de rue coloré (équivalent CORS des tuiles OpenStreetMap
+  // classiques affichées dans l'app), compatible canvas.
   const s = TILE_SERVERS[Math.abs(x + y) % TILE_SERVERS.length];
-  return `https://${s}.basemaps.cartocdn.com/dark_all/${z}/${x}/${y}.png`;
+  return `https://${s}.basemaps.cartocdn.com/rastertiles/voyager/${z}/${x}/${y}.png`;
 }
 function esriUrl(z: number, x: number, y: number): string {
   // ESRI utilise l'ordre z/y/x et sert bien les en-têtes CORS.
