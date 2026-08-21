@@ -6,7 +6,7 @@ import { fmtNumber, formatDistance } from './coins';
 
 export type ShareResult = 'shared' | 'downloaded';
 
-/** Blob PNG → base64 brut (sans le préfixe data:). */
+/** Blob JPEG → base64 brut (sans le préfixe data:). */
 function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -28,18 +28,6 @@ function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
   });
 }
 
-/**
- * Partage (ou télécharge) une image PNG générée par l’application.
- *
- * - Sur mobile natif : on écrit le fichier dans le cache puis on ouvre la
- *   feuille de partage système (le téléchargement d’un blob via <a download>
- *   ne fonctionne pas dans la WebView).
- * - Sur le web : feuille de partage du navigateur si disponible, sinon
- *   téléchargement classique.
- *
- * Ne lève jamais d’erreur non attrapée : en cas d’échec du partage natif,
- * on retombe sur le téléchargement, puis sur un message d’erreur lisible.
- */
 async function shareCanvas(canvas: HTMLCanvasElement, filename: string, title: string, text: string): Promise<ShareResult> {
   const blob = await canvasToBlob(canvas);
 
@@ -78,6 +66,8 @@ async function shareCanvas(canvas: HTMLCanvasElement, filename: string, title: s
   return 'downloaded';
 }
 
+// ============ Carte des pas du jour ============
+
 function dailyCanvas(profile: UserProfile, steps: number, distance: string, calories: number): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
   canvas.width = 1080; canvas.height = 1350;
@@ -105,56 +95,142 @@ export async function shareDailyStats(profile: UserProfile, steps: number, dista
   return shareCanvas(dailyCanvas(profile, steps, distance, calories), 'elywalk-pas-du-jour.jpg', 'Mes pas du jour avec ElyWalk', `J'ai marché ${fmtNumber(steps)} pas aujourd'hui !`);
 }
 
-/** Estime le nombre de pas d'une sortie quand le podomètre n'était pas dispo. */
+// ============ Carte d'une sortie (trajet sur vraie carte) ============
+
+const TILE = 256;
+const TILE_SERVERS = ['a', 'b', 'c', 'd'];
+
+function cartoUrl(z: number, x: number, y: number): string {
+  const s = TILE_SERVERS[Math.abs(x + y) % TILE_SERVERS.length];
+  return `https://${s}.basemaps.cartocdn.com/dark_all/${z}/${x}/${y}.png`;
+}
+function esriUrl(z: number, x: number, y: number): string {
+  // ESRI utilise l'ordre z/y/x et sert bien les en-têtes CORS.
+  return `https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/${z}/${y}/${x}.png`;
+}
+
+/** Projection Web Mercator : (lat,lng) -> coordonnées de tuile fractionnaire. */
+function latLngToTileXY(lat: number, lng: number, zoom: number): [number, number] {
+  const n = Math.pow(2, zoom);
+  const tx = ((lng + 180) / 360) * n;
+  const latRad = (lat * Math.PI) / 180;
+  const ty = ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * n;
+  return [tx, ty];
+}
+
+/** Charge une tuile en CORS (canvas non pollué). Renvoie null si échec. */
+function loadTile(url: string, timeoutMs = 6000): Promise<HTMLImageElement | null> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    let done = false;
+    const finish = (val: HTMLImageElement | null) => { if (!done) { done = true; clearTimeout(timer); resolve(val); } };
+    const timer = setTimeout(() => finish(null), timeoutMs);
+    img.onload = () => finish(img);
+    img.onerror = () => finish(null);
+    img.src = url;
+  });
+}
+
+/** Sous-échantillonne les points pour rester rapide sur les longues sorties. */
+function downsample<T>(arr: T[], max = 700): T[] {
+  if (arr.length <= max) return arr;
+  const step = Math.ceil(arr.length / max);
+  const out: T[] = [];
+  for (let i = 0; i < arr.length; i += step) out.push(arr[i]);
+  if (out[out.length - 1] !== arr[arr.length - 1]) out.push(arr[arr.length - 1]);
+  return out;
+}
+
+/**
+ * Dessine le trajet sur une vraie carte (tuiles de rue). Projection Web
+ * Mercator pour un alignement correct sur les tuiles. Si les tuiles
+ * échouent (hors-ligne / réseau), le trajet reste dessiné sur fond sombre.
+ */
+async function drawMapRoute(ctx: CanvasRenderingContext2D, rawPoints: { lat: number; lng: number }[], x: number, y: number, w: number, h: number): Promise<void> {
+  ctx.save();
+  ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
+  ctx.fillStyle = '#0e0e10'; ctx.fillRect(x, y, w, h);
+
+  if (!rawPoints || rawPoints.length < 2) {
+    ctx.fillStyle = '#5a5847'; ctx.font = '34px Arial'; ctx.textAlign = 'center';
+    ctx.fillText('Parcours non disponible', x + w / 2, y + h / 2);
+    ctx.textAlign = 'left'; ctx.restore(); return;
+  }
+
+  const points = downsample(rawPoints);
+
+  // Choix du zoom : le plus élevé qui contienne le trajet avec une marge.
+  const pad = 52;
+  let zoom = 19;
+  for (let z = 19; z >= 3; z--) {
+    let minTx = Infinity, maxTx = -Infinity, minTy = Infinity, maxTy = -Infinity;
+    for (const p of points) { const [tx, ty] = latLngToTileXY(p.lat, p.lng, z); minTx = Math.min(minTx, tx); maxTx = Math.max(maxTx, tx); minTy = Math.min(minTy, ty); maxTy = Math.max(maxTy, ty); }
+    if ((maxTx - minTx) * TILE <= w - 2 * pad && (maxTy - minTy) * TILE <= h - 2 * pad) { zoom = z; break; }
+  }
+
+  let minTx = Infinity, maxTx = -Infinity, minTy = Infinity, maxTy = -Infinity;
+  for (const p of points) { const [tx, ty] = latLngToTileXY(p.lat, p.lng, zoom); minTx = Math.min(minTx, tx); maxTx = Math.max(maxTx, tx); minTy = Math.min(minTy, ty); maxTy = Math.max(maxTy, ty); }
+  const mapLeftPx = ((minTx + maxTx) / 2) * TILE - w / 2;
+  const mapTopPx = ((minTy + maxTy) / 2) * TILE - h / 2;
+
+  // Tuiles couvrant la zone (limitées à ~20 pour rester réactif).
+  const tx0 = Math.floor(mapLeftPx / TILE), tx1 = Math.min(tx0 + 6, Math.floor((mapLeftPx + w - 1) / TILE));
+  const ty0 = Math.floor(mapTopPx / TILE), ty1 = Math.min(ty0 + 5, Math.floor((mapTopPx + h - 1) / TILE));
+  const tiles: Array<{ tx: number; ty: number }> = [];
+  for (let tx = tx0; tx <= tx1; tx++) for (let ty = ty0; ty <= ty1; ty++) tiles.push({ tx, ty });
+
+  // Primaire : CartoDB (sombre, assorti à la marque). Repli : ESRI.
+  let imgs = await Promise.all(tiles.map((t) => loadTile(cartoUrl(zoom, t.tx, t.ty))));
+  if (!imgs.some((i) => i)) imgs = await Promise.all(tiles.map((t) => loadTile(esriUrl(zoom, t.tx, t.ty))));
+  for (let i = 0; i < tiles.length; i++) {
+    const img = imgs[i];
+    if (img) ctx.drawImage(img, x + tiles[i].tx * TILE - mapLeftPx, y + tiles[i].ty * TILE - mapTopPx);
+  }
+
+  // Projection d'un point trajet -> pixel canvas.
+  const project = (p: { lat: number; lng: number }): [number, number] => {
+    const [tx, ty] = latLngToTileXY(p.lat, p.lng, zoom);
+    return [x + tx * TILE - mapLeftPx, y + ty * TILE - mapTopPx];
+  };
+
+  // Contour sombre puis ligne or (lisible sur fond clair ou sombre).
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  const trace = (color: string, width: number) => {
+    ctx.strokeStyle = color; ctx.lineWidth = width; ctx.beginPath();
+    points.forEach((p, i) => { const [px, py] = project(p); if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py); });
+    ctx.stroke();
+  };
+  trace('rgba(0,0,0,0.55)', 14);
+  trace('#D8CA82', 8);
+
+  // Départ (vert) et arrivée (or).
+  const [sx, sy] = project(points[0]);
+  const [ex, ey] = project(points[points.length - 1]);
+  const marker = (px: number, py: number, fill: string) => {
+    ctx.beginPath(); ctx.arc(px, py, 13, 0, Math.PI * 2); ctx.fillStyle = fill; ctx.fill();
+    ctx.lineWidth = 3; ctx.strokeStyle = '#111'; ctx.stroke();
+  };
+  marker(sx, sy, '#5bd46f');
+  marker(ex, ey, '#D8CA82');
+
+  // Attribution (exigée par les tuiles OSM/CARTO).
+  ctx.fillStyle = 'rgba(255,255,255,0.65)'; ctx.font = '20px Arial'; ctx.textAlign = 'left';
+  ctx.fillText('© OpenStreetMap · © CARTO', x + 10, y + h - 12);
+  ctx.textAlign = 'left';
+  ctx.restore();
+}
+
 function estimateSteps(session: ActivitySession, strideCm = 75): number {
   if (typeof session.steps === 'number' && session.steps > 0) return session.steps;
   return Math.round((session.distanceM || 0) / (strideCm / 100));
 }
-
 function speedKmh(distanceM: number, durationSec: number): number {
   if (durationSec <= 0) return 0;
   return distanceM / 1000 / (durationSec / 3600);
 }
 
-function drawRoute(ctx: CanvasRenderingContext2D, session: ActivitySession, x: number, y: number, w: number, h: number) {
-  ctx.fillStyle = '#1c1b16'; ctx.fillRect(x, y, w, h);
-  ctx.strokeStyle = '#3a382a'; ctx.lineWidth = 2; ctx.strokeRect(x, y, w, h);
-  const pts = session.points || [];
-  if (pts.length < 2) {
-    ctx.fillStyle = '#5a5847'; ctx.font = '34px Arial'; ctx.textAlign = 'center';
-    ctx.fillText('Parcours non disponible', x + w / 2, y + h / 2);
-    ctx.textAlign = 'left';
-    return;
-  }
-  let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity;
-  for (const p of pts) {
-    minLat = Math.min(minLat, p.lat); maxLat = Math.max(maxLat, p.lat);
-    minLng = Math.min(minLng, p.lng); maxLng = Math.max(maxLng, p.lng);
-  }
-  const pad = 60;
-  const spanLat = Math.max(maxLat - minLat, 1e-6);
-  const spanLng = Math.max(maxLng - minLng, 1e-6);
-  const project = (p: { lat: number; lng: number }) => {
-    const nx = (p.lng - minLng) / spanLng;
-    const ny = (p.lat - minLat) / spanLat;
-    const px = x + pad + nx * (w - pad * 2);
-    const py = y + h - pad - ny * (h - pad * 2);
-    return [px, py] as const;
-  };
-  ctx.strokeStyle = '#D8CA82'; ctx.lineWidth = 9; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-  ctx.beginPath();
-  pts.forEach((p, i) => {
-    const [px, py] = project(p);
-    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-  });
-  ctx.stroke();
-  const [sx, sy] = project(pts[0]);
-  const [ex, ey] = project(pts[pts.length - 1]);
-  ctx.fillStyle = '#5bd46f'; ctx.beginPath(); ctx.arc(sx, sy, 16, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = '#D8CA82'; ctx.beginPath(); ctx.arc(ex, ey, 16, 0, Math.PI * 2); ctx.fill();
-}
-
-function activityCanvas(session: ActivitySession, profile: UserProfile, strideCm = 75): HTMLCanvasElement {
+async function buildActivityCanvas(session: ActivitySession, profile: UserProfile, strideCm = 75): Promise<HTMLCanvasElement> {
   const canvas = document.createElement('canvas');
   canvas.width = 1080; canvas.height = 1350;
   const ctx = canvas.getContext('2d')!;
@@ -169,7 +245,8 @@ function activityCanvas(session: ActivitySession, profile: UserProfile, strideCm
   const date = new Date(session.startedAt).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
   ctx.fillText(`${label} · ${date}`, 84, 248);
 
-  drawRoute(ctx, session, 70, 300, 940, 470);
+  // Carte réelle avec le trajet
+  await drawMapRoute(ctx, session.points || [], 70, 300, 940, 470);
 
   const steps = estimateSteps(session, strideCm);
   const speed = speedKmh(session.distanceM || 0, session.durationSec || 0);
@@ -194,9 +271,10 @@ function activityCanvas(session: ActivitySession, profile: UserProfile, strideCm
   return canvas;
 }
 
-/** Génère une carte JPEG d'une sortie (trajet + stats) puis ouvre le partage natif. */
+/** Génère une carte JPEG d'une sortie (trajet sur vraie carte + stats) puis ouvre le partage natif. */
 export async function shareActivity(session: ActivitySession, profile: UserProfile, strideCm = 75): Promise<ShareResult> {
+  const canvas = await buildActivityCanvas(session, profile, strideCm);
   const filename = `elywalk-sortie-${session.id || session.startedAt}.jpg`;
   const km = ((session.distanceM || 0) / 1000).toFixed(2);
-  return shareCanvas(activityCanvas(session, profile, strideCm), filename, 'Ma sortie ElyWalk', `J'ai parcouru ${km} km avec ElyWalk !`);
+  return shareCanvas(canvas, filename, 'Ma sortie ElyWalk', `J'ai parcouru ${km} km avec ElyWalk !`);
 }
