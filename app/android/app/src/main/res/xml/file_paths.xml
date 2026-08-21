@@ -1,5 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Configuration FileProvider : couvre tous les emplacements où un fichier
+  partageable (image des pas, image d'une sortie) peut être écrit, afin que
+  la feuille de partage système trouve toujours la racine configurée.
+-->
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
-    <external-path name="my_images" path="." />
-    <cache-path name="my_cache_images" path="." />
+    <cache-path name="cache" path="." />
+    <files-path name="files" path="." />
+    <external-path name="external" path="." />
+    <external-files-path name="external_files" path="." />
+    <external-cache-path name="external_cache" path="." />
+    <root-path name="root" path="." />
 </paths>

@@ -164,7 +164,7 @@ export default function HomePage() {
   const nextTier = nextStepTier(steps);
   return (
     <div className="screen" data-testid="home-screen">
-      {celebration && <div className="celebration-overlay" role="status" aria-live="polite"><div className="celebration-card pop-in"><div className="celebration-confetti">✦ ✧ ✦</div><strong>{celebration}</strong><span>Continuez comme ça, marcheur ElyWalk !</span><div className="celebration-actions"><button className="btn btn-gold" onClick={() => setCelebration(null)}>Super !</button><button className="btn btn-ghost" onClick={async () => { if (profile) await shareDailyStats(profile, steps, formatDistance(distanceMeters, unitSystem), calories); }}>Partager</button></div></div></div>}
+      {celebration && <div className="celebration-overlay" role="status" aria-live="polite"><div className="celebration-card pop-in"><div className="celebration-confetti">✦ ✧ ✦</div><strong>{celebration}</strong><span>Continuez comme ça, marcheur ElyWalk !</span><div className="celebration-actions"><button className="btn btn-gold" onClick={() => setCelebration(null)}>Super !</button><button className="btn btn-ghost" onClick={async () => { if (!profile) return; try { await shareDailyStats(profile, steps, formatDistance(distanceMeters, unitSystem), calories); } catch (e) { if ((e as Error).name !== 'AbortError') toast((e as Error).message, 'error'); } }}>Partager</button></div></div></div>}
       <div className="screen-header">
         <div>
           <h1 className="screen-title">ElyWalk</h1>
