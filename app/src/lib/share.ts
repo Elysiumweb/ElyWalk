@@ -20,8 +20,11 @@ function blobToBase64(blob: Blob): Promise<string> {
 }
 
 function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
+  // JPEG : un fond dégradé produit un PNG énorme (plusieurs Mo) qui sature
+  // la mémoire au passage du pont Capacitor et fait planter l'app au partage.
+  // En JPEG, la même carte fait ~100 Ko -> partage instantané et stable.
   return new Promise((resolve, reject) => {
-    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Génération de l’image impossible.'))), 'image/png');
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Génération de l’image impossible.'))), 'image/jpeg', 0.9);
   });
 }
 
@@ -55,7 +58,7 @@ async function shareCanvas(canvas: HTMLCanvasElement, filename: string, title: s
     }
   }
 
-  const file = new File([blob], filename, { type: 'image/png' });
+  const file = new File([blob], filename, { type: 'image/jpeg' });
   if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] }))) {
     try {
       await navigator.share({ title, text, files: [file] });
@@ -97,9 +100,9 @@ function dailyCanvas(profile: UserProfile, steps: number, distance: string, calo
   return canvas;
 }
 
-/** Génère une vraie carte PNG partageable puis ouvre le partage natif. */
+/** Génère une vraie carte JPEG partageable puis ouvre le partage natif. */
 export async function shareDailyStats(profile: UserProfile, steps: number, distance: string, calories: number): Promise<ShareResult> {
-  return shareCanvas(dailyCanvas(profile, steps, distance, calories), 'elywalk-pas-du-jour.png', 'Mes pas du jour avec ElyWalk', `J'ai marché ${fmtNumber(steps)} pas aujourd'hui !`);
+  return shareCanvas(dailyCanvas(profile, steps, distance, calories), 'elywalk-pas-du-jour.jpg', 'Mes pas du jour avec ElyWalk', `J'ai marché ${fmtNumber(steps)} pas aujourd'hui !`);
 }
 
 /** Estime le nombre de pas d'une sortie quand le podomètre n'était pas dispo. */
@@ -191,9 +194,9 @@ function activityCanvas(session: ActivitySession, profile: UserProfile, strideCm
   return canvas;
 }
 
-/** Génère une carte PNG d'une sortie (trajet + stats) puis ouvre le partage natif. */
+/** Génère une carte JPEG d'une sortie (trajet + stats) puis ouvre le partage natif. */
 export async function shareActivity(session: ActivitySession, profile: UserProfile, strideCm = 75): Promise<ShareResult> {
-  const filename = `elywalk-sortie-${session.id || session.startedAt}.png`;
+  const filename = `elywalk-sortie-${session.id || session.startedAt}.jpg`;
   const km = ((session.distanceM || 0) / 1000).toFixed(2);
   return shareCanvas(activityCanvas(session, profile, strideCm), filename, 'Ma sortie ElyWalk', `J'ai parcouru ${km} km avec ElyWalk !`);
 }
