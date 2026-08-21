@@ -42,3 +42,43 @@ export const STEP_TIERS: { min: number; max: number; coins: number }[] = [
 ];
 
 export const DAILY_STEP_GOAL = 10000;
+
+// Défis visibles sans attendre une campagne distante. Les dates sont recalculées
+// à chaque ouverture : une vraie campagne peut ensuite être remplacée par le back-office.
+export function getChallengeDefinitions(now = new Date()): import('./types').ChallengeDefinition[] {
+  const day = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const iso = (d: Date) => {
+    const y = d.getFullYear(); const m = String(d.getMonth() + 1).padStart(2, '0');
+    return `${y}-${m}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+  const monday = new Date(day);
+  const offset = (day.getDay() + 6) % 7;
+  monday.setDate(day.getDate() - offset);
+  const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
+  const seasonStart = new Date(day.getFullYear(), day.getMonth(), 1);
+  const seasonEnd = new Date(day.getFullYear(), day.getMonth() + 1, 0);
+  const challengeStart = new Date(day); challengeStart.setDate(day.getDate() - 6);
+  const challengeEnd = new Date(day); challengeEnd.setDate(day.getDate() + 7);
+  return [
+    {
+      id: `week-steps-${iso(monday)}`, title: 'Sprint collectif',
+      description: 'La communauté marche ensemble cette semaine.', kind: 'collective',
+      metric: 'steps', target: 250000, reward: 25, startsAt: iso(monday), endsAt: iso(sunday), icon: '🌍', participantLabel: 'pas de la communauté',
+    },
+    {
+      id: `dated-active-${iso(challengeStart)}`, title: '7 jours en mouvement',
+      description: 'Validez au moins cinq journées avant la fin du défi.', kind: 'personal',
+      metric: 'activeDays', target: 5, reward: 12, startsAt: iso(challengeStart), endsAt: iso(challengeEnd), icon: '⚡',
+    },
+    {
+      id: `season-${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}`, title: 'Saison des foulées',
+      description: 'Accumulez des pas pendant la saison en cours.', kind: 'seasonal',
+      metric: 'steps', target: 100000, reward: 40, startsAt: iso(seasonStart), endsAt: iso(seasonEnd), icon: '🏆',
+    },
+    {
+      id: `streak-${iso(day)}`, title: 'Feu sacré',
+      description: 'Atteignez une série de sept jours.', kind: 'personal',
+      metric: 'streak', target: 7, reward: 15, startsAt: iso(day), endsAt: iso(new Date(day.getFullYear(), day.getMonth(), day.getDate() + 30)), icon: '🔥',
+    },
+  ];
+}

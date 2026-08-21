@@ -20,6 +20,8 @@ import LegalPage from './pages/LegalPage';
 import HistoryPage from './pages/HistoryPage';
 import PublicProfilePage from './pages/PublicProfilePage';
 import WhatsNewPage from './pages/WhatsNewPage';
+import ChallengesPage from './pages/ChallengesPage';
+import ActivityPage from './pages/ActivityPage';
 import ProductStatus from './components/ProductStatus';
 import { setupNotifications } from './lib/notifications';
 
@@ -104,6 +106,8 @@ function Shell() {
         <Route path="/partners" element={<PartnersPage />} />
         <Route path="/admin" element={<AdminPage />} />
         <Route path="/history" element={<HistoryPage />} />
+        <Route path="/challenges" element={<ChallengesPage />} />
+        <Route path="/activity" element={<ActivityPage />} />
         <Route path="/user/:uid" element={<PublicProfilePage />} />
         <Route path="/whats-new" element={<WhatsNewPage />} />
         <Route path="/legal/:doc" element={<LegalPage />} />

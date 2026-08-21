@@ -1,4 +1,13 @@
 export type Role = 'president' | 'copresident' | 'member';
+export type UnitSystem = 'metric' | 'imperial';
+export type ActivityType = 'walk' | 'run';
+
+export interface HealthProfile {
+  weightKg?: number;
+  heightCm?: number;
+  age?: number;
+  unitSystem?: UnitSystem;
+}
 
 export interface UserProfile {
   uid: string;
@@ -6,20 +15,20 @@ export interface UserProfile {
   photoURL?: string | null;
   email: string | null;
   // --- Anti-fraude parrainage (IP + HWID) ---
-  signupIp?: string | null; // IP publique à la création du compte
-  lastIp?: string | null; // Dernière IP connue
-  hwid?: string | null; // Identifiant matériel à la création du compte
-  hwids?: string[]; // Tous les HWID utilisés par ce compte
-  referralRejected?: boolean; // Parrainage refusé (même IP ou même HWID)
+  signupIp?: string | null;
+  lastIp?: string | null;
+  hwid?: string | null;
+  hwids?: string[];
+  referralRejected?: boolean;
   elycoins: number;
   totalSteps: number;
   totalCalories: number;
-  streak: number; // jours d'affilée d'activité validée
-  lastValidatedDate: string | null; // YYYY-MM-DD
+  streak: number;
+  lastValidatedDate: string | null;
   todaySteps: number;
-  todayDate: string; // YYYY-MM-DD
+  todayDate: string;
   referralCode: string;
-  referredBy: string | null; // uid du parrain
+  referredBy: string | null;
   paypalEmail: string | null;
   role: Role;
   createdAt: number;
@@ -30,6 +39,11 @@ export interface UserProfile {
   lastAdSlot?: string;
   lastAdRewardAt?: unknown;
   lastReferralClaim?: string;
+  lastChallengeClaim?: string;
+  /** Une journée manquée peut être rattrapée automatiquement avec un gel. */
+  streakFreezes?: number;
+  health?: HealthProfile;
+  unitSystem?: UnitSystem;
 }
 
 export interface DailySteps {
@@ -38,6 +52,55 @@ export interface DailySteps {
   coins: number;
   calories: number;
   validatedAt: number;
+}
+
+export type ChallengeKind = 'personal' | 'collective' | 'seasonal';
+export type ChallengeMetric = 'steps' | 'streak' | 'activeDays' | 'distance';
+
+export interface ChallengeDefinition {
+  id: string;
+  title: string;
+  description: string;
+  kind: ChallengeKind;
+  metric: ChallengeMetric;
+  target: number;
+  reward: number;
+  startsAt: string;
+  endsAt: string;
+  icon: string;
+  /** For collective challenges, progress is the community total. */
+  participantLabel?: string;
+}
+
+export interface UserChallenge {
+  challengeId: string;
+  uid: string;
+  progress: number;
+  completed: boolean;
+  claimed: boolean;
+  reward?: number;
+  updatedAt: number;
+  claimedAt?: number;
+}
+
+export interface ActivityPoint {
+  lat: number;
+  lng: number;
+  recordedAt: number;
+  altitude?: number;
+}
+
+export interface ActivitySession {
+  id?: string;
+  uid: string;
+  type: ActivityType;
+  startedAt: number;
+  endedAt?: number;
+  durationSec: number;
+  distanceM: number;
+  calories: number;
+  points: ActivityPoint[];
+  status: 'active' | 'completed';
 }
 
 export interface PartnerOffer {
@@ -54,8 +117,8 @@ export interface PartnerOffer {
 
 export interface CoinTransaction {
   id?: string;
-  type: 'steps' | 'ad' | 'referral' | 'paypal' | 'donation' | 'partner';
-  coins: number; // positif = gain, négatif = dépense
+  type: 'steps' | 'ad' | 'referral' | 'paypal' | 'donation' | 'partner' | 'challenge';
+  coins: number;
   note: string;
   createdAt: number;
 }
@@ -70,7 +133,6 @@ export interface Withdrawal {
   paypalEmail: string | null;
   status: 'pending' | 'paid' | 'rejected' | 'received';
   createdAt: number;
-  /** Consommé par le backend de confiance (push FCM). */
   notified?: boolean;
 }
 
@@ -93,13 +155,12 @@ export interface FriendRequest {
   toName: string;
   status: 'pending' | 'accepted' | 'rejected';
   createdAt: number;
-  /** Consommé par le backend de confiance (push FCM). */
   notified?: boolean;
 }
 
 export interface Friendship {
   id?: string;
-  members: string[]; // [uidA, uidB]
+  members: string[];
   createdAt: number;
 }
 
@@ -107,8 +168,8 @@ export interface ReferralClaim {
   sponsorUid: string;
   referredUid: string;
   referredName: string;
-  referredIp?: string | null; // IP du filleul au moment de la réclamation
-  referredHwid?: string | null; // HWID du filleul au moment de la réclamation
+  referredIp?: string | null;
+  referredHwid?: string | null;
   claimed: boolean;
   createdAt: number;
 }

@@ -68,7 +68,7 @@ export default function WalletPage() {
     }
   };
 
-  const transactionIcon = (type: CoinTransaction['type']) => ({ steps: '👟', ad: '▶', referral: '🤝', paypal: '↗', donation: '♥', partner: '✦' }[type]);
+  const transactionIcon = (type: CoinTransaction['type']) => ({ steps: '👟', ad: '▶', referral: '🤝', paypal: '↗', donation: '♥', partner: '✦', challenge: '🏆' }[type]);
   const formatDateTime = (value: number) => new Date(value).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' });
 
   const statusBadge = (s: Withdrawal['status']) => {

@@ -96,6 +96,7 @@ public class StepCounterService extends Service implements SensorEventListener {
         if (l != null) {
             l.onSteps(today);
         }
+        ElyWalkWidget.updateAll(this);
         if (lastNotifiedSteps < 0 || Math.abs(today - lastNotifiedSteps) >= 10) {
             lastNotifiedSteps = today;
             updateNotification(today);

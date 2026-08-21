@@ -40,6 +40,10 @@ import type {
   Role,
   DailySteps,
   PartnerOffer,
+  ChallengeDefinition,
+  UserChallenge,
+  ActivitySession,
+  ActivityPoint,
 } from './types';
 
 // ============ Profil utilisateur ============
@@ -106,6 +110,9 @@ export async function ensureUserDoc(
     dailyStepGoal: 10000,
     strideLengthCm: 75,
     onboardingDone: false,
+    streakFreezes: 1,
+    health: { unitSystem: 'metric' },
+    unitSystem: 'metric',
   };
   await setDoc(ref, profile);
   await setDoc(doc(db, 'referralCodes', code), { uid: user.uid }).catch(() => undefined);
@@ -283,6 +290,14 @@ export async function claimReferralBonuses(uid: string): Promise<number> {
 export interface ValidationResult {
   coins: number;
   streak: number;
+  freezeUsed: boolean;
+}
+
+function daysSince(date: string | null, today: string): number | null {
+  if (!date) return null;
+  const from = new Date(`${date}T00:00:00`);
+  const to = new Date(`${today}T00:00:00`);
+  return Math.round((to.getTime() - from.getTime()) / 86400000);
 }
 
 /** Crédite les ElyCoins du jour (une seule validation par jour). */
@@ -291,24 +306,27 @@ export async function validateSteps(uid: string, steps: number): Promise<Validat
     throw new Error('Nombre de pas incohérent (maximum quotidien : 60 000).');
   }
   const today = dateStr();
-  const yesterday = yesterdayStr();
   const coins = coinsForSteps(steps);
-  const calories = caloriesForSteps(steps);
 
   return runTransaction(db, async (tx) => {
     const userRef = doc(db, 'users', uid);
     const snap = await tx.get(userRef);
     if (!snap.exists()) throw new Error('Profil introuvable.');
     const profile = snap.data() as UserProfile;
+    const calories = caloriesForSteps(steps, profile.health, profile.strideLengthCm || 75);
     if (profile.lastValidatedDate === today) {
       throw new Error('Pas déjà validés aujourd’hui. Revenez demain !');
     }
-    const streak = profile.lastValidatedDate === yesterday ? profile.streak + 1 : 1;
+    const gap = daysSince(profile.lastValidatedDate, today);
+    const availableFreezes = Math.max(0, profile.streakFreezes ?? 1);
+    const freezeUsed = gap === 2 && availableFreezes > 0;
+    const streak = gap === 1 || freezeUsed ? profile.streak + 1 : 1;
     tx.update(userRef, {
       elycoins: increment(coins),
       totalSteps: increment(Math.floor(steps)),
       totalCalories: increment(calories),
       streak,
+      streakFreezes: availableFreezes - (freezeUsed ? 1 : 0),
       lastValidatedDate: today,
       todaySteps: Math.floor(steps),
       todayDate: today,
@@ -326,8 +344,91 @@ export async function validateSteps(uid: string, steps: number): Promise<Validat
       note: `${Math.floor(steps).toLocaleString('fr-FR')} pas validés`,
       createdAt: Date.now(),
     } satisfies CoinTransaction);
-    return { coins, streak };
+    return { coins, streak, freezeUsed };
   });
+}
+
+// ============ Défis ============
+
+function dayValue(date: string): number {
+  return new Date(`${date}T00:00:00`).getTime();
+}
+
+function challengeIsActive(challenge: ChallengeDefinition, today = dateStr()): boolean {
+  return dayValue(today) >= dayValue(challenge.startsAt) && dayValue(today) <= dayValue(challenge.endsAt);
+}
+
+/** Lit les défis actifs et la progression personnelle enregistrée. */
+export async function listMyChallenges(uid: string, challenges: ChallengeDefinition[]): Promise<UserChallenge[]> {
+  const active = challenges.filter((c) => challengeIsActive(c));
+  const [daily, profile] = await Promise.all([listDailySteps(uid, 370), getUserProfile(uid)]);
+  const docs = await getDocs(collection(db, 'users', uid, 'challenges'));
+  const saved = new Map(docs.docs.map((d) => [d.id, d.data() as UserChallenge]));
+  const result: UserChallenge[] = [];
+  for (const challenge of active) {
+    const ownDays = daily.filter((d) => d.date >= challenge.startsAt && d.date <= challenge.endsAt);
+    let progress = 0;
+    if (challenge.metric === 'steps') progress = ownDays.reduce((sum, d) => sum + d.steps, 0);
+    if (challenge.metric === 'activeDays') progress = ownDays.filter((d) => d.steps > 0).length;
+    if (challenge.metric === 'streak') progress = profile?.streak || 0;
+    // Collective challenges are deliberately based on the same daily records
+    // as personal challenges; the server can later replace this with an aggregate.
+    if (challenge.kind === 'collective') {
+      const users = await getLeaderboard(200);
+      const all = await Promise.all(users.map((u) => listDailySteps(u.uid, 370).catch(() => [])));
+      progress = all.flat().filter((d) => d.date >= challenge.startsAt && d.date <= challenge.endsAt).reduce((sum, d) => sum + d.steps, 0);
+    }
+    const old = saved.get(challenge.id);
+    result.push({
+      challengeId: challenge.id, uid, progress: Math.min(progress, challenge.target),
+      completed: progress >= challenge.target, claimed: old?.claimed || false,
+      updatedAt: Date.now(), claimedAt: old?.claimedAt,
+    });
+  }
+  return result;
+}
+
+/** Réclame une récompense une seule fois, dans la même transaction que le solde. */
+export async function claimChallengeReward(uid: string, challenge: ChallengeDefinition, progress: number): Promise<void> {
+  if (progress < challenge.target) throw new Error('Défi pas encore terminé.');
+  await runTransaction(db, async (tx) => {
+    const userRef = doc(db, 'users', uid);
+    const claimRef = doc(db, 'users', uid, 'challenges', challenge.id);
+    const [userSnap, claimSnap] = await Promise.all([tx.get(userRef), tx.get(claimRef)]);
+    if (!userSnap.exists()) throw new Error('Profil introuvable.');
+    if (claimSnap.exists() && (claimSnap.data() as UserChallenge).claimed) throw new Error('Récompense déjà récupérée.');
+    tx.update(userRef, { elycoins: increment(challenge.reward), lastChallengeClaim: challenge.id });
+    tx.set(claimRef, { challengeId: challenge.id, uid, progress, completed: true, claimed: true, reward: challenge.reward, updatedAt: Date.now(), claimedAt: Date.now() } satisfies UserChallenge);
+    tx.set(doc(collection(db, 'users', uid, 'transactions')), {
+      type: 'challenge', coins: challenge.reward, note: `Défi : ${challenge.title}`, createdAt: Date.now(),
+    } satisfies CoinTransaction);
+  });
+}
+
+// ============ Sorties GPS ============
+
+export async function createActivitySession(uid: string, type: ActivitySession['type']): Promise<string> {
+  const ref = await addDoc(collection(db, 'activitySessions'), {
+    uid, type, startedAt: Date.now(), durationSec: 0, distanceM: 0, calories: 0, points: [], status: 'active',
+  } satisfies ActivitySession);
+  return ref.id;
+}
+
+export async function updateActivitySession(uid: string, id: string, data: Partial<ActivitySession>): Promise<void> {
+  await updateDoc(doc(db, 'activitySessions', id), data as Record<string, unknown>);
+}
+
+export async function appendActivityPoint(uid: string, id: string, point: ActivityPoint[], distanceM: number, durationSec: number, calories: number): Promise<void> {
+  await updateActivitySession(uid, id, { points: point, distanceM, durationSec, calories });
+}
+
+export async function finishActivitySession(uid: string, id: string, data: Pick<ActivitySession, 'points' | 'distanceM' | 'durationSec' | 'calories'>): Promise<void> {
+  await updateActivitySession(uid, id, { ...data, endedAt: Date.now(), status: 'completed' });
+}
+
+export async function listActivitySessions(uid: string, count = 20): Promise<ActivitySession[]> {
+  const snaps = await getDocs(query(collection(db, 'activitySessions'), where('uid', '==', uid), limit(count)));
+  return snaps.docs.map((d) => ({ id: d.id, ...(d.data() as ActivitySession) })).sort((a, b) => b.startedAt - a.startedAt);
 }
 
 // ============ Récompense publicitaire ============
@@ -614,20 +715,22 @@ export async function redeemPartnerOffer(profile: UserProfile, offer: PartnerOff
 }
 
 export async function exportAccountData(uid: string): Promise<Record<string, unknown>> {
-  const [profile, daily, transactions, withdrawals] = await Promise.all([
-    getUserProfile(uid), listDailySteps(uid, 3650), listMyTransactions(uid), listMyWithdrawals(uid),
+  const [profile, daily, transactions, withdrawals, activities] = await Promise.all([
+    getUserProfile(uid), listDailySteps(uid, 3650), listMyTransactions(uid), listMyWithdrawals(uid), listActivitySessions(uid, 1000),
   ]);
-  return { exportedAt: new Date().toISOString(), profile, dailySteps: daily, transactions, withdrawals };
+  return { exportedAt: new Date().toISOString(), profile, dailySteps: daily, transactions, withdrawals, activities };
 }
 
 export async function deleteAccountData(uid: string): Promise<void> {
-  const refs = [collection(db, 'users', uid, 'dailySteps'), collection(db, 'users', uid, 'transactions')];
+  const refs = [collection(db, 'users', uid, 'dailySteps'), collection(db, 'users', uid, 'transactions'), collection(db, 'users', uid, 'challenges')];
   for (const ref of refs) {
     const snaps = await getDocs(ref);
     for (let i = 0; i < snaps.docs.length; i += 400) {
       const batch = writeBatch(db); snaps.docs.slice(i, i + 400).forEach(d => batch.delete(d.ref)); await batch.commit();
     }
   }
+  const activities = await getDocs(query(collection(db, 'activitySessions'), where('uid', '==', uid)));
+  for (const activity of activities.docs) await deleteDoc(activity.ref);
   const friendships = await getDocs(query(collection(db, 'friendships'), where('members', 'array-contains', uid)));
   for (const f of friendships.docs) await deleteDoc(f.ref);
   for (const field of ['from','to'] as const) { const requests=await getDocs(query(collection(db,'friendRequests'),where(field,'==',uid))); for(const r of requests.docs) await deleteDoc(r.ref); }

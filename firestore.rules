@@ -21,7 +21,7 @@ service cloud.firestore {
     function safeProfileEdit() {
       return economyUnchanged() && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
         'displayName','photoURL','paypalEmail','referredBy','referralRejected','signupIp','lastIp','hwid','hwids',
-        'dailyStepGoal','strideLengthCm','bio','onboardingDone','todaySteps','todayDate'
+        'dailyStepGoal','strideLengthCm','bio','onboardingDone','todaySteps','todayDate','health','unitSystem'
       ]) && numberBetween(request.resource.data.todaySteps, 0, 60000);
     }
     function validStepCredit(uid) {
@@ -32,7 +32,10 @@ service cloud.firestore {
         && request.resource.data.totalSteps == resource.data.totalSteps + daily.steps
         && request.resource.data.totalCalories == resource.data.totalCalories + daily.calories
         && request.resource.data.elycoins == resource.data.elycoins + daily.coins
-        && request.resource.data.todaySteps == daily.steps;
+        && request.resource.data.todaySteps == daily.steps
+        && request.resource.data.streakFreezes is int
+        && request.resource.data.streakFreezes >= 0
+        && request.resource.data.streakFreezes <= 1;
     }
     function validAdCredit(uid) {
       let slot = request.resource.data.lastAdSlot;
@@ -54,6 +57,17 @@ service cloud.firestore {
     }
     // Un utilisateur peut dépenser son solde, jamais le créditer librement. La création
     // atomique du retrait est contrôlée dans /withdrawals.
+    function validChallengeCredit(uid) {
+      let challengeId = request.resource.data.lastChallengeClaim;
+      let after = getAfter(/databases/$(database)/documents/users/$(uid)/challenges/$(challengeId)).data;
+      return verified() && (!('lastChallengeClaim' in resource.data) || challengeId != resource.data.lastChallengeClaim)
+        && after.claimed == true && after.uid == uid
+        && after.reward is number && request.resource.data.elycoins == resource.data.elycoins + after.reward
+        && request.resource.data.totalSteps == resource.data.totalSteps
+        && request.resource.data.totalCalories == resource.data.totalCalories
+        && request.resource.data.streak == resource.data.streak
+        && request.resource.data.lastValidatedDate == resource.data.lastValidatedDate;
+    }
     function validDebit() {
       return verified() && request.resource.data.elycoins >= 0
         && request.resource.data.elycoins < resource.data.elycoins
@@ -65,7 +79,7 @@ service cloud.firestore {
       allow read: if auth();
       allow create: if self(uid) && request.resource.data.uid == uid
         && request.resource.data.elycoins == 0 && request.resource.data.totalSteps == 0;
-      allow update: if president() || (self(uid) && (safeProfileEdit() || safePublicSync() || validStepCredit(uid) || validAdCredit(uid) || validReferralCredit(uid) || validDebit()));
+      allow update: if president() || (self(uid) && (safeProfileEdit() || safePublicSync() || validStepCredit(uid) || validAdCredit(uid) || validReferralCredit(uid) || validChallengeCredit(uid) || validDebit()));
       allow delete: if self(uid);
       match /dailySteps/{day} {
         allow read: if auth();
@@ -76,6 +90,15 @@ service cloud.firestore {
       }
       match /notificationTokens/{tokenId} {
         allow read, create, update, delete: if self(uid);
+      }
+      match /challenges/{challengeId} {
+        allow read: if self(uid);
+        allow create, update: if self(uid) && verified()
+          && request.resource.data.uid == uid
+          && request.resource.data.progress is number
+          && request.resource.data.progress >= 0
+          && request.resource.data.claimed is bool;
+        allow delete: if self(uid);
       }
       match /transactions/{txId} {
         allow read: if self(uid) || president();
@@ -140,6 +163,17 @@ service cloud.firestore {
           getAfter(/databases/$(database)/documents/users/$(resource.data.uid)).data.elycoins
             == get(/databases/$(database)/documents/users/$(resource.data.uid)).data.elycoins + resource.data.coins));
       allow delete: if false;
+    }
+    match /activitySessions/{id} {
+      allow read: if auth() && resource.data.uid == request.auth.uid;
+      allow create: if verified() && request.resource.data.uid == request.auth.uid
+        && request.resource.data.type in ['walk','run'] && request.resource.data.status == 'active';
+      allow update: if verified() && resource.data.uid == request.auth.uid
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.points.size() <= 20000
+        && request.resource.data.distanceM is number
+        && request.resource.data.status in ['active','completed'];
+      allow delete: if auth() && resource.data.uid == request.auth.uid;
     }
     match /partnerRequests/{id} {
       allow read: if president() || (auth() && resource.data.uid == request.auth.uid);
