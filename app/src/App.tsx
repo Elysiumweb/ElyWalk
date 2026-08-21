@@ -22,6 +22,7 @@ import PublicProfilePage from './pages/PublicProfilePage';
 import WhatsNewPage from './pages/WhatsNewPage';
 import ChallengesPage from './pages/ChallengesPage';
 import ActivityPage from './pages/ActivityPage';
+import ActivityDetailPage from './pages/ActivityDetailPage';
 import ProductStatus from './components/ProductStatus';
 import { setupNotifications } from './lib/notifications';
 
@@ -108,6 +109,7 @@ function Shell() {
         <Route path="/history" element={<HistoryPage />} />
         <Route path="/challenges" element={<ChallengesPage />} />
         <Route path="/activity" element={<ActivityPage />} />
+        <Route path="/activity/:id" element={<ActivityDetailPage />} />
         <Route path="/user/:uid" element={<PublicProfilePage />} />
         <Route path="/whats-new" element={<WhatsNewPage />} />
         <Route path="/legal/:doc" element={<LegalPage />} />

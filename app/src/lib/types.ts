@@ -99,6 +99,8 @@ export interface ActivitySession {
   durationSec: number;
   distanceM: number;
   calories: number;
+  /** Pas comptés pendant la sortie (delta du podomètre), si disponible. */
+  steps?: number;
   points: ActivityPoint[];
   status: 'active' | 'completed';
 }

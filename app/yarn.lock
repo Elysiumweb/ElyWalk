@@ -219,6 +219,13 @@
   resolved "https://registry.npmjs.org/@capacitor/device/-/device-8.0.3.tgz"
   integrity sha512-rliPCCZwxtjU6200jJNDAsQhioyozV3fGgiP+NgRqtDOI7i+Jdz+DYNwEup+3MGZZ4NEmkuFaBeWLM3T01vJRg==
 
+"@capacitor/filesystem@^8.0.0":
+  version "8.1.3"
+  resolved "https://registry.npmjs.org/@capacitor/filesystem/-/filesystem-8.1.3.tgz"
+  integrity sha512-GNBlRkaXEEb+6WP/YsDXr2zygyOHoieuye6viyd2ZkEdBwfseG41jxfarVxLWH0r0owhyNUbwJ/Qi8fubqr6wA==
+  dependencies:
+    "@capacitor/synapse" "^1.0.4"
+
 "@capacitor/geolocation@^8.0.0":
   version "8.2.2"
   resolved "https://registry.npmjs.org/@capacitor/geolocation/-/geolocation-8.2.2.tgz"
@@ -240,6 +247,11 @@
   version "8.1.2"
   resolved "https://registry.npmjs.org/@capacitor/push-notifications/-/push-notifications-8.1.2.tgz"
   integrity sha512-TQl4XxqJfNF+KbSYBFMXYYT5WXUaleVKXlByhh/8+KySMVNjp+l5OqAUoGe/sY1IAnGXEuUeCjA/WLZEVvGwrA==
+
+"@capacitor/share@^8.0.0":
+  version "8.0.1"
+  resolved "https://registry.npmjs.org/@capacitor/share/-/share-8.0.1.tgz"
+  integrity sha512-3cSBKBCJVon54rKDROP2rqGyeGks4pBh9TbaEk9S375Kbek/ZHe72N50zIa0Vn9Eac/SuhwgehO/mmA4CsUOiw==
 
 "@capacitor/synapse@^1.0.4":
   version "1.0.4"

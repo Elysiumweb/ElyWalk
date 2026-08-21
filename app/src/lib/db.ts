@@ -422,8 +422,13 @@ export async function appendActivityPoint(uid: string, id: string, point: Activi
   await updateActivitySession(uid, id, { points: point, distanceM, durationSec, calories });
 }
 
-export async function finishActivitySession(uid: string, id: string, data: Pick<ActivitySession, 'points' | 'distanceM' | 'durationSec' | 'calories'>): Promise<void> {
+export async function finishActivitySession(uid: string, id: string, data: Pick<ActivitySession, 'points' | 'distanceM' | 'durationSec' | 'calories' | 'steps'>): Promise<void> {
   await updateActivitySession(uid, id, { ...data, endedAt: Date.now(), status: 'completed' });
+}
+
+export async function getActivitySession(id: string): Promise<ActivitySession | null> {
+  const snap = await getDoc(doc(db, 'activitySessions', id));
+  return snap.exists() ? { id: snap.id, ...(snap.data() as ActivitySession) } : null;
 }
 
 export async function listActivitySessions(uid: string, count = 20): Promise<ActivitySession[]> {

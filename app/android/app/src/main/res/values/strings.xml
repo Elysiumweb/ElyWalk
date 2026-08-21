@@ -8,5 +8,9 @@
     <string name="step_channel_desc">ElyWalk compte vos pas même lorsque l\'application est fermée.</string>
     <string name="step_notif_title">ElyWalk</string>
     <string name="step_notif_text">%1$d pas aujourd\'hui</string>
+    <string name="tracking_channel_name">Sortie GPS en cours</string>
+    <string name="tracking_channel_desc">ElyWalk enregistre votre parcours, même lorsque l\'application est en arrière-plan.</string>
+    <string name="tracking_notif_title">Sortie ElyWalk en cours</string>
+    <string name="tracking_notif_text">%1$s km · %2$d min</string>
     <string name="widget_description">Compteur de pas ElyWalk</string>
 </resources>
