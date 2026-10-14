@@ -104,6 +104,35 @@ La page documente deux voies : la suppression immédiate depuis l'application
 demande par e-mail à `contact@elysium-esport.fr` (traitement sous 30 jours) lorsque
 l'utilisateur ne peut plus se connecter.
 
+## Suppression de données sans fermer le compte — URL publique
+
+Play demande une **URL distincte** pour la suppression de données lorsqu'on déclare
+offrir cette possibilité (ce qui est le cas d'ElyWalk).
+
+- Fichier source : `app/public/delete-data.html`
+- **URL à renseigner dans la fiche Play Store** :
+
+  ```
+  https://elywalk-2f7ba.web.app/delete-data.html
+  ```
+
+- Constante `DATA_DELETION_URL` (`app/src/lib/constants.ts`), bouton
+  *Profil → « Supprimer une partie de mes données »*.
+
+La page sépare le libre-service immédiat (sortie GPS et son tracé, ami, photo de
+profil, jetons FCM via la désactivation des notifications, consentement publicitaire)
+de ce qui passe par une demande e-mail traitée sous 30 jours (historique de pas,
+historique de transactions, bloc de sorties, réactions et messages, données de profil
+optionnelles).
+
+Récapitulatif des trois URL publiques à renseigner dans la fiche Play Store :
+
+```
+https://elywalk-2f7ba.web.app/privacy.html          # règles de confidentialité
+https://elywalk-2f7ba.web.app/delete-account.html   # suppression du compte
+https://elywalk-2f7ba.web.app/delete-data.html      # suppression des données
+```
+
 `deleteAccountData()` (`app/src/lib/db.ts`) doit rester exhaustif : il efface
 `dailySteps`, `transactions`, `challenges` et `notificationTokens` (sous-collections du
 profil, **non** supprimées avec le document parent), `activitySessions`, `friendships`,

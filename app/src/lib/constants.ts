@@ -15,6 +15,10 @@ export const PRIVACY_POLICY_URL = 'https://elywalk-2f7ba.web.app/privacy.html';
 // distincte, affichée sur la fiche de l'application).
 export const ACCOUNT_DELETION_URL = 'https://elywalk-2f7ba.web.app/delete-account.html';
 
+// Suppression d'une partie ou de la totalité des données SANS fermer le compte
+// (exigence Play Store : URL distincte de la suppression de compte).
+export const DATA_DELETION_URL = 'https://elywalk-2f7ba.web.app/delete-data.html';
+
 // --- Attestation serveur (Play Integrity, F05) ---
 // URL du Worker Cloudflare de confiance (voir /worker/README.md). À renseigner
 // après déploiement du Worker. Vide => l'attestation est désactivée.
