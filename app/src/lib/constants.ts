@@ -6,6 +6,19 @@ export const AD_UNIT_REWARDED = 'ca-app-pub-6906841385343667/3683414466';
 export const AD_UNIT_APP_OPEN = 'ca-app-pub-6906841385343667/6616749893';
 export const AD_UNIT_INTERSTITIAL = 'ca-app-pub-6906841385343667/3494240028';
 
+// --- Documents légaux en ligne (exigence Play Store : URL publique) ---
+// Page statique servie par Firebase Hosting (app/public/privacy.html).
+// Doit rester accessible sans authentification et sans restriction géographique.
+export const PRIVACY_POLICY_URL = 'https://elywalk-2f7ba.web.app/privacy.html';
+
+// Procédure de suppression de compte (exigence Play Store : URL publique
+// distincte, affichée sur la fiche de l'application).
+export const ACCOUNT_DELETION_URL = 'https://elywalk-2f7ba.web.app/delete-account.html';
+
+// Suppression d'une partie ou de la totalité des données SANS fermer le compte
+// (exigence Play Store : URL distincte de la suppression de compte).
+export const DATA_DELETION_URL = 'https://elywalk-2f7ba.web.app/delete-data.html';
+
 // --- Attestation serveur (Play Integrity, F05) ---
 // URL du Worker Cloudflare de confiance (voir /worker/README.md). À renseigner
 // après déploiement du Worker. Vide => l'attestation est désactivée.

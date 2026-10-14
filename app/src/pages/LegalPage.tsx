@@ -1,5 +1,6 @@
 import { useNavigate, useParams } from 'react-router-dom';
 import type { ReactNode } from 'react';
+import { PRIVACY_POLICY_URL, ACCOUNT_DELETION_URL } from '../lib/constants';
 
 /**
  * Documents légaux ElyWalk.
@@ -86,9 +87,16 @@ const content: Record<string, LegalDoc> = {
   },
   privacy: {
     title: 'Politique de confidentialité',
-    updated: '20 août 2026',
+    updated: '14 octobre 2026',
     body: (
       <>
+        <p className="legal-online">
+          Version de référence hébergée en ligne :{' '}
+          <a href={PRIVACY_POLICY_URL} target="_blank" rel="noopener noreferrer">
+            {PRIVACY_POLICY_URL}
+          </a>
+        </p>
+
         <h2>1. Responsable du traitement</h2>
         <p>
           Le responsable du traitement est {EDITOR}. Pour toute question relative à vos
@@ -125,16 +133,24 @@ const content: Record<string, LegalDoc> = {
 
         <h2>5. Destinataires</h2>
         <p>
-          Google Firebase (hébergement, base de données, authentification, notifications)
-          et Google AdMob (publicité) agissent en qualité de sous-traitants. Aucune donnée
-          de santé n’est vendue ni cédée à des tiers à des fins commerciales.
+          Google Firebase (hébergement, base de données, authentification, notifications),
+          Google AdMob (publicité), Cloudflare (backend de confiance : attestation d’intégrité,
+          vérification serveur des récompenses, envoi des notifications, file de retraits),
+          PayPal (exécution des retraits) et les services publics d’affichage d’adresse IP
+          (anti-fraude au parrainage) agissent en qualité de sous-traitants. Aucune donnée
+          de santé n’est vendue ni cédée à des tiers à des fins commerciales, et aucune donnée
+          d’activité physique n’est transmise aux régies publicitaires.
         </p>
 
         <h2>6. Durées de conservation</h2>
         <p>
-          Les données sont conservées tant que le compte est actif, puis supprimées dans un
-          délai raisonnable après suppression du compte. Certaines données comptables ou
-          liées à la sécurité peuvent être conservées plus longtemps lorsque la loi l’exige.
+          Les données sont conservées tant que le compte est actif. À la suppression du compte,
+          vos données personnelles sont effacées immédiatement depuis l’application
+          (Profil → « Supprimer définitivement mon compte ») et les copies de sauvegarde de
+          l’hébergeur sont purgées sous 35 jours. Certaines données sont conservées sous forme
+          <strong> anonymisée</strong> lorsque la loi l’exige : demandes de retrait traitées
+          (10 ans, obligation comptable), demandes de partenariat (3 ans), journal anti-fraude
+          dissocié du compte (12 mois).
         </p>
 
         <h2>7. Transferts hors Union européenne</h2>
@@ -149,6 +165,26 @@ const content: Record<string, LegalDoc> = {
           L’accès aux données est protégé par des règles de sécurité, l’authentification
           Firebase et des contrôles d’intégrité. Aucun système n’étant infaillible, nous
           mettons en œuvre des mesures proportionnées aux risques.
+        </p>
+
+        <h2>9. Vos droits</h2>
+        <p>
+          Vous disposez d’un droit d’accès, de rectification, d’effacement, de portabilité,
+          de limitation et d’opposition sur vos données, ainsi que du droit de retirer votre
+          consentement (publicité, notifications) à tout moment. Depuis l’application, la page
+          Profil vous permet d’exporter l’intégralité de vos données, de supprimer une sortie
+          GPS et son tracé, de retirer un ami, de supprimer votre photo de profil, et de
+          supprimer définitivement votre compte.
+        </p>
+        <p>
+          La procédure complète de suppression du compte, la liste des données supprimées ou
+          conservées et les durées applicables sont détaillées sur :{' '}
+          <a href={ACCOUNT_DELETION_URL} target="_blank" rel="noopener noreferrer">
+            {ACCOUNT_DELETION_URL}
+          </a>
+          . Vous pouvez également écrire à{' '}
+          <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a> (traitement sous 30 jours) ou
+          saisir la CNIL (cnil.fr).
         </p>
       </>
     ),

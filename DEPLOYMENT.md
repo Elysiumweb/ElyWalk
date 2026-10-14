@@ -47,6 +47,99 @@ keytool -printcert -jarfile app-release.apk | grep SHA256
 
 Puis `npm run build && firebase deploy --only hosting`.
 
+## Règles de confidentialité — URL publique (exigence Play Store)
+
+Le Play Store exige une politique de confidentialité hébergée sur une **URL publique**
+(HTTPS, accessible dans le monde entier sans connexion, page HTML standard), et un lien
+vers cette URL **dans l'application**.
+
+- Fichier source : `app/public/privacy.html` (page statique autonome, CSS inline).
+- Copié tel quel dans `app/dist/` par `npm run build`, donc servi par Firebase Hosting.
+- **URL à renseigner dans la fiche Play Store** :
+
+  ```
+  https://elywalk-2f7ba.web.app/privacy.html
+  ```
+
+  (fonctionne aussi sur `https://elywalk-2f7ba.firebaseapp.com/privacy.html`)
+
+La constante `PRIVACY_POLICY_URL` (`app/src/lib/constants.ts`) pointe vers cette URL et
+est utilisée à trois endroits : la page *Confidentialité* de l'app, le consentement à
+l'inscription (`AuthPage`) et le pied de page du profil.
+
+Checklist Play Store :
+
+- [ ] *Play Console → Politique → Règles de confidentialité* : coller l'URL ci-dessus.
+- [ ] L'URL répond en 200 sans authentification, sans redirection et sans géoblocage.
+- [ ] Le contenu couvre bien : données d'activité physique (santé), localisation,
+      identifiants appareil (IP, HWID, jeton FCM, ID publicitaire), publicité AdMob,
+      sous-traitants (Firebase, AdMob, Cloudflare, PayPal, ipify), durées, droits RGPD.
+- [ ] Cohérence avec la fiche *Sécurité des données* et avec `LegalPage.tsx`.
+
+Vérification après déploiement :
+
+```bash
+curl -I https://elywalk-2f7ba.web.app/privacy.html   # 200 + content-type text/html
+firebase deploy --only hosting
+```
+
+## Suppression de compte — URL publique (exigence Play Store)
+
+Le Play Store exige une **URL de suppression de compte** distincte de la politique de
+confidentialité, qui décrit la procédure, les données supprimées et les durées de
+conservation.
+
+- Fichier source : `app/public/delete-account.html`
+- **URL à renseigner dans la fiche Play Store** :
+
+  ```
+  https://elywalk-2f7ba.web.app/delete-account.html
+  ```
+
+- Constante `ACCOUNT_DELETION_URL` (`app/src/lib/constants.ts`), affichée dans
+  *Profil → Supprimer définitivement mon compte* et dans la politique de confidentialité.
+
+La page documente deux voies : la suppression immédiate depuis l'application
+(Profil → bouton rouge → confirmation → mot de passe, vide si connexion Google) et la
+demande par e-mail à `contact@elysium-esport.fr` (traitement sous 30 jours) lorsque
+l'utilisateur ne peut plus se connecter.
+
+## Suppression de données sans fermer le compte — URL publique
+
+Play demande une **URL distincte** pour la suppression de données lorsqu'on déclare
+offrir cette possibilité (ce qui est le cas d'ElyWalk).
+
+- Fichier source : `app/public/delete-data.html`
+- **URL à renseigner dans la fiche Play Store** :
+
+  ```
+  https://elywalk-2f7ba.web.app/delete-data.html
+  ```
+
+- Constante `DATA_DELETION_URL` (`app/src/lib/constants.ts`), bouton
+  *Profil → « Supprimer une partie de mes données »*.
+
+La page sépare le libre-service immédiat (sortie GPS et son tracé, ami, photo de
+profil, jetons FCM via la désactivation des notifications, consentement publicitaire)
+de ce qui passe par une demande e-mail traitée sous 30 jours (historique de pas,
+historique de transactions, bloc de sorties, réactions et messages, données de profil
+optionnelles).
+
+Récapitulatif des trois URL publiques à renseigner dans la fiche Play Store :
+
+```
+https://elywalk-2f7ba.web.app/privacy.html          # règles de confidentialité
+https://elywalk-2f7ba.web.app/delete-account.html   # suppression du compte
+https://elywalk-2f7ba.web.app/delete-data.html      # suppression des données
+```
+
+`deleteAccountData()` (`app/src/lib/db.ts`) doit rester exhaustif : il efface
+`dailySteps`, `transactions`, `challenges` et `notificationTokens` (sous-collections du
+profil, **non** supprimées avec le document parent), `activitySessions`, `friendships`,
+`friendRequests` et `friendReactions` (les deux sens), et anonymise `withdrawals` /
+`partnerRequests`. ⚠️ Toute nouvelle collection contenant des données personnelles doit
+y être ajoutée.
+
 ## Firebase (Hosting + règles) — gratuit (Spark)
 
 ```bash

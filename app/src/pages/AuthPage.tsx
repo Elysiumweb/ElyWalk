@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
+import { PRIVACY_POLICY_URL } from '../lib/constants';
 import {
   registerWithEmail,
   loginWithEmail,
@@ -140,7 +141,7 @@ export default function AuthPage() {
         {busy ? '...' : mode === 'register' ? "S'inscrire" : 'Se connecter'}
       </button>
       {mode === 'login' && <button className="text-button" onClick={forgotPassword} disabled={busy} data-testid="forgot-password-button">Mot de passe oublié ?</button>}
-      {mode === 'register' && <p className="legal-consent">En créant un compte, vous acceptez les <a href="/legal/terms">CGU</a> et la <a href="/legal/privacy">politique de confidentialité</a>.</p>}
+      {mode === 'register' && <p className="legal-consent">En créant un compte, vous acceptez les <a href="/legal/terms">CGU</a> et la <a href={PRIVACY_POLICY_URL} target="_blank" rel="noopener noreferrer">politique de confidentialité</a>.</p>}
 
       <div className="divider">ou</div>
       <button className="btn btn-outline" onClick={submitGoogle} disabled={busy} data-testid="auth-google-button">

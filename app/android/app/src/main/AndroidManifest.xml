@@ -94,6 +94,13 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Identifiant publicitaire (AAID) : requis par le SDK Google Mobile Ads
+         (AdMob) sur Android 13+. Déclaré explicitement ici plutôt que de
+         dépendre du seul manifeste fusionné de play-services-ads : la
+         déclaration Play « utilisation de l'identifiant publicitaire » en
+         dépend, et une version ciblant Android 13+ sans cette autorisation
+         serait bloquée. L'identifiant n'est lu qu'après consentement (UMP). -->
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID" />
     <!-- Comptage de pas : capteur système (Activité physique) -->
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
     <uses-feature android:name="android.hardware.sensor.stepcounter" android:required="false" />

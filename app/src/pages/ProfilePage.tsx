@@ -8,6 +8,7 @@ import { logout, updateAuthProfile, changePassword, changeEmail, deleteAuthAccou
 import { updateUserFields, setReferredBy, exportAccountData, deleteAccountData } from '../lib/db';
 import { uploadAvatar, deleteAvatar } from '../lib/avatar';
 import { getNotificationSettings, setReminderEnabled, setPushEnabled, type NotificationSettings } from '../lib/notifications';
+import { ACCOUNT_DELETION_URL, DATA_DELETION_URL } from '../lib/constants';
 import { showPrivacyOptionsForm } from '../lib/ads';
 import { isPresidentUid } from '../lib/constants';
 import { fmtCoins } from '../lib/coins';
@@ -260,7 +261,12 @@ export default function ProfilePage() {
         <button className="btn btn-ghost" onClick={()=>setEmailOpen(true)} data-testid="change-email-button">Changer l’adresse e-mail</button><div className="section-gap" />
         <button className="btn btn-outline" onClick={onPrivacyOptions}>Confidentialité des annonces (AdMob)</button><div className="section-gap" />
         <button className="btn btn-outline" onClick={onExport}>Exporter mes données (RGPD)</button><div className="section-gap" />
+        <a className="btn btn-outline" href={DATA_DELETION_URL} target="_blank" rel="noopener noreferrer">Supprimer une partie de mes données</a><div className="section-gap" />
         <button className="btn btn-danger" onClick={onDelete} disabled={busy}>Supprimer définitivement mon compte</button>
+        <p style={{ color: 'var(--muted)', fontSize: 12, marginTop: 8, lineHeight: 1.5 }}>
+          Procédure détaillée, données supprimées et durées de conservation :{' '}
+          <a href={ACCOUNT_DELETION_URL} target="_blank" rel="noopener noreferrer">{ACCOUNT_DELETION_URL}</a>
+        </p>
         <div className="legal-links"><a href="/legal/terms">CGU</a> · <a href="/legal/privacy">Confidentialité</a> · <a href="/legal/notices">Mentions légales</a> · <a href="mailto:contact@elysium-esport.fr?subject=Feedback%20ElyWalk">Donner mon avis</a> · <button className="text-button" style={{display:'inline',padding:0,width:'auto'}} onClick={()=>navigate('/whats-new')}>Nouveautés</button><br/>ElyWalk 1.1.0</div>
       </div>
 

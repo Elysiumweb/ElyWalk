@@ -4,7 +4,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
-import { getActivitySession } from '../lib/db';
+import { getActivitySession, deleteActivitySession } from '../lib/db';
 import { shareActivity } from '../lib/share';
 import type { ActivitySession } from '../lib/types';
 import { fmtNumber, formatDistance } from '../lib/coins';
@@ -73,6 +73,21 @@ export default function ActivityDetailPage() {
     }
   };
 
+  const onDelete = async () => {
+    if (!profile || !session?.id) return;
+    if (!confirm('Supprimer cette sortie et son tracé GPS ? Cette action est définitive.')) return;
+    setBusy(true);
+    try {
+      await deleteActivitySession(profile.uid, session.id);
+      toast('Sortie et tracé GPS supprimés.', 'success');
+      navigate('/activity');
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (loading) return <div className="screen"><div className="spinner" style={{ margin: '40px auto' }} /></div>;
   if (!session) return <div className="screen" data-testid="activity-detail-screen"><div className="screen-header"><div><h1 className="screen-title">Sortie introuvable</h1></div></div><p className="empty-state">Cette sortie n’existe plus ou ne vous appartient pas.</p><button className="btn btn-ghost" onClick={() => navigate('/activity')}>← Retour aux sorties</button></div>;
 
@@ -98,6 +113,7 @@ export default function ActivityDetailPage() {
         <div className="row-sub" style={{ marginTop: 6 }}>{(session.points || []).length} points GPS enregistrés</div>
         <button className="btn btn-gold" style={{ marginTop: 12, width: '100%' }} onClick={onShare} disabled={busy}>{busy ? 'Préparation…' : '📤 Partager cette sortie'}</button>
         <button className="btn btn-outline" style={{ marginTop: 8, width: '100%' }} onClick={() => navigate('/activity')}>Voir toutes mes sorties</button>
+        <button className="btn btn-danger" style={{ marginTop: 8, width: '100%' }} onClick={onDelete} disabled={busy}>🗑 Supprimer cette sortie et son tracé GPS</button>
       </div>
     </div>
   );
