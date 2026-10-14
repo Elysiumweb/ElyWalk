@@ -1,6 +1,6 @@
 import { useNavigate, useParams } from 'react-router-dom';
 import type { ReactNode } from 'react';
-import { PRIVACY_POLICY_URL } from '../lib/constants';
+import { PRIVACY_POLICY_URL, ACCOUNT_DELETION_URL } from '../lib/constants';
 
 /**
  * Documents légaux ElyWalk.
@@ -144,9 +144,13 @@ const content: Record<string, LegalDoc> = {
 
         <h2>6. Durées de conservation</h2>
         <p>
-          Les données sont conservées tant que le compte est actif, puis supprimées dans un
-          délai raisonnable après suppression du compte. Certaines données comptables ou
-          liées à la sécurité peuvent être conservées plus longtemps lorsque la loi l’exige.
+          Les données sont conservées tant que le compte est actif. À la suppression du compte,
+          vos données personnelles sont effacées immédiatement depuis l’application
+          (Profil → « Supprimer définitivement mon compte ») et les copies de sauvegarde de
+          l’hébergeur sont purgées sous 35 jours. Certaines données sont conservées sous forme
+          <strong> anonymisée</strong> lorsque la loi l’exige : demandes de retrait traitées
+          (10 ans, obligation comptable), demandes de partenariat (3 ans), journal anti-fraude
+          dissocié du compte (12 mois).
         </p>
 
         <h2>7. Transferts hors Union européenne</h2>
@@ -168,10 +172,19 @@ const content: Record<string, LegalDoc> = {
           Vous disposez d’un droit d’accès, de rectification, d’effacement, de portabilité,
           de limitation et d’opposition sur vos données, ainsi que du droit de retirer votre
           consentement (publicité, notifications) à tout moment. Depuis l’application, la page
-          Profil vous permet d’exporter l’intégralité de vos données et de supprimer
-          définitivement votre compte. Vous pouvez également écrire à{' '}
-          <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a> ou saisir la CNIL
-          (cnil.fr).
+          Profil vous permet d’exporter l’intégralité de vos données, de supprimer une sortie
+          GPS et son tracé, de retirer un ami, de supprimer votre photo de profil, et de
+          supprimer définitivement votre compte.
+        </p>
+        <p>
+          La procédure complète de suppression du compte, la liste des données supprimées ou
+          conservées et les durées applicables sont détaillées sur :{' '}
+          <a href={ACCOUNT_DELETION_URL} target="_blank" rel="noopener noreferrer">
+            {ACCOUNT_DELETION_URL}
+          </a>
+          . Vous pouvez également écrire à{' '}
+          <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a> (traitement sous 30 jours) ou
+          saisir la CNIL (cnil.fr).
         </p>
       </>
     ),

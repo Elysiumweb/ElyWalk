@@ -431,6 +431,21 @@ export async function getActivitySession(id: string): Promise<ActivitySession | 
   return snap.exists() ? { id: snap.id, ...(snap.data() as ActivitySession) } : null;
 }
 
+/**
+ * Supprime une sortie et ses points GPS (tracé).
+ * Vérifie que la sortie appartient bien à l'utilisateur : les points de parcours
+ * sont des données de localisation sensible, on n'autorise pas la suppression
+ * de celle d'un tiers.
+ */
+export async function deleteActivitySession(uid: string, sessionId: string): Promise<void> {
+  const ref = doc(db, 'activitySessions', sessionId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return;
+  const session = snap.data() as ActivitySession;
+  if (session.uid !== uid) throw new Error('Cette sortie ne vous appartient pas.');
+  await deleteDoc(ref);
+}
+
 export async function listActivitySessions(uid: string, count = 20): Promise<ActivitySession[]> {
   const snaps = await getDocs(query(collection(db, 'activitySessions'), where('uid', '==', uid), limit(count)));
   return snaps.docs.map((d) => ({ id: d.id, ...(d.data() as ActivitySession) })).sort((a, b) => b.startedAt - a.startedAt);
@@ -736,10 +751,32 @@ export async function deleteAccountData(uid: string): Promise<void> {
   }
   const activities = await getDocs(query(collection(db, 'activitySessions'), where('uid', '==', uid)));
   for (const activity of activities.docs) await deleteDoc(activity.ref);
+  // Jetons de notification (identifiants d'appareil) : sous-collection du profil.
+  // Firestore ne supprime PAS les sous-collections avec le document parent.
+  const tokens = await getDocs(collection(db, 'users', uid, 'notificationTokens'));
+  for (const t of tokens.docs) await deleteDoc(t.ref);
+  // Réactions entre amis : contiennent le pseudo et un message libre (160 car. max).
+  // À supprimer dans les deux sens (émises et reçues).
+  for (const field of ['from', 'to'] as const) {
+    const reactions = await getDocs(query(collection(db, 'friendReactions'), where(field, '==', uid)));
+    for (const r of reactions.docs) await deleteDoc(r.ref);
+  }
   const friendships = await getDocs(query(collection(db, 'friendships'), where('members', 'array-contains', uid)));
   for (const f of friendships.docs) await deleteDoc(f.ref);
   for (const field of ['from','to'] as const) { const requests=await getDocs(query(collection(db,'friendRequests'),where(field,'==',uid))); for(const r of requests.docs) await deleteDoc(r.ref); }
-  const withdrawals=await getDocs(query(collection(db,'withdrawals'),where('uid','==',uid))); for(const w of withdrawals.docs) await updateDoc(w.ref,{userName:'Compte supprimé',paypalEmail:null,deletedUser:true});
+  // Retraits : on n'anonymise que les demandes déjà traitées. Une demande encore
+  // « pending » conserve son e-mail PayPal le temps d'être payée, sinon
+  // l'utilisateur perdrait à la fois ses ElyCoins (débités à la demande) et son
+  // paiement. L'adresse est effacée dès le versement effectué.
+  const withdrawals=await getDocs(query(collection(db,'withdrawals'),where('uid','==',uid)));
+  for (const w of withdrawals.docs) {
+    const data = w.data() as Withdrawal;
+    if (data.status === 'pending') {
+      await updateDoc(w.ref, { userName: 'Compte supprimé', deletedUser: true });
+    } else {
+      await updateDoc(w.ref, { userName: 'Compte supprimé', paypalEmail: null, deletedUser: true });
+    }
+  }
   const partners=await getDocs(query(collection(db,'partnerRequests'),where('uid','==',uid))); for(const p of partners.docs) await updateDoc(p.ref,{userName:'Compte supprimé',contactEmail:'supprimé',message:'Données supprimées',deletedUser:true});
   await deleteDoc(doc(db, 'referralClaims', uid)).catch(() => undefined);
   await deleteDoc(doc(db, 'referralCodes', (await getUserProfile(uid))?.referralCode || '_')).catch(() => undefined);

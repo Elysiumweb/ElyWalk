@@ -83,6 +83,34 @@ curl -I https://elywalk-2f7ba.web.app/privacy.html   # 200 + content-type text/h
 firebase deploy --only hosting
 ```
 
+## Suppression de compte — URL publique (exigence Play Store)
+
+Le Play Store exige une **URL de suppression de compte** distincte de la politique de
+confidentialité, qui décrit la procédure, les données supprimées et les durées de
+conservation.
+
+- Fichier source : `app/public/delete-account.html`
+- **URL à renseigner dans la fiche Play Store** :
+
+  ```
+  https://elywalk-2f7ba.web.app/delete-account.html
+  ```
+
+- Constante `ACCOUNT_DELETION_URL` (`app/src/lib/constants.ts`), affichée dans
+  *Profil → Supprimer définitivement mon compte* et dans la politique de confidentialité.
+
+La page documente deux voies : la suppression immédiate depuis l'application
+(Profil → bouton rouge → confirmation → mot de passe, vide si connexion Google) et la
+demande par e-mail à `contact@elysium-esport.fr` (traitement sous 30 jours) lorsque
+l'utilisateur ne peut plus se connecter.
+
+`deleteAccountData()` (`app/src/lib/db.ts`) doit rester exhaustif : il efface
+`dailySteps`, `transactions`, `challenges` et `notificationTokens` (sous-collections du
+profil, **non** supprimées avec le document parent), `activitySessions`, `friendships`,
+`friendRequests` et `friendReactions` (les deux sens), et anonymise `withdrawals` /
+`partnerRequests`. ⚠️ Toute nouvelle collection contenant des données personnelles doit
+y être ajoutée.
+
 ## Firebase (Hosting + règles) — gratuit (Spark)
 
 ```bash
