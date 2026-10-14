@@ -47,6 +47,42 @@ keytool -printcert -jarfile app-release.apk | grep SHA256
 
 Puis `npm run build && firebase deploy --only hosting`.
 
+## Règles de confidentialité — URL publique (exigence Play Store)
+
+Le Play Store exige une politique de confidentialité hébergée sur une **URL publique**
+(HTTPS, accessible dans le monde entier sans connexion, page HTML standard), et un lien
+vers cette URL **dans l'application**.
+
+- Fichier source : `app/public/privacy.html` (page statique autonome, CSS inline).
+- Copié tel quel dans `app/dist/` par `npm run build`, donc servi par Firebase Hosting.
+- **URL à renseigner dans la fiche Play Store** :
+
+  ```
+  https://elywalk-2f7ba.web.app/privacy.html
+  ```
+
+  (fonctionne aussi sur `https://elywalk-2f7ba.firebaseapp.com/privacy.html`)
+
+La constante `PRIVACY_POLICY_URL` (`app/src/lib/constants.ts`) pointe vers cette URL et
+est utilisée à trois endroits : la page *Confidentialité* de l'app, le consentement à
+l'inscription (`AuthPage`) et le pied de page du profil.
+
+Checklist Play Store :
+
+- [ ] *Play Console → Politique → Règles de confidentialité* : coller l'URL ci-dessus.
+- [ ] L'URL répond en 200 sans authentification, sans redirection et sans géoblocage.
+- [ ] Le contenu couvre bien : données d'activité physique (santé), localisation,
+      identifiants appareil (IP, HWID, jeton FCM, ID publicitaire), publicité AdMob,
+      sous-traitants (Firebase, AdMob, Cloudflare, PayPal, ipify), durées, droits RGPD.
+- [ ] Cohérence avec la fiche *Sécurité des données* et avec `LegalPage.tsx`.
+
+Vérification après déploiement :
+
+```bash
+curl -I https://elywalk-2f7ba.web.app/privacy.html   # 200 + content-type text/html
+firebase deploy --only hosting
+```
+
 ## Firebase (Hosting + règles) — gratuit (Spark)
 
 ```bash

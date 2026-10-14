@@ -1,5 +1,6 @@
 import { useNavigate, useParams } from 'react-router-dom';
 import type { ReactNode } from 'react';
+import { PRIVACY_POLICY_URL } from '../lib/constants';
 
 /**
  * Documents légaux ElyWalk.
@@ -86,9 +87,16 @@ const content: Record<string, LegalDoc> = {
   },
   privacy: {
     title: 'Politique de confidentialité',
-    updated: '20 août 2026',
+    updated: '14 octobre 2026',
     body: (
       <>
+        <p className="legal-online">
+          Version de référence hébergée en ligne :{' '}
+          <a href={PRIVACY_POLICY_URL} target="_blank" rel="noopener noreferrer">
+            {PRIVACY_POLICY_URL}
+          </a>
+        </p>
+
         <h2>1. Responsable du traitement</h2>
         <p>
           Le responsable du traitement est {EDITOR}. Pour toute question relative à vos
@@ -125,9 +133,13 @@ const content: Record<string, LegalDoc> = {
 
         <h2>5. Destinataires</h2>
         <p>
-          Google Firebase (hébergement, base de données, authentification, notifications)
-          et Google AdMob (publicité) agissent en qualité de sous-traitants. Aucune donnée
-          de santé n’est vendue ni cédée à des tiers à des fins commerciales.
+          Google Firebase (hébergement, base de données, authentification, notifications),
+          Google AdMob (publicité), Cloudflare (backend de confiance : attestation d’intégrité,
+          vérification serveur des récompenses, envoi des notifications, file de retraits),
+          PayPal (exécution des retraits) et les services publics d’affichage d’adresse IP
+          (anti-fraude au parrainage) agissent en qualité de sous-traitants. Aucune donnée
+          de santé n’est vendue ni cédée à des tiers à des fins commerciales, et aucune donnée
+          d’activité physique n’est transmise aux régies publicitaires.
         </p>
 
         <h2>6. Durées de conservation</h2>
@@ -149,6 +161,17 @@ const content: Record<string, LegalDoc> = {
           L’accès aux données est protégé par des règles de sécurité, l’authentification
           Firebase et des contrôles d’intégrité. Aucun système n’étant infaillible, nous
           mettons en œuvre des mesures proportionnées aux risques.
+        </p>
+
+        <h2>9. Vos droits</h2>
+        <p>
+          Vous disposez d’un droit d’accès, de rectification, d’effacement, de portabilité,
+          de limitation et d’opposition sur vos données, ainsi que du droit de retirer votre
+          consentement (publicité, notifications) à tout moment. Depuis l’application, la page
+          Profil vous permet d’exporter l’intégralité de vos données et de supprimer
+          définitivement votre compte. Vous pouvez également écrire à{' '}
+          <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a> ou saisir la CNIL
+          (cnil.fr).
         </p>
       </>
     ),
