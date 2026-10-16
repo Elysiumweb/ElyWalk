@@ -56,6 +56,49 @@ export const STEP_TIERS: { min: number; max: number; coins: number }[] = [
 
 export const DAILY_STEP_GOAL = 10000;
 
+// ========== Badges / Trophées ==========
+export const BADGE_DEFINITIONS: import('./types').BadgeDefinition[] = [
+  { id: 'first-10k', title: 'Premier 10K', description: 'Validez 10 000 pas en une journée', icon: '🎯', tier: 'bronze' },
+  { id: 'streak-7', title: 'Semaine d’or', description: 'Série de 7 jours consécutifs', icon: '🔥', tier: 'bronze' },
+  { id: 'streak-30', title: 'Mois de feu', description: 'Série de 30 jours consécutifs', icon: '⚡', tier: 'silver' },
+  { id: 'streak-100', title: 'Légende', description: 'Série de 100 jours consécutifs', icon: '👑', tier: 'legend' },
+  { id: 'first-gps', title: 'Explorateur', description: 'Première sortie GPS enregistrée', icon: '📍', tier: 'bronze' },
+  { id: 'km-10', title: '10 km', description: '10 km cumulés', icon: '🥾', tier: 'bronze' },
+  { id: 'km-100', title: '100 km', description: '100 km cumulés', icon: '🏅', tier: 'silver' },
+  { id: 'km-500', title: '500 km', description: '500 km cumulés', icon: '🌍', tier: 'gold' },
+  { id: 'steps-100k', title: '100K pas', description: '100 000 pas au total', icon: '👟', tier: 'silver' },
+  { id: 'steps-1m', title: 'Millionnaire', description: '1 000 000 pas au total', icon: '💎', tier: 'platinum' },
+  { id: 'referral-first', title: 'Parrain', description: 'Premier filleul éligible', icon: '🤝', tier: 'gold' },
+  { id: 'challenge-first', title: 'Challenger', description: 'Premier défi remporté', icon: '🏆', tier: 'silver' },
+];
+
+export function getBadgeDef(id: string) {
+  return BADGE_DEFINITIONS.find(b => b.id === id);
+}
+
+// ========== Niveaux / Rangs ==========
+export const WALKER_LEVELS: import('./types').WalkerLevel[] = [
+  { level: 1, title: 'Marcheur Bronze', icon: '🥉', minSteps: 0, maxSteps: 50000, color: '#cd7f32', nextAt: 50000 },
+  { level: 2, title: 'Marcheur Argent', icon: '🥈', minSteps: 50000, maxSteps: 150000, color: '#c0c0c0', nextAt: 150000 },
+  { level: 3, title: 'Marcheur Or', icon: '🥇', minSteps: 150000, maxSteps: 500000, color: '#d8ca82', nextAt: 500000 },
+  { level: 4, title: 'Marcheur Platine', icon: '💠', minSteps: 500000, maxSteps: 1000000, color: '#a8d8f0', nextAt: 1000000 },
+  { level: 5, title: 'Marcheur Diamant', icon: '💎', minSteps: 1000000, maxSteps: 3000000, color: '#b9f2ff', nextAt: 3000000 },
+  { level: 6, title: 'Légende ElyWalk', icon: '👑', minSteps: 3000000, maxSteps: null, color: '#ffd700', nextAt: null },
+];
+
+export function getWalkerLevel(totalSteps: number): import('./types').WalkerLevel {
+  const steps = Math.max(0, totalSteps || 0);
+  for (let i = WALKER_LEVELS.length - 1; i >= 0; i--) {
+    if (steps >= WALKER_LEVELS[i].minSteps) return WALKER_LEVELS[i];
+  }
+  return WALKER_LEVELS[0];
+}
+export function getNextLevel(totalSteps: number) {
+  const current = getWalkerLevel(totalSteps);
+  const idx = WALKER_LEVELS.findIndex(l => l.level === current.level);
+  return idx >= 0 && idx < WALKER_LEVELS.length - 1 ? WALKER_LEVELS[idx + 1] : null;
+}
+
 // Défis visibles sans attendre une campagne distante. Les dates sont recalculées
 // à chaque ouverture : une vraie campagne peut ensuite être remplacée par le back-office.
 export function getChallengeDefinitions(now = new Date()): import('./types').ChallengeDefinition[] {

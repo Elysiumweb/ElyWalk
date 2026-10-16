@@ -15,10 +15,15 @@ import {
   removeFriendship,
   sendFriendReaction,
   watchFriendReactions,
+  sendDirectMessage,
+  watchRecentMessages,
+  listRecentMessages,
 } from '../lib/db';
 import Avatar from '../components/Avatar';
+import ActivityFeed from '../components/ActivityFeed';
+import QRCode, { shareFriendCode } from '../components/QRCode';
 import { fmtNumber, dateStr } from '../lib/coins';
-import type { UserProfile, FriendRequest } from '../lib/types';
+import type { UserProfile, FriendRequest, DirectMessage } from '../lib/types';
 
 export default function FriendsPage() {
   const { profile } = useAuth();
@@ -34,6 +39,13 @@ export default function FriendsPage() {
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState<'friends'|'feed'|'messages'>('friends');
+  const [qrOpen, setQrOpen] = useState(false);
+  const [messages, setMessages] = useState<DirectMessage[]>([]);
+  const [msgOpen, setMsgOpen] = useState<{uid:string; name:string}|null>(null);
+  const [msgText, setMsgText] = useState('');
+  const [chatMessages, setChatMessages] = useState<DirectMessage[]>([]);
+  const [msgBusy, setMsgBusy]=useState(false);
 
   useEffect(() => {
     if (!profile) return;
@@ -45,8 +57,8 @@ export default function FriendsPage() {
     });
     const unsub3 = watchOutgoingRequests(profile.uid, setOutgoing);
     const unsub4 = watchFriendReactions(profile.uid, setReactions);
-    return () => { unsub1(); unsub2(); unsub3(); unsub4(); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const unsub5 = watchRecentMessages(profile.uid, setMessages);
+    return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); };
   }, [profile?.uid]);
 
   const onAdd = async () => {
@@ -84,7 +96,23 @@ export default function FriendsPage() {
   const doSearch = async () => { setSearchResults(await searchUsersByName(code)); };
   const remove = async (uid:string) => { if(!profile||!confirm('Supprimer cet ami ?'))return; await removeFriendship(profile.uid,uid); toast('Ami supprimé.','info'); };
   const share = async () => { if(!profile)return; const text=`Rejoins-moi sur ElyWalk : ${location.origin}/?ref=${profile.referralCode}`; if(navigator.share)await navigator.share({text});else{await navigator.clipboard.writeText(text);toast('Lien copié !','success')} };
+  const shareQR = async()=>{ if(!profile)return; try{ const r=await shareFriendCode(profile.referralCode, profile.displayName); toast(r==='shared'?'QR partagé !':'Image enregistrée.','success'); }catch(e){toast((e as Error).message,'error')} };
   const today = dateStr();
+
+  const openChat = async (uid:string, name:string)=>{
+    if(!profile) return;
+    setMsgOpen({uid,name});
+    const { watchDirectMessages } = await import('../lib/db');
+    // subscribe
+    watchDirectMessages(profile.uid, uid, setChatMessages);
+  };
+  const sendMsg = async()=>{
+    if(!profile||!msgOpen||!msgText.trim()) return;
+    setMsgBusy(true);
+    try{ await sendDirectMessage(profile, msgOpen.uid, msgText); setMsgText(''); }
+    catch(e){ toast((e as Error).message,'error'); }
+    finally{ setMsgBusy(false); }
+  };
 
   return (
     <div className="screen" data-testid="friends-screen">
@@ -98,14 +126,25 @@ export default function FriendsPage() {
         </button>
       </div>
 
+      <div className="chip-row" style={{marginBottom:8}}>
+        <button className={`chip ${tab==='friends'?'chip-active':''}`} onClick={()=>setTab('friends')}>Amis</button>
+        <button className={`chip ${tab==='feed'?'chip-active':''}`} onClick={()=>setTab('feed')}>Fil d’activité</button>
+        <button className={`chip ${tab==='messages'?'chip-active':''}`} onClick={()=>setTab('messages')}>Messages {messages.length>0 && `· ${messages.length}`}</button>
+      </div>
+
       <div className="card">
         <div className="card-title">Mon code ami</div>
         <div className="display" style={{ fontSize: 22, color: 'var(--gold)', letterSpacing: '0.2em' }} data-testid="my-friend-code">
           {profile?.referralCode}
         </div>
-        <p style={{ color: 'var(--muted)', fontSize: 12, marginTop: 6 }}>Partagez ce code : il sert aussi de code de parrainage (+10 EC par filleul éligible).</p><button className="btn btn-outline btn-sm" style={{marginTop:10}} onClick={share}>Partager / copier</button>
+        <p style={{ color: 'var(--muted)', fontSize: 12, marginTop: 6 }}>Partagez ce code : il sert aussi de code de parrainage (+10 EC par filleul éligible).</p>
+        <div className="two-col" style={{marginTop:10}}>
+          <button className="btn btn-outline btn-sm" onClick={share}>Partager / copier</button>
+          <button className="btn btn-gold btn-sm" onClick={()=>setQrOpen(true)}>QR code</button>
+        </div>
       </div>
 
+      {tab==='friends' && <>
       {requests.length > 0 && (
         <div className="card" data-testid="friend-requests-card">
           <div className="card-title">Demandes reçues</div>
@@ -150,11 +189,43 @@ export default function FriendsPage() {
                   aujourd’hui · {fmtNumber(f.totalCalories)} kcal au total
                 </div>
               </div>
+              <button className="icon-danger" title="Message" onClick={()=>openChat(f.uid,f.displayName)} aria-label="Message">💬</button>
               <button className="icon-danger" onClick={()=>profile&&sendFriendReaction(profile,f.uid,'👏',prompt('Petit message (optionnel)')||'').then(()=>toast('Encouragement envoyé !','success'))} aria-label="Encourager">👏</button><button className="icon-danger" onClick={()=>remove(f.uid)} aria-label="Supprimer">✕</button>
             </div>
           ))
         )}
       </div>
+
+      <ActivityFeed />
+      </>}
+
+      {tab==='feed' && <ActivityFeed />}
+
+      {tab==='messages' && (
+        <div className="card" data-testid="messages-tab">
+          <div className="card-title">Messagerie légère</div>
+          <p className="card-help">Messages courts entre amis (max 500 car.). Respect et bienveillance — tout abus peut être signalé.</p>
+          {friends.length===0 ? <div className="empty-state">Ajoutez des amis pour discuter.</div> : friends.map(f=>(
+            <div key={f.uid} className="list-row">
+              <Avatar name={f.displayName} photoURL={f.photoURL} size={40} />
+              <div className="row-main"><div className="row-title">{f.displayName}</div><div className="row-sub">💬 Conversation privée</div></div>
+              <button className="btn btn-gold btn-sm" onClick={()=>openChat(f.uid,f.displayName)}>Ouvrir</button>
+            </div>
+          ))}
+          {messages.length>0 && (
+            <div style={{marginTop:12}}>
+              <div className="card-title" style={{fontSize:12}}>Derniers messages</div>
+              {messages.slice(0,5).map(m=>(
+                <div key={m.id} className="list-row" style={{opacity:0.9}}>
+                  <span style={{fontSize:18}}>{m.from===profile?.uid?'↗':'↘'}</span>
+                  <div className="row-main"><div className="row-title" style={{fontSize:12}}>{m.from===profile?.uid?`À ${m.toName}`:m.fromName}</div><div className="row-sub">{m.text.slice(0,60)}</div></div>
+                  <small style={{color:'var(--muted)'}}>{new Date(m.createdAt).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}</small>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <Sheet open={addOpen} onClose={() => setAddOpen(false)} title="Ajouter un ami" testId="add-friend-sheet">
         <div className="field">
@@ -169,6 +240,33 @@ export default function FriendsPage() {
         </div>
         <div className="two-col"><button className="btn btn-gold" onClick={onAdd} disabled={busy} data-testid="send-friend-request-button">{busy ? '...' : 'Ajouter par code'}</button><button className="btn btn-outline" onClick={doSearch}>Chercher pseudo</button></div>
         {searchResults.map(u=><div className="list-row" key={u.uid}><Avatar name={u.displayName} photoURL={u.photoURL}/><div className="row-main"><div className="row-title">{u.displayName}</div></div><button className="btn btn-gold btn-sm" onClick={()=>profile&&sendFriendRequest(profile,u).then(()=>toast('Demande envoyée','success'))}>Ajouter</button></div>)}
+      </Sheet>
+
+      <Sheet open={qrOpen} onClose={()=>setQrOpen(false)} title="QR code ami">
+        <div style={{textAlign:'center', padding:'8px 0'}}>
+          {profile && <QRCode value={`${location.origin}/?ref=${profile.referralCode}`} size={220} title={`Code ${profile.referralCode}`} />}
+          <div style={{marginTop:12, fontFamily:'var(--font-display)', fontSize:24, color:'var(--gold)', letterSpacing:'0.2em'}}>{profile?.referralCode}</div>
+          <p style={{color:'var(--muted)', fontSize:12, marginTop:8}}>Montrez ce QR à vos amis en présentiel — scan instantané.</p>
+          <button className="btn btn-gold" style={{marginTop:12}} onClick={shareQR}>Partager l’image stylée ElyWalk</button>
+        </div>
+      </Sheet>
+
+      <Sheet open={!!msgOpen} onClose={()=>setMsgOpen(null)} title={`💬 ${msgOpen?.name||''}`}>
+        <div style={{maxHeight:'50vh', overflow:'auto', marginBottom:12}}>
+          {chatMessages.length===0 ? <div className="empty-state">Aucun message. Dites bonjour ! 👋</div> : chatMessages.map(m=>(
+            <div key={m.id} className={`list-row ${m.from===profile?.uid?'':'incoming'}`} style={{background: m.from===profile?.uid?'var(--gold-dim)':'transparent', borderRadius:8, margin:'6px 0', padding:'8px 10px'}}>
+              <div className="row-main">
+                <div className="row-title" style={{fontSize:12}}>{m.from===profile?.uid?'Vous':m.fromName} <span style={{color:'var(--muted)', fontWeight:400}}>{new Date(m.createdAt).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}</span></div>
+                <div className="row-sub" style={{color:'var(--white)'}}>{m.text}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="field">
+          <textarea className="input" rows={2} maxLength={500} value={msgText} onChange={e=>setMsgText(e.target.value)} placeholder="Message (500 car. max) — restez bienveillant" data-testid="message-input" />
+          <small style={{color:'var(--muted)'}}>{msgText.length}/500</small>
+        </div>
+        <button className="btn btn-gold" onClick={sendMsg} disabled={msgBusy||!msgText.trim()} data-testid="send-message-button">{msgBusy?'Envoi...':'Envoyer'}</button>
       </Sheet>
     </div>
   );
