@@ -21,7 +21,7 @@ service cloud.firestore {
     function safeProfileEdit() {
       return economyUnchanged() && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
         'displayName','photoURL','paypalEmail','referredBy','referralRejected','signupIp','lastIp','hwid','hwids',
-        'dailyStepGoal','strideLengthCm','bio','onboardingDone','todaySteps','todayDate','health','unitSystem'
+        'dailyStepGoal','strideLengthCm','bio','onboardingDone','todaySteps','todayDate','health','unitSystem','activityPrivacy'
       ]) && numberBetween(request.resource.data.todaySteps, 0, 60000);
     }
     function validStepCredit(uid) {
@@ -165,7 +165,7 @@ service cloud.firestore {
       allow delete: if false;
     }
     match /activitySessions/{id} {
-      allow read: if auth() && resource.data.uid == request.auth.uid;
+      allow read: if auth() && (resource.data.uid == request.auth.uid || resource.data.visibility in ['friends','link']);
       allow create: if verified() && request.resource.data.uid == request.auth.uid
         && request.resource.data.type in ['walk','run'] && request.resource.data.status == 'active';
       allow update: if verified() && resource.data.uid == request.auth.uid
@@ -181,6 +181,40 @@ service cloud.firestore {
       allow update: if president() || (auth() && resource.data.uid == request.auth.uid
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['userName','contactEmail','message','deletedUser'])
         && request.resource.data.userName == 'Compte supprimé'); allow delete: if false;
+    }
+    match /users/{uid}/badges/{badgeId} {
+      allow read: if auth();
+      allow create, update: if self(uid) && request.resource.data.badgeId == badgeId;
+      allow delete: if self(uid);
+    }
+    match /activityFeed/{id} {
+      allow read: if auth();
+      allow create: if auth() && request.resource.data.uid == request.auth.uid
+        && request.resource.data.createdAt is number
+        && request.resource.data.message.size() <= 300;
+      allow update, delete: if auth() && resource.data.uid == request.auth.uid;
+    }
+    match /friendChallenges/{id} {
+      allow read: if auth() && request.auth.uid in resource.data.participants;
+      allow create: if auth() && request.resource.data.creatorUid == request.auth.uid
+        && request.resource.data.participants.size() >= 2
+        && request.resource.data.participants.size() <= 6
+        && request.resource.data.target is number;
+      allow update: if auth() && request.auth.uid in resource.data.participants;
+      allow delete: if auth() && resource.data.creatorUid == request.auth.uid;
+    }
+    match /directMessages/{id} {
+      allow read: if auth() && request.auth.uid in [resource.data.from, resource.data.to];
+      allow create: if auth() && request.resource.data.from == request.auth.uid
+        && request.resource.data.text.size() <= 500;
+      allow update: if auth() && request.auth.uid == resource.data.to;
+      allow delete: if auth() && request.auth.uid in [resource.data.from, resource.data.to];
+    }
+    match /communityEvents/{id} {
+      allow read: if auth();
+      allow create: if auth() && request.resource.data.creatorUid == request.auth.uid;
+      allow update: if auth();
+      allow delete: if auth() && resource.data.creatorUid == request.auth.uid;
     }
     match /partnerOffers/{id} { allow read: if auth(); allow write: if president(); }
     match /establishments/{id} { allow read: if auth(); allow write: if president(); }

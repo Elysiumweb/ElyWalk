@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { getLeaderboard, listDailySteps, watchFriendships } from '../lib/db';
 import Avatar from '../components/Avatar';
 import { fmtCoins, fmtNumber } from '../lib/coins';
-import { isPresidentUid, PRESIDENT_UID } from '../lib/constants';
+import { isPresidentUid, PRESIDENT_UID, getWalkerLevel } from '../lib/constants';
 import type { UserProfile } from '../lib/types';
 
 export default function LeaderboardPage() {
@@ -92,9 +92,12 @@ export default function LeaderboardPage() {
                         👑 {u.uid === PRESIDENT_UID ? 'Président' : 'Co-Président'}
                       </span>
                     )}
+                    <span className="badge" style={{ marginLeft: 4, background: `${getWalkerLevel(u.totalSteps).color}22`, color: getWalkerLevel(u.totalSteps).color, borderColor: getWalkerLevel(u.totalSteps).color }}>
+                      {getWalkerLevel(u.totalSteps).icon} {getWalkerLevel(u.totalSteps).title.split(' ').pop()}
+                    </span>
                   </button>
                   <div className="row-sub">
-                    {fmtNumber(u.totalSteps)} pas · 🔥 {u.streak} j
+                    {fmtNumber(u.totalSteps)} pas · 🔥 {u.streak} j · {getWalkerLevel(u.totalSteps).title}
                   </div>
                 </div>
                 <div className="row-value">{mode==='coins'||mode==='friends'?`${fmtCoins(u.elycoins)} EC`:`${fmtNumber(score(u))} pas`}</div>

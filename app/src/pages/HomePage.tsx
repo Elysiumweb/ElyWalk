@@ -10,6 +10,7 @@ import { validateSteps, creditAdReward, syncTodaySteps } from '../lib/db';
 import { coinsForSteps, caloriesForSteps, fmtCoins, fmtNumber, dateStr, nextStepTier, formatDistance } from '../lib/coins';
 import { shareDailyStats } from '../lib/share';
 import { DAILY_STEP_GOAL, STEP_TIERS, AD_REWARD_COINS, ATTESTATION_WORKER_URL } from '../lib/constants';
+import LevelBadge from '../components/LevelBadge';
 import { Capacitor } from '@capacitor/core';
 
 type PermState = 'granted' | 'denied' | 'prompt' | 'unavailable';
@@ -98,6 +99,12 @@ export default function HomePage() {
       return () => clearTimeout(t);
     }
   }, [profile?.uid, Math.floor(steps / 200)]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Vérification badges au chargement (rattrapage pour anciens comptes)
+  useEffect(()=>{
+    if(!profile) return;
+    import('../lib/db').then(m=>m.checkAndUnlockBadges(profile, { stepsToday: profile.todaySteps, totalSteps: profile.totalSteps }).catch(()=>undefined));
+  },[profile?.uid]);
 
   const askPermission = async () => {
     const granted = await pedometer.requestPermission();
@@ -251,9 +258,11 @@ export default function HomePage() {
       <div className="home-actions">
         <button type="button" className="btn btn-ghost" onClick={() => navigate('/history')}>Historique, santé & calendrier</button>
         <button type="button" className="btn btn-outline" onClick={() => navigate('/challenges')}>🏆 Ouvrir les défis datés</button>
+        <button type="button" className="btn btn-outline" onClick={() => navigate('/events')}>👥 Marcher ensemble · événements</button>
         <button type="button" className="btn btn-outline" onClick={() => navigate('/activity')}>▶ Commencer une sortie</button>
         <button type="button" className="btn btn-outline" onClick={async () => { if (!profile) return; try { const result = await shareDailyStats(profile, steps, formatDistance(distanceMeters, unitSystem), calories); toast(result === 'shared' ? 'Carte partagée !' : 'Carte enregistrée dans vos téléchargements.', 'success'); } catch (e) { if ((e as Error).name !== 'AbortError') toast((e as Error).message, 'error'); } }}>Partager mes pas du jour</button>
       </div>
+      {profile && <LevelBadge totalSteps={profile.totalSteps} />}
       <div className="card streak-freeze-card"><div className="card-title">Série protégée</div><div className="freeze-count">🧊 {profile?.streakFreezes ?? 1} gel disponible</div><p>Une journée manquée peut être rattrapée automatiquement le lendemain. Votre série ne repart plus forcément à 1.</p></div>
 
       <Sheet open={showTiers} onClose={() => setShowTiers(false)} title="Barème quotidien" testId="tiers-sheet">

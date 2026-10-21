@@ -44,6 +44,15 @@ export interface UserProfile {
   streakFreezes?: number;
   health?: HealthProfile;
   unitSystem?: UnitSystem;
+  /** Préférences de vie privée pour le fil d'activité */
+  activityPrivacy?: ActivityPrivacySettings;
+}
+
+export interface ActivityPrivacySettings {
+  shareGoals?: boolean;
+  shareActivities?: boolean;
+  shareBadges?: boolean;
+  shareChallenges?: boolean;
 }
 
 export interface DailySteps {
@@ -54,7 +63,7 @@ export interface DailySteps {
   validatedAt: number;
 }
 
-export type ChallengeKind = 'personal' | 'collective' | 'seasonal';
+export type ChallengeKind = 'personal' | 'collective' | 'seasonal' | 'friend';
 export type ChallengeMetric = 'steps' | 'streak' | 'activeDays' | 'distance';
 
 export interface ChallengeDefinition {
@@ -90,6 +99,8 @@ export interface ActivityPoint {
   altitude?: number;
 }
 
+export type ActivityVisibility = 'private' | 'friends' | 'link';
+
 export interface ActivitySession {
   id?: string;
   uid: string;
@@ -103,6 +114,9 @@ export interface ActivitySession {
   steps?: number;
   points: ActivityPoint[];
   status: 'active' | 'completed';
+  /** Visibilité de la sortie dans l'app */
+  visibility?: ActivityVisibility;
+  sharedWith?: string[];
 }
 
 export interface PartnerOffer {
@@ -173,5 +187,124 @@ export interface ReferralClaim {
   referredIp?: string | null;
   referredHwid?: string | null;
   claimed: boolean;
+  createdAt: number;
+}
+
+// ========== Badges / Trophées ==========
+
+export type BadgeId =
+  | 'first-10k'
+  | 'streak-7'
+  | 'streak-30'
+  | 'streak-100'
+  | 'first-gps'
+  | 'km-10'
+  | 'km-100'
+  | 'km-500'
+  | 'steps-100k'
+  | 'steps-1m'
+  | 'referral-first'
+  | 'challenge-first';
+
+export interface BadgeDefinition {
+  id: BadgeId;
+  title: string;
+  description: string;
+  icon: string;
+  tier: 'bronze' | 'silver' | 'gold' | 'platinum' | 'legend';
+}
+
+export interface UserBadge {
+  id?: string;
+  badgeId: BadgeId;
+  unlockedAt: number;
+  seen?: boolean;
+}
+
+// ========== Niveaux / Rangs ==========
+
+export interface WalkerLevel {
+  level: number;
+  title: string;
+  icon: string;
+  minSteps: number;
+  maxSteps: number | null;
+  color: string;
+  nextAt: number | null;
+}
+
+// ========== Défis entre amis ==========
+
+export interface FriendChallenge {
+  id?: string;
+  creatorUid: string;
+  creatorName: string;
+  title: string;
+  target: number;
+  metric: 'steps' | 'distance';
+  participants: string[];
+  participantNames: Record<string, string>;
+  invitedUids?: string[];
+  startsAt: string;
+  endsAt: string;
+  status: 'active' | 'completed';
+  createdAt: number;
+  reward?: number;
+}
+
+export interface FriendChallengeProgress {
+  uid: string;
+  displayName: string;
+  photoURL?: string | null;
+  progress: number;
+  percent: number;
+}
+
+// ========== Fil d'activité ==========
+
+export type ActivityFeedType = 'goal' | 'activity' | 'challenge' | 'badge' | 'streak' | 'friend';
+
+export interface ActivityFeedItem {
+  id?: string;
+  uid: string;
+  displayName: string;
+  photoURL?: string | null;
+  type: ActivityFeedType;
+  message: string;
+  metadata?: Record<string, unknown>;
+  createdAt: number;
+}
+
+// ========== Messagerie légère ==========
+
+export interface DirectMessage {
+  id?: string;
+  from: string;
+  fromName: string;
+  to: string;
+  toName: string;
+  text: string;
+  createdAt: number;
+  activityId?: string | null;
+  read?: boolean;
+}
+
+// ========== Événements communautaires ==========
+
+export interface CommunityEvent {
+  id?: string;
+  title: string;
+  description: string;
+  establishmentId?: string | null;
+  establishmentName?: string | null;
+  location?: string | null;
+  lat?: number | null;
+  lng?: number | null;
+  date: string;
+  time?: string | null;
+  creatorUid: string;
+  creatorName: string;
+  participants: string[];
+  maxParticipants?: number | null;
   createdAt: number;
 }

@@ -790,3 +790,49 @@ img.podium-avatar {
 .activity-privacy { color: var(--muted); font-size: 10px; text-align: center; margin-top: 10px; }
 .activity-history { margin: 12px; }
 .activity-history-icon { font-size: 22px; }
+
+/* ===== Nouvelles fonctionnalités sociales ===== */
+.badge-grid{ display:grid; grid-template-columns: repeat(3,1fr); gap:10px; }
+.badge-grid-small{ grid-template-columns: repeat(4,1fr); gap:8px; }
+.badge-item{ background:var(--surface-2); border:1px solid var(--gold-border); border-radius:12px; padding:10px 6px; display:flex; flex-direction:column; align-items:center; gap:6px; color:var(--muted); transition:all .15s; }
+.badge-item.badge-unlocked{ background:linear-gradient(160deg, rgba(216,202,130,.18), rgba(216,202,130,.04)); border-color: var(--gold); color:var(--white); box-shadow:0 4px 14px rgba(216,202,130,.12); }
+.badge-item.badge-locked{ opacity:.55; }
+.badge-item .badge-icon{ font-size:26px; }
+.badge-item .badge-icon.large{ font-size:48px; }
+.badge-item .badge-name{ font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.06em; text-align:center; }
+.badge-item.tier-gold.badge-unlocked{ border-color:#d8ca82; }
+.badge-item.tier-platinum.badge-unlocked{ border-color:#a8d8f0; box-shadow:0 0 14px rgba(168,216,240,.25); }
+.badge-item.tier-legend.badge-unlocked{ border-color:#ffd700; box-shadow:0 0 18px rgba(255,215,0,.35); }
+.badge-preview{ text-align:center; padding:18px 12px; }
+.badge-preview .badge-icon{ font-size:56px; margin-bottom:10px; }
+.badge-preview h3{ color:var(--gold); font-family:var(--font-display); }
+.badge-preview p{ color:var(--muted); font-size:13px; margin:6px 0 8px; }
+.badge-tier{ display:inline-flex; padding:4px 10px; border-radius:99px; font-size:10px; text-transform:uppercase; letter-spacing:.08em; background:var(--gold-dim); color:var(--gold); border:1px solid var(--gold-border); }
+
+.level-card{ background:var(--surface); border:1px solid var(--gold-border); border-radius:16px; padding:14px; margin-bottom:12px; }
+.level-top{ display:flex; align-items:center; gap:12px; }
+.level-icon{ width:44px; height:44px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:22px; box-shadow:0 4px 14px rgba(0,0,0,.25); }
+.level-title{ font-weight:700; color:var(--white); font-size:14px; }
+.level-sub{ font-size:11px; color:var(--muted); }
+.level-progress-text{ margin-left:auto; font-family:var(--font-display); color:var(--gold); font-size:13px; }
+.level-bar{ height:8px; border-radius:99px; background:var(--surface-2); margin-top:10px; overflow:hidden; }
+.level-bar div{ height:100%; border-radius:inherit; transition:width .5s; }
+.level-next{ font-size:11px; color:var(--muted); margin-top:6px; text-align:center; }
+.level-badge.compact{ display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:99px; font-size:11px; border:1px solid var(--gold-border); background:var(--gold-dim); color:var(--gold); }
+
+.qr-wrap img{ box-shadow:0 8px 24px rgba(0,0,0,.25); }
+.referral-code{ display:flex; flex-direction:column; align-items:center; gap:4px; padding:14px; border-radius:14px; background:var(--surface-2); border:1px solid var(--gold-border); width:100%; cursor:pointer; }
+.referral-code span{ font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.1em; }
+.referral-code strong{ font-family:var(--font-display); color:var(--gold); font-size:26px; letter-spacing:.2em; }
+.copy-value{ background:none; border:0; color:var(--gold); font:inherit; font-size:12px; cursor:pointer; display:inline-flex; gap:4px; }
+
+.challenge-intro, .challenge-card{ margin-bottom:12px; }
+
+.activity-privacy .chip-row{ height:auto; padding-bottom:4px; }
+
+/* Events */
+.event-card{ border-left:3px solid var(--gold); }
+
+/* Fix for message incoming */
+.list-row.incoming{ border:1px solid var(--gold-border); }
+
