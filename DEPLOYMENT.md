@@ -36,7 +36,18 @@ servi à la racine des deux domaines Hosting. Deux points sont déjà réglés d
 repo : `firebase.json` n'ignore plus les dossiers `.well-known` (retrait de
 `**/.*`), et Firebase Hosting sert les fichiers statiques avant les rewrites SPA.
 
-Générer l'empreinte SHA-256 **du certificat de signature** :
+Pour une application distribuée via **Google Play App Signing**, l'empreinte
+à publier est celle du **certificat de clé de signature de l'application**
+(Play Console → *Configuration* → *Intégrité de l'application*) — **pas** celle
+de la clé d'importation ni une clé debug. L'empreinte de production ElyWalk est
+actuellement :
+
+```text
+F6:20:12:12:DA:72:EC:0B:79:88:94:36:9E:99:CF:63:E3:DA:C3:8D:50:7B:5E:1F:08:3C:A3:E5:5B:8B:93:E6
+```
+
+Pour une distribution hors Play dont le certificat est réellement local, on
+peut régénérer le fichier avec :
 
 ```bash
 cd app
@@ -45,7 +56,20 @@ bash scripts/generate-assetlinks.sh <keystore> <alias>
 keytool -printcert -jarfile app-release.apk | grep SHA256
 ```
 
-Puis `npm run build && firebase deploy --only hosting`.
+Puis déployer **après** le build :
+
+```bash
+npm run build
+firebase deploy --only hosting --project elywalk-2f7ba
+```
+
+Vérifier les deux domaines sans redirection et avec `Content-Type:
+application/json` :
+
+```bash
+curl -i https://elywalk-2f7ba.web.app/.well-known/assetlinks.json
+curl -i https://elywalk-2f7ba.firebaseapp.com/.well-known/assetlinks.json
+```
 
 ## Règles de confidentialité — URL publique (exigence Play Store)
 
@@ -192,7 +216,7 @@ npx cap sync android
 npx cap open android
 ```
 
-La version Android est `2 / 1.1.0`.
+La version Android de publication est `3 / 1.3.1`. Construisez un nouvel AAB signé avec ce code de version avant de le promouvoir vers la production Play.
 
 ## Consentement publicitaire RGPD (F03)
 

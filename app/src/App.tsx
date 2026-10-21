@@ -60,24 +60,31 @@ function Shell() {
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
     if (!profile?.onboardingDone) return;
+
     let firstLoad = true;
+    let disposed = false;
+    let openingTimer: number | undefined;
     (async () => {
       await initAds();
       await loadAppOpenAd();
-      // Affiche l'annonce d'ouverture peu après le lancement.
-      setTimeout(() => {
-        if (firstLoad) {
+      if (disposed) return;
+      // Affiche l'annonce d'ouverture peu après le lancement, une fois que
+      // l'écran principal est réellement visible et que l'annonce est prête.
+      openingTimer = window.setTimeout(() => {
+        if (firstLoad && !disposed) {
           firstLoad = false;
-          showAppOpenAdIfReady();
+          void showAppOpenAdIfReady();
         }
       }, 3500);
     })();
     const sub = CapApp.addListener('appStateChange', ({ isActive }) => {
-      if (isActive && !firstLoad) {
-        showAppOpenAdIfReady();
+      if (isActive && !firstLoad && !disposed) {
+        void showAppOpenAdIfReady();
       }
     });
     return () => {
+      disposed = true;
+      if (openingTimer !== undefined) window.clearTimeout(openingTimer);
       sub.then((h) => h.remove());
     };
   }, [profile?.onboardingDone]);
