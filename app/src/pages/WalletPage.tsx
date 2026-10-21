@@ -8,6 +8,7 @@ import { fmtCoins, fmtEuros, coinsToEuros } from '../lib/coins';
 import { MIN_PAYPAL_COINS, isPresidentUid } from '../lib/constants';
 import { updateUserFields } from '../lib/db';
 import type { Withdrawal, CoinTransaction } from '../lib/types';
+import { showInterstitial } from '../lib/ads';
 
 export default function WalletPage() {
   const { profile } = useAuth();
@@ -61,6 +62,10 @@ export default function WalletPage() {
       setDonateOpen(false);
       setAmount('');
       reload();
+      // Le retrait est déjà enregistré de façon atomique. L'annonce est
+      // volontairement non bloquante afin de ne jamais interrompre l'opération
+      // financière si AdMob n'a pas d'inventaire ou si le réseau échoue.
+      if (type === 'paypal') void showInterstitial();
     } catch (e) {
       toast((e as Error).message, 'error');
     } finally {

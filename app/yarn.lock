@@ -160,10 +160,10 @@
     "@babel/helper-string-parser" "^7.29.7"
     "@babel/helper-validator-identifier" "^7.29.7"
 
-"@capacitor-community/admob@^8.1.0":
-  version "8.1.0"
-  resolved "https://registry.npmjs.org/@capacitor-community/admob/-/admob-8.1.0.tgz"
-  integrity sha512-DMIxg80CwQsJd0EcvsCNtpWizFcesZUFCFNVxRctv4HLSH8RPGfaS3pxRuq+tXw6jy0za5o3g5l/+z201nHNsw==
+"@capacitor-community/admob@^8.2.1":
+  version "8.2.1"
+  resolved "https://registry.npmjs.org/@capacitor-community/admob/-/admob-8.2.1.tgz"
+  integrity sha512-kJRy6EMNrutDZL0ETChg5pAJ9pQFxkcsinrTRD4wkYp7NGkLZmG0m/YBMyXvUhMkbMIqlCGkNRSjgXi25F9/ww==
   dependencies:
     "@capacitor/core" "^8.0.0"
     "@rdlabo/capacitor-docgen" "^0.4.1"

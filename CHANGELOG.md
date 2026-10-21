@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.1 — 2026-10-21
+
+- **AdMob production** : remplacement de l'ancien compte AdMob par l'ID d'application et les trois IDs de blocs de production ElyWalk.
+- **Diffusion fiable** : mise à niveau de `@capacitor-community/admob` en 8.2.1, consentement UMP traité avant l'initialisation du SDK, initialisation sérialisée et garde-fou contre les annonces plein écran concurrentes.
+- **Emplacements** : App Open Ad au lancement/retour, interstitielle après validation des pas, fin de sortie GPS et retrait PayPal, vidéo récompensée à `+0,1 EC` avec SSV.
+- **Release Android** : version Play `3 / 1.3.1`.
+
 ## 1.3.0 — 2026-08-21
 
 - **F12** Carte : fin du message « Aucun partenaire sur la carte ».

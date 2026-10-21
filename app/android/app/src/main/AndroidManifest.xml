@@ -9,10 +9,10 @@
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
 
-        <!-- Google Mobile Ads (AdMob) — ID d'application ElyWalk -->
+        <!-- Google Mobile Ads (AdMob) — ID d'application ElyWalk (production) -->
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="ca-app-pub-6906841385343667~6481018527" />
+            android:value="ca-app-pub-5316598937383510~4963026878" />
 
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"

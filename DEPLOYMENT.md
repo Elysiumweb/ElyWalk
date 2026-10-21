@@ -192,7 +192,7 @@ npx cap sync android
 npx cap open android
 ```
 
-La version Android est `2 / 1.1.0`.
+La version Android de publication est `3 / 1.3.1`. Construisez un nouvel AAB signé avec ce code de version avant de le promouvoir vers la production Play.
 
 ## Consentement publicitaire RGPD (F03)
 

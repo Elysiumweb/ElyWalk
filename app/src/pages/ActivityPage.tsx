@@ -12,6 +12,7 @@ import { tracking, isTrackingSupported, type TrackingSnapshot } from '../lib/tra
 import { pedometer } from '../lib/pedometer';
 import type { ActivityPoint, ActivitySession, ActivityType } from '../lib/types';
 import { formatDistance } from '../lib/coins';
+import { showInterstitial } from '../lib/ads';
 
 const FALLBACK_CENTER: [number, number] = [46.6, 2.4];
 const ACTIVE_SESSION_KEY = 'elywalk.activeSession';
@@ -188,6 +189,9 @@ export default function ActivityPage() {
       localStorage.removeItem(ACTIVE_SESSION_KEY);
       setSessions(await listActivitySessions(profile.uid));
       toast(`Sortie enregistrée · ${formatDistance(finalDistance, unitSystem)} · ${Math.floor(duration / 60)} min`, 'success');
+      // La sortie est déjà sauvegardée : une erreur/no-fill AdMob ne doit donc
+      // jamais empêcher la fin d'activité ni son historique.
+      void showInterstitial();
     } catch (e) {
       toast((e as Error).message, 'error');
       setRunning(false);
