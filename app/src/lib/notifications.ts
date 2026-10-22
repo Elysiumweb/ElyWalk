@@ -6,6 +6,7 @@ import { collection, getDocs, doc, setDoc, deleteDoc } from 'firebase/firestore'
 import { db } from './firebase';
 
 const REMINDER_ID = 2108; // notification locale de rappel à 20 h
+const GOAL_NOTIF_ID = 2301; // objectif de sortie atteint
 const PREFS_REMINDER = 'notif.reminder.enabled';
 const PREFS_PUSH = 'notif.push.enabled';
 
@@ -53,6 +54,31 @@ async function applyReminder(enabled: boolean): Promise<void> {
       },
     ],
   });
+}
+
+/**
+ * Prévient (notification locale) que l'objectif de distance d'une sortie
+ * vient d'être atteint. Silencieux sur le web et si la permission manque.
+ */
+export async function notifyActivityGoal(goalKm: number, distanceM: number): Promise<void> {
+  if (!Capacitor.isNativePlatform()) return;
+  try {
+    const local = await LocalNotifications.requestPermissions();
+    if (local.display !== 'granted') return;
+    await LocalNotifications.schedule({
+      notifications: [
+        {
+          id: GOAL_NOTIF_ID,
+          title: 'Objectif atteint ! 🎉',
+          body: `Bravo : ${goalKm.toLocaleString('fr-FR')} km visés, ${(distanceM / 1000).toFixed(2)} km parcourus. Continuez comme ça !`,
+          schedule: { at: new Date(Date.now() + 400) },
+          channelId: 'elywalk-reminders',
+        },
+      ],
+    });
+  } catch (e) {
+    console.warn('[notif] goal', e);
+  }
 }
 
 /** Active/désactive le rappel quotidien à 20 h. */

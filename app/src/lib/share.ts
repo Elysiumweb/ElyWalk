@@ -3,6 +3,13 @@ import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import type { ActivitySession, UserProfile } from './types';
 import { fmtNumber, formatDistance } from './coins';
+import {
+  MAP_STYLES,
+  fmtDuration,
+  mapStyleLabel,
+  weatherLabel,
+  type MapStyle,
+} from './activity';
 
 export type ShareResult = 'shared' | 'downloaded';
 
@@ -100,15 +107,36 @@ export async function shareDailyStats(profile: UserProfile, steps: number, dista
 const TILE = 256;
 const TILE_SERVERS = ['a', 'b', 'c', 'd'];
 
-function cartoUrl(z: number, x: number, y: number): string {
-  // Voyager : style de rue coloré (équivalent CORS des tuiles OpenStreetMap
-  // classiques affichées dans l'app), compatible canvas.
+/**
+ * Serveurs de tuiles pour les cartes partagées. Tous servent des en-têtes
+ * CORS, indispensables pour dessiner dans un canvas sans le « polluer ».
+ *
+ * - voyager   : rues colorées CARTO (fond clair, très lisible).
+ * - dark      : fond sombre CARTO, assorti à la charte ElyWalk.
+ * - satellite : imagerie ESRI World Imagery.
+ */
+function tileUrl(style: MapStyle, z: number, x: number, y: number): string {
   const s = TILE_SERVERS[Math.abs(x + y) % TILE_SERVERS.length];
+  if (style === 'dark') return `https://${s}.basemaps.cartocdn.com/dark_all/${z}/${x}/${y}.png`;
+  if (style === 'satellite') return `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}.png`;
   return `https://${s}.basemaps.cartocdn.com/rastertiles/voyager/${z}/${x}/${y}.png`;
 }
-function esriUrl(z: number, x: number, y: number): string {
-  // ESRI utilise l'ordre z/y/x et sert bien les en-têtes CORS.
+
+/** Repli si le style choisi ne répond pas (réseau, quotas). */
+function fallbackTileUrl(z: number, x: number, y: number): string {
   return `https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/${z}/${y}/${x}.png`;
+}
+
+function attributionFor(style: MapStyle): string {
+  if (style === 'satellite') return '© Esri · © OpenStreetMap';
+  return '© OpenStreetMap · © CARTO';
+}
+
+/** Couleurs du tracé selon le fond (l'or reste lisible sur les trois). */
+function traceColors(style: MapStyle): { halo: string; line: string; start: string; end: string } {
+  if (style === 'satellite') return { halo: 'rgba(0,0,0,0.65)', line: '#FFD84D', start: '#7CF08C', end: '#FFD84D' };
+  if (style === 'voyager') return { halo: 'rgba(17,17,17,0.6)', line: '#B8860B', start: '#2E9E44', end: '#B8860B' };
+  return { halo: 'rgba(0,0,0,0.55)', line: '#D8CA82', start: '#5bd46f', end: '#D8CA82' };
 }
 
 /** Projection Web Mercator : (lat,lng) -> coordonnées de tuile fractionnaire. */
@@ -149,7 +177,15 @@ function downsample<T>(arr: T[], max = 700): T[] {
  * Mercator pour un alignement correct sur les tuiles. Si les tuiles
  * échouent (hors-ligne / réseau), le trajet reste dessiné sur fond sombre.
  */
-async function drawMapRoute(ctx: CanvasRenderingContext2D, rawPoints: { lat: number; lng: number }[], x: number, y: number, w: number, h: number): Promise<void> {
+async function drawMapRoute(
+  ctx: CanvasRenderingContext2D,
+  rawPoints: { lat: number; lng: number }[],
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  style: MapStyle = 'voyager',
+): Promise<void> {
   ctx.save();
   ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
   ctx.fillStyle = '#0e0e10'; ctx.fillRect(x, y, w, h);
@@ -182,9 +218,9 @@ async function drawMapRoute(ctx: CanvasRenderingContext2D, rawPoints: { lat: num
   const tiles: Array<{ tx: number; ty: number }> = [];
   for (let tx = tx0; tx <= tx1; tx++) for (let ty = ty0; ty <= ty1; ty++) tiles.push({ tx, ty });
 
-  // Primaire : CartoDB (sombre, assorti à la marque). Repli : ESRI.
-  let imgs = await Promise.all(tiles.map((t) => loadTile(cartoUrl(zoom, t.tx, t.ty))));
-  if (!imgs.some((i) => i)) imgs = await Promise.all(tiles.map((t) => loadTile(esriUrl(zoom, t.tx, t.ty))));
+  // Style demandé, puis repli ESRI si aucune tuile ne répond.
+  let imgs = await Promise.all(tiles.map((t) => loadTile(tileUrl(style, zoom, t.tx, t.ty))));
+  if (!imgs.some((i) => i)) imgs = await Promise.all(tiles.map((t) => loadTile(fallbackTileUrl(zoom, t.tx, t.ty))));
   for (let i = 0; i < tiles.length; i++) {
     const img = imgs[i];
     if (img) ctx.drawImage(img, x + tiles[i].tx * TILE - mapLeftPx, y + tiles[i].ty * TILE - mapTopPx);
@@ -196,15 +232,16 @@ async function drawMapRoute(ctx: CanvasRenderingContext2D, rawPoints: { lat: num
     return [x + tx * TILE - mapLeftPx, y + ty * TILE - mapTopPx];
   };
 
-  // Contour sombre puis ligne or (lisible sur fond clair ou sombre).
+  // Contour sombre puis ligne colorée (lisible sur fond clair ou sombre).
+  const colors = traceColors(style);
   ctx.lineJoin = 'round'; ctx.lineCap = 'round';
   const trace = (color: string, width: number) => {
     ctx.strokeStyle = color; ctx.lineWidth = width; ctx.beginPath();
     points.forEach((p, i) => { const [px, py] = project(p); if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py); });
     ctx.stroke();
   };
-  trace('rgba(0,0,0,0.55)', 14);
-  trace('#D8CA82', 8);
+  trace(colors.halo, 14);
+  trace(colors.line, 8);
 
   // Départ (vert) et arrivée (or).
   const [sx, sy] = project(points[0]);
@@ -213,12 +250,21 @@ async function drawMapRoute(ctx: CanvasRenderingContext2D, rawPoints: { lat: num
     ctx.beginPath(); ctx.arc(px, py, 13, 0, Math.PI * 2); ctx.fillStyle = fill; ctx.fill();
     ctx.lineWidth = 3; ctx.strokeStyle = '#111'; ctx.stroke();
   };
-  marker(sx, sy, '#5bd46f');
-  marker(ex, ey, '#D8CA82');
+  marker(sx, sy, colors.start);
+  marker(ex, ey, colors.end);
 
-  // Attribution (exigée par les tuiles OSM/CARTO).
-  ctx.fillStyle = 'rgba(255,255,255,0.65)'; ctx.font = '20px Arial'; ctx.textAlign = 'left';
-  ctx.fillText('© OpenStreetMap · © CARTO', x + 10, y + h - 12);
+  // Attribution (exigée par les fournisseurs de tuiles).
+  const lightText = style !== 'voyager';
+  ctx.save();
+  ctx.shadowColor = lightText ? 'rgba(0,0,0,0.7)' : 'rgba(255,255,255,0.7)';
+  ctx.shadowBlur = 4;
+  ctx.fillStyle = lightText ? 'rgba(255,255,255,0.8)' : 'rgba(17,17,17,0.85)';
+  ctx.font = '20px Arial'; ctx.textAlign = 'left';
+  ctx.fillText(attributionFor(style), x + 10, y + h - 12);
+  ctx.fillStyle = lightText ? 'rgba(255,255,255,0.95)' : 'rgba(17,17,17,0.9)';
+  ctx.font = '600 20px Arial'; ctx.textAlign = 'right';
+  ctx.fillText(mapStyleLabel(style).toUpperCase(), x + w - 12, y + h - 12);
+  ctx.restore();
   ctx.textAlign = 'left';
   ctx.restore();
 }
@@ -232,7 +278,13 @@ function speedKmh(distanceM: number, durationSec: number): number {
   return distanceM / 1000 / (durationSec / 3600);
 }
 
-async function buildActivityCanvas(session: ActivitySession, profile: UserProfile, strideCm = 75): Promise<HTMLCanvasElement> {
+async function buildActivityCanvas(
+  session: ActivitySession,
+  profile: UserProfile,
+  strideCm = 75,
+  options: { mapStyle?: MapStyle } = {},
+): Promise<HTMLCanvasElement> {
+  const mapStyle = options.mapStyle || 'voyager';
   const canvas = document.createElement('canvas');
   canvas.width = 1080; canvas.height = 1350;
   const ctx = canvas.getContext('2d')!;
@@ -241,14 +293,18 @@ async function buildActivityCanvas(session: ActivitySession, profile: UserProfil
   ctx.fillStyle = gradient; ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.strokeStyle = '#D8CA82'; ctx.lineWidth = 3; ctx.strokeRect(38, 38, 1004, 1274);
   ctx.fillStyle = '#D8CA82'; ctx.font = '700 44px Arial'; ctx.fillText('ELYWALK', 84, 120);
-  ctx.fillStyle = '#ffffff'; ctx.font = '700 58px Arial'; ctx.fillText('Ma sortie ElyWalk', 84, 200);
+  // Titre personnalisé (tronqué si trop long) sinon titre générique.
+  const title = session.title?.trim() || 'Ma sortie ElyWalk';
+  ctx.fillStyle = '#ffffff'; ctx.font = '700 58px Arial';
+  ctx.fillText(fitText(ctx, title, 910), 84, 200);
   ctx.fillStyle = '#98948a'; ctx.font = '32px Arial';
   const label = session.type === 'run' ? 'Course' : 'Marche';
   const date = new Date(session.startedAt).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
-  ctx.fillText(`${label} · ${date}`, 84, 248);
+  const weather = weatherLabel(session.weather);
+  ctx.fillText(`${label} · ${date}${weather ? ` · ${weather}` : ''}`, 84, 248);
 
-  // Carte réelle avec le trajet
-  await drawMapRoute(ctx, session.points || [], 70, 300, 940, 470);
+  // Carte réelle avec le trajet, au style choisi.
+  await drawMapRoute(ctx, session.points || [], 70, 300, 940, 470, mapStyle);
 
   const steps = estimateSteps(session, strideCm);
   const speed = speedKmh(session.distanceM || 0, session.durationSec || 0);
@@ -268,15 +324,123 @@ async function buildActivityCanvas(session: ActivitySession, profile: UserProfil
     ctx.fillStyle = '#98948a'; ctx.font = '24px Arial'; ctx.fillText(name, cx, startY + 44);
   });
   ctx.textAlign = 'left';
+  if (session.pausedSec && session.pausedSec >= 30) {
+    ctx.fillStyle = '#98948a'; ctx.font = '26px Arial';
+    ctx.fillText(`Pauses exclues · ${fmtDuration(session.pausedSec)}`, 84, 920);
+  }
   ctx.fillStyle = '#d8d2c2'; ctx.font = '34px Arial'; ctx.fillText(`Bravo ${profile.displayName} !`, 84, 1170);
   ctx.fillStyle = '#98948a'; ctx.font = '26px Arial'; ctx.fillText('Marchez. Progressez. Gagnez.', 84, 1220);
   return canvas;
 }
 
-/** Génère une carte JPEG d'une sortie (trajet sur vraie carte + stats) puis ouvre le partage natif. */
-export async function shareActivity(session: ActivitySession, profile: UserProfile, strideCm = 75): Promise<ShareResult> {
-  const canvas = await buildActivityCanvas(session, profile, strideCm);
+/** Réduit la police puis tronque proprement un texte trop large. */
+function fitText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string {
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  let cut = text;
+  while (cut.length > 1 && ctx.measureText(`${cut}…`).width > maxWidth) cut = cut.slice(0, -1);
+  return `${cut.trim()}…`;
+}
+
+/**
+ * Génère une carte JPEG d'une sortie (trajet sur vraie carte + stats) puis
+ * ouvre le partage natif. `mapStyle` permet de choisir le fond de carte
+ * (voyager / sombre / satellite).
+ */
+export async function shareActivity(
+  session: ActivitySession,
+  profile: UserProfile,
+  strideCm = 75,
+  options: { mapStyle?: MapStyle } = {},
+): Promise<ShareResult> {
+  const canvas = await buildActivityCanvas(session, profile, strideCm, options);
   const filename = `elywalk-sortie-${session.id || session.startedAt}.jpg`;
   const km = ((session.distanceM || 0) / 1000).toFixed(2);
-  return shareCanvas(canvas, filename, 'Ma sortie ElyWalk', `J'ai parcouru ${km} km avec ElyWalk !`);
+  const title = session.title?.trim() || 'Ma sortie ElyWalk';
+  return shareCanvas(canvas, filename, title, `J'ai parcouru ${km} km avec ElyWalk !`);
 }
+
+// ============ Synthèse hebdomadaire / mensuelle ============
+
+export interface ShareSummary {
+  /** « Ma semaine » ou « Mon mois ». */
+  title: string;
+  /** « 20 → 26 octobre » ou « octobre 2026 ». */
+  subtitle: string;
+  steps: number;
+  distanceM: number;
+  calories: number;
+  activeDays: number;
+  previousSteps: number | null;
+  changePct: number | null;
+  goalDays?: number;
+  unitSystem?: 'metric' | 'imperial';
+}
+
+function buildSummaryCanvas(profile: UserProfile, summary: ShareSummary): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = 1080; canvas.height = 1350;
+  const ctx = canvas.getContext('2d')!;
+  const gradient = ctx.createLinearGradient(0, 0, 1080, 1350);
+  gradient.addColorStop(0, '#25241e'); gradient.addColorStop(1, '#111111');
+  ctx.fillStyle = gradient; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = '#D8CA82'; ctx.lineWidth = 3; ctx.strokeRect(38, 38, 1004, 1274);
+
+  ctx.fillStyle = '#D8CA82'; ctx.font = '700 44px Arial'; ctx.fillText('ELYWALK', 84, 120);
+  ctx.fillStyle = '#ffffff'; ctx.font = '700 62px Arial'; ctx.fillText(summary.title, 84, 220);
+  ctx.fillStyle = '#98948a'; ctx.font = '32px Arial'; ctx.fillText(summary.subtitle, 84, 272);
+
+  ctx.fillStyle = '#D8CA82'; ctx.font = '700 150px Arial'; ctx.fillText(fmtNumber(summary.steps), 84, 470);
+  ctx.fillStyle = '#98948a'; ctx.font = '38px Arial'; ctx.fillText('PAS', 88, 530);
+
+  const distance = formatDistance(summary.distanceM, summary.unitSystem || 'metric');
+  const stats: Array<[string, string]> = [
+    [distance, 'DISTANCE'],
+    [`${fmtNumber(summary.calories)}`, 'KCAL'],
+    [`${summary.activeDays} j`, 'JOURS ACTIFS'],
+  ];
+  stats.forEach(([value, name], i) => {
+    const x = 84 + (i % 2) * 460;
+    const y = 680 + Math.floor(i / 2) * 150;
+    ctx.fillStyle = '#ffffff'; ctx.font = '700 54px Arial'; ctx.fillText(value, x, y);
+    ctx.fillStyle = '#98948a'; ctx.font = '26px Arial'; ctx.fillText(name, x + 2, y + 42);
+  });
+
+  // Comparaison avec la période précédente.
+  const comparisonY = 1010;
+  if (summary.changePct == null) {
+    ctx.fillStyle = '#98948a'; ctx.font = '30px Arial';
+    ctx.fillText('Première période enregistrée — continuez !', 84, comparisonY);
+  } else {
+    const positive = summary.changePct >= 0;
+    ctx.fillStyle = positive ? '#5bd46f' : '#e8837a';
+    ctx.font = '700 64px Arial';
+    ctx.fillText(`${positive ? '↑ +' : '↓ '}${summary.changePct} %`, 84, comparisonY);
+    ctx.fillStyle = '#98948a'; ctx.font = '28px Arial';
+    ctx.fillText(
+      `vs période précédente${summary.previousSteps != null ? ` (${fmtNumber(summary.previousSteps)} pas)` : ''}`,
+      84,
+      comparisonY + 46,
+    );
+  }
+
+  ctx.fillStyle = '#d8d2c2'; ctx.font = '34px Arial'; ctx.fillText(`Bravo ${profile.displayName} !`, 84, 1170);
+  ctx.fillStyle = '#98948a'; ctx.font = '26px Arial'; ctx.fillText('Marchez. Progressez. Gagnez.', 84, 1220);
+  return canvas;
+}
+
+/** Partage une synthèse hebdomadaire ou mensuelle (image + texte). */
+export async function shareSummary(profile: UserProfile, summary: ShareSummary): Promise<ShareResult> {
+  const canvas = buildSummaryCanvas(profile, summary);
+  const distance = formatDistance(summary.distanceM, summary.unitSystem || 'metric');
+  const filename = `elywalk-${summary.title.toLowerCase().replace(/\s+/g, '-')}-${Date.now()}.jpg`;
+  return shareCanvas(
+    canvas,
+    filename,
+    summary.title,
+    `${summary.title} : ${fmtNumber(summary.steps)} pas, ${distance} et ${fmtNumber(summary.calories)} kcal avec ElyWalk !`,
+  );
+}
+
+// Styles de carte exportés pour l'UI de partage.
+export { MAP_STYLES };
+export type { MapStyle };

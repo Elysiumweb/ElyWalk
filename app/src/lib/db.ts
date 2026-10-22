@@ -15,7 +15,11 @@ import {
   increment,
   serverTimestamp,
   deleteDoc,
+  deleteField,
   writeBatch,
+  startAfter,
+  documentId,
+  type QueryConstraint,
   type Unsubscribe,
 } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
@@ -45,6 +49,7 @@ import type {
   UserChallenge,
   ActivitySession,
   ActivityPoint,
+  ActivityWeather,
   UserBadge,
   BadgeId,
   ActivityFeedItem,
@@ -456,12 +461,19 @@ export async function updateActivitySession(uid: string, id: string, data: Parti
   await updateDoc(doc(db, 'activitySessions', id), data as Record<string, unknown>);
 }
 
-export async function appendActivityPoint(uid: string, id: string, point: ActivityPoint[], distanceM: number, durationSec: number, calories: number): Promise<void> {
-  await updateActivitySession(uid, id, { points: point, distanceM, durationSec, calories });
+export async function appendActivityPoint(uid: string, id: string, point: ActivityPoint[], distanceM: number, durationSec: number, calories: number, pausedSec = 0): Promise<void> {
+  await updateActivitySession(uid, id, { points: point, distanceM, durationSec, calories, pausedSec: Math.max(0, Math.round(pausedSec)) });
 }
 
-export async function finishActivitySession(uid: string, id: string, data: Pick<ActivitySession, 'points' | 'distanceM' | 'durationSec' | 'calories' | 'steps'>): Promise<void> {
-  await updateActivitySession(uid, id, { ...data, endedAt: Date.now(), status: 'completed', visibility: 'private' });
+/** Enregistre une sortie terminée : durée active (pauses exclues) + temps de pause. */
+export async function finishActivitySession(uid: string, id: string, data: Pick<ActivitySession, 'points' | 'distanceM' | 'durationSec' | 'calories' | 'steps'> & { pausedSec?: number }): Promise<void> {
+  await updateActivitySession(uid, id, {
+    ...data,
+    pausedSec: Math.max(0, Math.round(data.pausedSec || 0)),
+    endedAt: Date.now(),
+    status: 'completed',
+    visibility: 'private',
+  });
   try {
     const profile = await getUserProfile(uid);
     if (profile) {
@@ -491,9 +503,99 @@ export async function deleteActivitySession(uid: string, sessionId: string): Pro
   await deleteDoc(ref);
 }
 
+/**
+ * Titre, note et météo ressentie d'une sortie.
+ * Les champs vides sont supprimés du document (deleteField) pour rester
+ * compatibles avec les règles Firestore qui bornent leur taille.
+ */
+export async function updateActivityMetadata(
+  uid: string,
+  id: string,
+  metadata: { title?: string; note?: string; weather?: ActivityWeather | null },
+): Promise<void> {
+  const ref = doc(db, 'activitySessions', id);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) throw new Error('Cette sortie n’existe plus.');
+  if ((snap.data() as ActivitySession).uid !== uid) throw new Error('Cette sortie ne vous appartient pas.');
+  const title = (metadata.title || '').trim().slice(0, 80);
+  const note = (metadata.note || '').trim().slice(0, 500);
+  const data: Record<string, unknown> = {
+    title: title || deleteField(),
+    note: note || deleteField(),
+    weather: metadata.weather || deleteField(),
+  };
+  await updateDoc(ref, data);
+}
+
+/** Curseur de pagination d'une liste de sorties (tri startedAt desc + id). */
+export interface ActivityQueryCursor {
+  startedAt: number;
+  id: string;
+}
+
+export interface ActivityQueryFilters {
+  type?: ActivitySession['type'];
+  /** Timestamp epoch (ms) minimal du début de sortie. */
+  from?: number;
+  /** Timestamp epoch (ms) maximal, exclu. */
+  to?: number;
+  /** Distance minimale en mètres (filtre appliqué côté client). */
+  minDistanceM?: number;
+  pageSize?: number;
+  cursor?: ActivityQueryCursor | null;
+}
+
+export interface ActivityPageResult {
+  items: ActivitySession[];
+  cursor: ActivityQueryCursor | null;
+  hasMore: boolean;
+}
+
+/**
+ * Liste paginée des sorties (« Mes sorties »).
+ *
+ * La pagination s'appuie sur orderBy(startedAt desc, __name__ desc) et
+ * startAfter(cursor) : pas de saut, pas de doublon. Le filtre de distance
+ * minimale est appliqué côté client (Firestore n'autorise qu'une seule
+ * inégalité par requête, déjà utilisée pour la période).
+ *
+ * Index composites requis : (uid, startedAt desc) et (uid, type, startedAt desc).
+ */
+export async function listActivitySessionsPage(uid: string, filters: ActivityQueryFilters = {}): Promise<ActivityPageResult> {
+  const pageSize = Math.min(50, Math.max(1, Math.floor(filters.pageSize || 20)));
+  const constraints: QueryConstraint[] = [where('uid', '==', uid)];
+  if (filters.type) constraints.push(where('type', '==', filters.type));
+  if (typeof filters.from === 'number') constraints.push(where('startedAt', '>=', filters.from));
+  if (typeof filters.to === 'number') constraints.push(where('startedAt', '<', filters.to));
+  constraints.push(orderBy('startedAt', 'desc'));
+  constraints.push(orderBy(documentId(), 'desc'));
+  if (filters.cursor) constraints.push(startAfter(filters.cursor.startedAt, filters.cursor.id));
+  constraints.push(limit(pageSize + 1));
+
+  const snaps = await getDocs(query(collection(db, 'activitySessions'), ...constraints));
+  const hasMore = snaps.docs.length > pageSize;
+  const docs = hasMore ? snaps.docs.slice(0, pageSize) : snaps.docs;
+  const page = docs.map((d) => ({ id: d.id, ...(d.data() as ActivitySession) }));
+  const items = filters.minDistanceM
+    ? page.filter((s) => (s.distanceM || 0) >= (filters.minDistanceM || 0))
+    : page;
+  const last = page[page.length - 1];
+  return {
+    items,
+    cursor: last ? { startedAt: last.startedAt, id: last.id || '' } : null,
+    hasMore,
+  };
+}
+
+/** Liste simple (exports RGPD, usages internes), triée de la plus récente à la plus ancienne. */
 export async function listActivitySessions(uid: string, count = 20): Promise<ActivitySession[]> {
-  const snaps = await getDocs(query(collection(db, 'activitySessions'), where('uid', '==', uid), limit(count)));
-  return snaps.docs.map((d) => ({ id: d.id, ...(d.data() as ActivitySession) })).sort((a, b) => b.startedAt - a.startedAt);
+  const snaps = await getDocs(query(
+    collection(db, 'activitySessions'),
+    where('uid', '==', uid),
+    orderBy('startedAt', 'desc'),
+    limit(Math.max(1, count)),
+  ));
+  return snaps.docs.map((d) => ({ id: d.id, ...(d.data() as ActivitySession) }));
 }
 
 // ============ Récompense publicitaire ============

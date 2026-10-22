@@ -97,9 +97,14 @@ export interface ActivityPoint {
   lng: number;
   recordedAt: number;
   altitude?: number;
+  /** Précision horizontale du point en mètres (qualité du signal GPS). */
+  accuracy?: number;
 }
 
 export type ActivityVisibility = 'private' | 'friends' | 'link';
+
+/** Météo ressentie pendant la sortie (annotation libre, choisie par l'utilisateur). */
+export type ActivityWeather = 'sunny' | 'cloudy' | 'rain' | 'cold' | 'wind' | 'night';
 
 export interface ActivitySession {
   id?: string;
@@ -107,7 +112,10 @@ export interface ActivitySession {
   type: ActivityType;
   startedAt: number;
   endedAt?: number;
+  /** Durée active en secondes : les pauses sont exclues. */
   durationSec: number;
+  /** Temps total passé en pause (secondes), exclu de durationSec et de l'allure. */
+  pausedSec?: number;
   distanceM: number;
   calories: number;
   /** Pas comptés pendant la sortie (delta du podomètre), si disponible. */
@@ -117,6 +125,12 @@ export interface ActivitySession {
   /** Visibilité de la sortie dans l'app */
   visibility?: ActivityVisibility;
   sharedWith?: string[];
+  /** Titre personnalisé (« Balade au bord de l'Authie »). */
+  title?: string;
+  /** Note libre de l'utilisateur (500 caractères max). */
+  note?: string;
+  /** Météo ressentie pendant la sortie. */
+  weather?: ActivityWeather;
 }
 
 export interface PartnerOffer {
