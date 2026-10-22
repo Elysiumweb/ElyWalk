@@ -149,6 +149,12 @@ npm --prefix app run build
 firebase deploy --only firestore:rules,firestore:indexes,storage,hosting
 ```
 
+Depuis la 1.4.0, « Mes sorties » est paginée et filtrable : deux index
+composites `activitySessions` sont nécessaires (`uid` + `startedAt` desc, et
+`uid` + `type` + `startedAt` desc). Ils sont déclarés dans
+`firestore.indexes.json` ; sans ce déploiement, la liste des sorties renvoie
+une erreur « index requis ».
+
 ## Backend de confiance — Cloudflare Workers (F05/F06/F11, 100 % gratuit)
 
 Les Cloud Functions Firebase exigent le plan payant **Blaze**. ElyWalk utilise
@@ -192,7 +198,7 @@ npx cap sync android
 npx cap open android
 ```
 
-La version Android est `2 / 1.1.0`.
+La version Android est `3 / 1.4.0`.
 
 ## Consentement publicitaire RGPD (F03)
 

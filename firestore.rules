@@ -168,11 +168,22 @@ service cloud.firestore {
       allow read: if auth() && (resource.data.uid == request.auth.uid || resource.data.visibility in ['friends','link']);
       allow create: if verified() && request.resource.data.uid == request.auth.uid
         && request.resource.data.type in ['walk','run'] && request.resource.data.status == 'active';
+      // pausedSec est exclu de durationSec (durée active) et borné à 24 h.
+      // title / note / weather : bornes alignées sur l'interface.
       allow update: if verified() && resource.data.uid == request.auth.uid
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.points.size() <= 20000
         && request.resource.data.distanceM is number
-        && request.resource.data.status in ['active','completed'];
+        && request.resource.data.durationSec is number && request.resource.data.durationSec >= 0
+        && request.resource.data.status in ['active','completed']
+        && (!('pausedSec' in request.resource.data)
+          || (request.resource.data.pausedSec is number
+            && request.resource.data.pausedSec >= 0
+            && request.resource.data.pausedSec <= 86400))
+        && (!('title' in request.resource.data) || request.resource.data.title.size() <= 80)
+        && (!('note' in request.resource.data) || request.resource.data.note.size() <= 500)
+        && (!('weather' in request.resource.data)
+          || request.resource.data.weather in ['sunny','cloudy','rain','cold','wind','night']);
       allow delete: if auth() && resource.data.uid == request.auth.uid;
     }
     match /partnerRequests/{id} {

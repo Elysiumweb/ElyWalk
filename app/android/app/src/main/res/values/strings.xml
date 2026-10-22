@@ -12,5 +12,7 @@
     <string name="tracking_channel_desc">ElyWalk enregistre votre parcours, même lorsque l\'application est en arrière-plan.</string>
     <string name="tracking_notif_title">Sortie ElyWalk en cours</string>
     <string name="tracking_notif_text">%1$s km · %2$d min</string>
+    <string name="tracking_notif_paused_title">Sortie ElyWalk en pause</string>
+    <string name="tracking_notif_paused_text">En pause · %1$s km · %2$d min</string>
     <string name="widget_description">Compteur de pas ElyWalk</string>
 </resources>

@@ -43,7 +43,8 @@ public class TrackingPlugin extends Plugin {
             requestPermissionForAlias("location", call, "onStartPerms");
             return;
         }
-        TrackingService.startSession(getContext(), call.getString("type", "walk"));
+        TrackingService.startSession(getContext(), call.getString("type", "walk"),
+            Boolean.TRUE.equals(call.getBoolean("batterySaver", false)));
         call.resolve(TrackingService.snapshot());
     }
 
@@ -53,7 +54,29 @@ public class TrackingPlugin extends Plugin {
             call.reject("Permission de localisation refusée");
             return;
         }
-        TrackingService.startSession(getContext(), call.getString("type", "walk"));
+        TrackingService.startSession(getContext(), call.getString("type", "walk"),
+            Boolean.TRUE.equals(call.getBoolean("batterySaver", false)));
+        call.resolve(TrackingService.snapshot());
+    }
+
+    /** Met la sortie en pause : GPS coupé, temps de pause exclu de l'allure. */
+    @PluginMethod
+    public void pause(PluginCall call) {
+        TrackingService.pauseSession(getContext());
+        call.resolve(TrackingService.snapshot());
+    }
+
+    /** Reprend la sortie après une pause. */
+    @PluginMethod
+    public void resume(PluginCall call) {
+        TrackingService.resumeSession(getContext());
+        call.resolve(TrackingService.snapshot());
+    }
+
+    /** Bascule le mode économie de batterie (moins de points GPS). */
+    @PluginMethod
+    public void setBatterySaver(PluginCall call) {
+        TrackingService.setBatterySaver(getContext(), Boolean.TRUE.equals(call.getBoolean("enabled", false)));
         call.resolve(TrackingService.snapshot());
     }
 
