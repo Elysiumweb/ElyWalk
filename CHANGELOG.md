@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.5.0 — 2026-10-23 — passage en production
+
+- **F24 — Publicités AdMob réparées.** Les identifiants pointaient vers un **autre compte AdMob** (`ca-app-pub-6906841385343667`). L'`APPLICATION_ID` du manifeste ne correspondait donc pas au compte courant : `AdMob.initialize()` échouait silencieusement et **aucune annonce n'était servie**. Tout est aligné sur le compte `ca-app-pub-5316598937383510` (application `~4963026878`, App Open `6986554989`, interstitiel `7972992736`, récompensée `9832210178`). Un test unitaire (`src/lib/ads-config.test.ts`) verrouille la cohérence `constants.ts` ↔ `AndroidManifest.xml`.
+- **F25 — Emplacements publicitaires complets.** App Open à l'ouverture et au retour au premier plan (plafond 3/jour, cooldown 30 min, jamais juste après un autre plein écran) ; interstitiel après la **validation des pas**, la **fin d'une sortie GPS** et une **demande de retrait** ; vidéo récompensée (« +0,1 ElyCoin ») avec SSV `userId`. Les interstitiels sont préchargés et espacés de 45 s ; les récompenses ne dépendent jamais du chargement d'une annonce.
+- **F26 — Affichage de bord à bord (Android 15).** `EdgeToEdge.enable()` en rétrocompatibilité (si WebView ≥ 140), barres système transparentes, icônes claires, et encarts consommés côté web via `--safe-area-inset-*` (Capacitor `SystemBars`) avec repli sur `env(safe-area-inset-*)`. Plus aucune API obsolète de découpe d'écran utilisée par le code applicatif.
+- **F27 — Build de production optimisé (R8).** `minifyEnabled` + `shrinkResources` avec règles ProGuard dédiées (Capacitor, plugins natifs, AdMob, Firebase, widget, services) : corrige l'alerte Play Console « obscurcissement du code DEX : 1 % » et réduit la taille de l'APK/AAB.
+- **F28 — Empreinte mémoire réduite.** Bundle web découpé (firebase / leaflet / react / capacitor / vendor) : la WebView n'analyse plus un fichier unique de 1,3 Mo au démarrage.
+- Version `versionCode 4` / `versionName 1.5.0`.
+
 ## 1.4.0 — 2026-10-22
 
 - **F16** Pause / reprise d'une sortie : nouveau bouton dans l'écran Sortie GPS et méthodes `pause()` / `resume()` du plugin `Tracking`. Le service natif `TrackingService` gère l'état `paused` (GPS coupé, notification « en pause », reprise après kill du process) et le temps de pause est exclu de la durée active, de la vitesse et de l'allure.

@@ -198,7 +198,70 @@ npx cap sync android
 npx cap open android
 ```
 
-La version Android est `3 / 1.4.0`.
+La version Android est `4 / 1.5.0`.
+
+## Publicités AdMob — configuration de production
+
+Compte AdMob : `ca-app-pub-5316598937383510` · application `ca-app-pub-5316598937383510~4963026878`.
+
+| Emplacement | Type | Bloc d'annonces | Où |
+| --- | --- | --- | --- |
+| Ouverture / retour au premier plan | App Open | `ca-app-pub-5316598937383510/6986554989` | `App.tsx` + `lib/ads.ts` |
+| Validation des pas | Interstitiel | `ca-app-pub-5316598937383510/7972992736` | `HomePage.tsx` |
+| Fin d'une sortie GPS | Interstitiel | idem | `ActivityPage.tsx` |
+| Demande de retrait | Interstitiel | idem | `WalletPage.tsx` |
+| « Regarder une pub pour gagner 0,1 EC » | Récompensée | `ca-app-pub-5316598937383510/9832210178` | `HomePage.tsx` |
+
+⚠️ **L'`APPLICATION_ID` du manifeste doit être identique à `ADMOB_APP_ID`**
+(`app/src/lib/constants.ts`). S'ils diffèrent, le SDK ne s'initialise pas et
+**aucune annonce n'est diffusée**, sans erreur visible. `npm test` vérifie cette
+cohérence (`src/lib/ads-config.test.ts`).
+
+Points à contrôler dans la console AdMob avant publication :
+
+- L'application `com.elysium.elywalk` est bien celle qui porte cet ID.
+- Les 4 blocs sont **actifs** (statut « Prêt ») et l'app n'est pas en mode test.
+- Le **message RGPD** (Confidentialité et messages) est publié pour l'EEE/UK :
+  sans consentement, `ads.ts` ne demande volontairement aucune annonce.
+- La **vérification côté serveur (SSV)** de la vidéo récompensée est activée si
+  le Worker Cloudflare est déployé ; sinon la récompense est créditée côté
+  client (bornée à 1/h par Firestore).
+
+## Build de production (R8 activé)
+
+```bash
+cd app
+npm ci && npm test && npm run build
+npx cap copy android          # copie dist/ dans les assets natifs
+cd android && ./gradlew bundleRelease   # AAB signé (Play Store)
+# ou ./gradlew assembleRelease          # APK signé (test)
+```
+
+- `minifyEnabled true` + `shrinkResources true` : R8 obscurcit et réduit le code
+  (alerte Play Console « obscurcissement DEX »), les règles de conservation sont
+  dans `android/app/proguard-rules.pro`.
+- Signature : soit via Android Studio (*Build → Generate Signed Bundle / APK*),
+  soit en créant `android/keystore.properties` (non versionné) :
+
+  ```properties
+  storeFile=elywalk-release.jks
+  storePassword=…
+  keyAlias=elywalk
+  keyPassword=…
+  ```
+
+  Le chemin `storeFile` est relatif au dossier `app/android/`.
+- Après publication, vérifier que la **version de WebView** du parc est ≥ 140 :
+  en dessous, Android < 15 conserve le rendu système classique (pas de bord à
+  bord) afin de ne jamais afficher l'interface sous la barre d'état.
+
+## Affichage de bord à bord (Android 15)
+
+`MainActivity` active `EdgeToEdge.enable()` pour Android < 15 (rétrocompatibilité)
+lorsque la WebView sait remonter les encarts. Les valeurs sont exposées au web via
+les variables CSS `--safe-area-inset-*` (plugin `SystemBars` de Capacitor, voir
+`capacitor.config.ts`) avec repli sur `env(safe-area-inset-*)`.
+`styles.xml` déclare des barres transparentes et des icônes claires (thème noir).
 
 ## Consentement publicitaire RGPD (F03)
 

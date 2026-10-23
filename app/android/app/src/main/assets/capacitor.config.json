@@ -6,6 +6,11 @@
 		"allowMixedContent": false
 	},
 	"plugins": {
+		"SystemBars": {
+			"insetsHandling": "css",
+			"style": "DARK",
+			"hidden": false
+		},
 		"FirebaseAuthentication": {
 			"skipNativeAuth": false,
 			"providers": [

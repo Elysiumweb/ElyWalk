@@ -5,7 +5,7 @@ import { Capacitor } from '@capacitor/core';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './components/Toast';
 import TabBar from './components/TabBar';
-import { initAds, loadAppOpenAd, showAppOpenAdIfReady } from './lib/ads';
+import { initAds, showAppOpenAdIfReady, warmUpAds } from './lib/ads';
 import { pedometer } from './lib/pedometer';
 import AuthPage from './pages/AuthPage';
 import HomePage from './pages/HomePage';
@@ -56,28 +56,28 @@ function Shell() {
 
   // Annonce à l'ouverture + au retour sur l'application (App Open Ad).
   // Garde-fous : exemptée tant que l'onboarding n'est pas terminé, plafonnée
-  // quotidiennement et espacée d'un cooldown (voir ads.ts).
+  // quotidiennement et espacée d'un cooldown (voir ads.ts). Le préchargement
+  // de l'interstitiel se fait en parallèle pour qu'il soit prêt au moment de
+  // valider les pas / terminer une sortie.
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
     if (!profile?.onboardingDone) return;
-    let firstLoad = true;
+    let disposed = false;
+    let launchTimer: ReturnType<typeof setTimeout> | undefined;
     (async () => {
-      await initAds();
-      await loadAppOpenAd();
-      // Affiche l'annonce d'ouverture peu après le lancement.
-      setTimeout(() => {
-        if (firstLoad) {
-          firstLoad = false;
-          showAppOpenAdIfReady();
-        }
-      }, 3500);
+      await warmUpAds();
+      // Affiche l'annonce d'ouverture une fois l'accueil rendu (pas pendant le
+      // splash). Le plafond et le cooldown sont gérés dans ads.ts.
+      launchTimer = setTimeout(() => {
+        if (!disposed) void showAppOpenAdIfReady();
+      }, 2500);
     })();
     const sub = CapApp.addListener('appStateChange', ({ isActive }) => {
-      if (isActive && !firstLoad) {
-        showAppOpenAdIfReady();
-      }
+      if (isActive && !disposed) void showAppOpenAdIfReady();
     });
     return () => {
+      disposed = true;
+      if (launchTimer) clearTimeout(launchTimer);
       sub.then((h) => h.remove());
     };
   }, [profile?.onboardingDone]);

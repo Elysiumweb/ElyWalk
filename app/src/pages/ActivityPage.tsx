@@ -16,6 +16,7 @@ import {
 } from '../lib/db';
 import { tracking, isTrackingSupported, type TrackingSnapshot } from '../lib/tracking';
 import { pedometer } from '../lib/pedometer';
+import { showInterstitial } from '../lib/ads';
 import type { ActivityPoint, ActivitySession, ActivityType } from '../lib/types';
 import { formatDistance } from '../lib/coins';
 import {
@@ -629,6 +630,10 @@ export default function ActivityPage() {
         `Sortie enregistrée · ${formatDistance(finalDistance, unitSystem)} · ${Math.floor(duration / 60)} min${pauseLabel}`,
         'success',
       );
+      // Annonce interstitielle sur la transition « fin de sortie ».
+      // Affichée APRÈS l'enregistrement (la séance ne dépend jamais de la pub),
+      // et soumise au cooldown interne de ads.ts.
+      void showInterstitial().catch(() => undefined);
     } catch (e) {
       toast((e as Error).message, 'error');
       setRunning(false);

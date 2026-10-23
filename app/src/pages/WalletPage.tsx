@@ -6,6 +6,7 @@ import Sheet from '../components/Sheet';
 import { requestConversion, listMyWithdrawals, listMyTransactions } from '../lib/db';
 import { fmtCoins, fmtEuros, coinsToEuros } from '../lib/coins';
 import { MIN_PAYPAL_COINS, isPresidentUid } from '../lib/constants';
+import { showInterstitial } from '../lib/ads';
 import { updateUserFields } from '../lib/db';
 import type { Withdrawal, CoinTransaction } from '../lib/types';
 
@@ -61,6 +62,9 @@ export default function WalletPage() {
       setDonateOpen(false);
       setAmount('');
       reload();
+      // Annonce interstitielle sur la transition « demande de retrait »
+      // (après validation : elle ne conditionne jamais le retrait).
+      if (type === 'paypal') void showInterstitial().catch(() => undefined);
     } catch (e) {
       toast((e as Error).message, 'error');
     } finally {
