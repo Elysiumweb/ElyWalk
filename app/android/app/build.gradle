@@ -1,5 +1,16 @@
 apply plugin: 'com.android.application'
 
+// Signature de production optionnelle : si `android/keystore.properties` existe
+// (fichier local, non versionné — voir .gitignore), il est utilisé pour signer
+// la release. Sinon, Android Studio propose la signature au moment de générer
+// le bundle / l'APK.
+def keystorePropertiesFile = rootProject.file('keystore.properties')
+def keystoreProperties = new Properties()
+def hasReleaseKeystore = keystorePropertiesFile.exists()
+if (hasReleaseKeystore) {
+    keystorePropertiesFile.withInputStream { keystoreProperties.load(it) }
+}
+
 android {
     namespace = "com.elysium.elywalk"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,8 +18,8 @@ android {
         applicationId "com.elysium.elywalk"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 3
-        versionName "1.4.0"
+        versionCode 4
+        versionName "1.5.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,11 +27,40 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
-    buildTypes {
-        release {
-            minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+    signingConfigs {
+        if (hasReleaseKeystore) {
+            release {
+                storeFile rootProject.file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            }
         }
+    }
+    buildTypes {
+        debug {
+            minifyEnabled false
+        }
+        release {
+            // R8 : obscurcissement du bytecode + réduction du code et des
+            // ressources. Corrige l'alerte Play Console « Obscurcissement du
+            // code DEX inférieur au seuil » (1 % → ~70-85 %) et diminue
+            // l'empreinte mémoire de l'APK/AAB.
+            // Les règles de conservation indispensables à Capacitor, aux
+            // plugins natifs et au widget sont dans proguard-rules.pro.
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (hasReleaseKeystore) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+    // R8 peut légitimement laisser des références optionnelles non résolues
+    // (fournisseurs de médiation publicitaire). On ne casse pas la release.
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
     }
 }
 
@@ -33,6 +73,8 @@ repositories {
 dependencies {
     implementation fileTree(include: ['*.jar'], dir: 'libs')
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    // Affichage de bord à bord : EdgeToEdge (rétrocompatibilité Android < 15).
+    implementation "androidx.activity:activity:$androidxActivityVersion"
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')

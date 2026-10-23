@@ -123,11 +123,14 @@ export default function HomePage() {
     setBusyValidate(true);
     try {
       const stepsToValidate = pedometer.getTodaySteps();
-      // Annonce interstitielle avant le crédit.
-      await showInterstitial();
+      // 1) Le crédit est validé AVANT la publicité : la récompense de
+      //    l'utilisateur ne dépend jamais du chargement d'une annonce.
       const result = await validateSteps(profile.uid, stepsToValidate);
       toast(`+${fmtCoins(result.coins)} ElyCoins · Série de ${result.streak} jour${result.streak > 1 ? 's' : ''} !${result.freezeUsed ? ' Gel utilisé pour rattraper la journée manquée.' : ''}`, 'success');
       if (result.streak === 7 || result.streak === 30) celebrate(`Palier de série atteint : ${result.streak} jours !`);
+      // 2) Annonce interstitielle sur la transition « pas validés ».
+      //    Léger différé pour laisser le toast de crédit s'afficher d'abord.
+      window.setTimeout(() => void showInterstitial().catch(() => undefined), 700);
     } catch (e) {
       toast((e as Error).message, 'error');
     } finally {

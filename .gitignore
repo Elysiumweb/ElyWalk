@@ -9,3 +9,8 @@ app/android/.gradle/
 *.iml
 .idea/
 .DS_Store
+
+# Signature de production (ne jamais versionner)
+app/android/keystore.properties
+*.jks
+*.keystore

@@ -9,10 +9,19 @@
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
 
-        <!-- Google Mobile Ads (AdMob) — ID d'application ElyWalk -->
+        <!-- Google Mobile Ads (AdMob) — ID d'application ElyWalk.
+             ⚠️ Doit rester identique à ADMOB_APP_ID (src/lib/constants.ts). -->
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="ca-app-pub-6906841385343667~6481018527" />
+            android:value="ca-app-pub-5316598937383510~4963026878" />
+        <!-- Initialisation et chargement des annonces optimisés (recommandations
+             Google) : le SDK démarre pendant que la WebView se charge. -->
+        <meta-data
+            android:name="com.google.android.gms.ads.flag.OPTIMIZE_INITIALIZATION"
+            android:value="true" />
+        <meta-data
+            android:name="com.google.android.gms.ads.flag.OPTIMIZE_AD_LOADING"
+            android:value="true" />
 
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"

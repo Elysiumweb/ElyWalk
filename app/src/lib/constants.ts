@@ -1,10 +1,18 @@
 // ===== ElyWalk — Constantes globales =====
 
 // --- AdMob (production) ---
-export const ADMOB_APP_ID = 'ca-app-pub-6906841385343667~6481018527';
-export const AD_UNIT_REWARDED = 'ca-app-pub-6906841385343667/3683414466';
-export const AD_UNIT_APP_OPEN = 'ca-app-pub-6906841385343667/6616749893';
-export const AD_UNIT_INTERSTITIAL = 'ca-app-pub-6906841385343667/3494240028';
+// ⚠️ L'ID d'application doit être IDENTIQUE à la meta-data
+// `com.google.android.gms.ads.APPLICATION_ID` du AndroidManifest.xml.
+// En cas de divergence, le SDK Google Mobile Ads s'initialise en échec
+// silencieux et AUCUNE annonce n'est diffusée.
+// Un test unitaire (src/lib/ads-config.test.ts) vérifie cette cohérence.
+export const ADMOB_APP_ID = 'ca-app-pub-5316598937383510~4963026878';
+// Annonce à l'ouverture (App Open).
+export const AD_UNIT_APP_OPEN = 'ca-app-pub-5316598937383510/6986554989';
+// Interstitiel : validation des pas, fin de sortie GPS, demande de retrait.
+export const AD_UNIT_INTERSTITIAL = 'ca-app-pub-5316598937383510/7972992736';
+// Vidéo avec récompense : « Regarder une pub pour gagner 0,1 ElyCoin ».
+export const AD_UNIT_REWARDED = 'ca-app-pub-5316598937383510/9832210178';
 
 // --- Documents légaux en ligne (exigence Play Store : URL publique) ---
 // Page statique servie par Firebase Hosting (app/public/privacy.html).
