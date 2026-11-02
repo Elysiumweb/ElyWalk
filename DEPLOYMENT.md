@@ -198,15 +198,123 @@ npx cap sync android
 npx cap open android
 ```
 
-La version Android est `3 / 1.4.0`.
+La version Android est `5 / 1.5.0` (la 1.4.0 publiée en test fermé portait le
+`versionCode` 4 : tout nouvel envoi doit être strictement supérieur).
+
+### Build de production (AAB signé)
+
+```bash
+cd app
+npm ci && npm test && npm run build
+npx cap sync android
+cd android
+./gradlew clean bundleRelease      # app/android/app/build/outputs/bundle/release/app-release.aab
+```
+
+Signature : créer `app/android/keystore.properties` (ignoré par Git)
+
+```properties
+storeFile=/chemin/absolu/elywalk-upload.jks
+storePassword=…
+keyAlias=upload
+keyPassword=…
+```
+
+ou exporter `ELYWALK_STORE_FILE`, `ELYWALK_STORE_PASSWORD`, `ELYWALK_KEY_ALIAS`,
+`ELYWALK_KEY_PASSWORD` (CI). Sans ces valeurs, `bundleRelease` produit un AAB
+non signé, à signer depuis Android Studio (*Build → Generate Signed App
+Bundle*). ⚠️ Conserver la **même clé d'upload** que la 1.4.0, sinon Play
+refuse l'envoi.
+
+### Optimisation du code DEX (exigence Google Play)
+
+Play signalait « L'optimisation du code DEX est inférieure à notre seuil —
+Obscurcissement (1 %) » : la version release n'était pas minifiée. Elle l'est
+désormais (`app/android/app/build.gradle`) :
+
+- `minifyEnabled true` + `shrinkResources true` ;
+- `proguard-android-optimize.txt` + `app/android/app/proguard-rules.pro`
+  (conserve les classes chargées par réflexion : plugins Capacitor listés dans
+  `assets/capacitor.plugins.json`, plugins natifs `StepCounterPlugin` /
+  `TrackingPlugin`, widget, services de premier plan, interfaces JavaScript) ;
+- `app/android/app/src/main/res/raw/keep.xml` protège les ressources
+  référencées par nom (icône de notification, splash, widget, launcher).
+
+Le fichier de correspondance R8 (`mapping.txt`) est inclus automatiquement dans
+l'AAB : les rapports de plantage Play restent lisibles.
+
+⚠️ Après un changement de règles, tester un **APK release** réel
+(`./gradlew assembleRelease` puis `adb install -r`) : pubs, podomètre, sortie
+GPS, partage et widget.
+
+### Affichage de bord à bord (Android 15 / SDK 35+)
+
+- `MainActivity.enableEdgeToEdgeCompat()` active le bord à bord **sans API
+  obsolète** : `WindowCompat.setDecorFitsSystemWindows(false)` et
+  `LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS` (API 30+) à la place de
+  `LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES`, déprécié dans Android 15.
+- Les couleurs transparentes des barres viennent du thème
+  (`res/values/styles.xml`), jamais de `Window#setStatusBarColor`.
+- Les encarts sont consommés côté web : `viewport-fit=cover` (index.html) et
+  `env(safe-area-inset-*)` dans les feuilles de style ; Capacitor injecte aussi
+  `--safe-area-inset-*` (`SystemBars.insetsHandling: 'css'`).
+- Avant Android 15, le bord à bord n'est activé que si la WebView sait exposer
+  les safe-area (Chromium 140+) ; sinon Capacitor applique les marges et
+  l'affichage reste correct.
+- Les occurrences restantes de `LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES`
+  signalées par Play provenaient des bibliothèques Google
+  (`com.google.android.gms.ads.internal.overlay`,
+  `com.google.android.play.core.hsdp`). Le SDK d'annonces est pinné sur la
+  branche **25.4.x** (`app/android/variables.gradle`), qui a migré ; la partie
+  `play.core.hsdp` est interne au Play Store et se résorbe avec les montées de
+  version des SDK Google.
+
+## Publicités AdMob (F24 / F25)
+
+Compte AdMob ElyWalk — **ID d'application** :
+`ca-app-pub-5316598937383510~4963026878`
+
+| Format | Bloc d'annonces | Déclenchement |
+| --- | --- | --- |
+| Annonce à l'ouverture | `ca-app-pub-5316598937383510/6986554989` | Lancement + retour dans l'app (plafond 2/jour, cooldown 10 min, jamais pendant l'onboarding) |
+| Interstitiel | `ca-app-pub-5316598937383510/7972992736` | Validation des pas, fin d'une sortie, demande de retrait (60 s minimum entre deux) |
+| Vidéo avec récompense | `ca-app-pub-5316598937383510/9832210178` | « Regarder une pub pour gagner 0,1 ElyCoins » (1/h, SSV avec `userId`) |
+
+Ces valeurs sont déclarées à **deux endroits qui doivent rester synchronisés** :
+
+- `app/src/lib/constants.ts` (`ADMOB_APP_ID`, `AD_UNIT_*`) ;
+- `app/android/app/src/main/AndroidManifest.xml`
+  (`com.google.android.gms.ads.APPLICATION_ID`).
+
+Un ID d'application qui ne correspond pas au compte propriétaire des blocs =
+**zéro annonce** (c'était la panne de la 1.4.0). Le manifeste active aussi
+`OPTIMIZE_INITIALIZATION` / `OPTIMIZE_AD_LOADING` (moins d'ANR au démarrage).
+
+Checklist console AdMob avant publication :
+
+- [ ] L'application `com.elysium.elywalk` est **liée au Play Store** dans AdMob
+      (*Applications → Paramètres de l'application*).
+- [ ] Les trois blocs d'annonces sont **actifs** (un bloc tout juste créé peut
+      rester sans impression pendant quelques heures).
+- [ ] *Confidentialité et messages → Message RGPD* : message **publié** pour
+      l'EEE/UK, sinon `canRequestAds` reste `false` en Europe et aucune annonce
+      n'est diffusée (l'app l'indique dans Profil → *Confidentialité des
+      annonces*).
+- [ ] *Confidentialité et messages → Options de confidentialité* activées
+      (bouton de révision du consentement exigé par le RGPD).
+- [ ] Paiements et fiscalité validés : un compte non vérifié ne reçoit que des
+      annonces vides.
+- [ ] Pour tester sans risque d'« invalid traffic », utiliser un appareil de
+      test déclaré dans AdMob ou les blocs de test Google.
 
 ## Consentement publicitaire RGPD (F03)
 
 AdMob est initialisé avec le module de consentement Google **UMP** (Funding
 Choices) : avant toute annonce, le formulaire de consentement est affiché pour
 les utilisateurs de l'EEE/UK. L'utilisateur peut le réviser à tout moment
-(Profil → *Confidentialité des annonces*). Créer le **message RGPD** dans la
-console AdMob → *Confidentialité et messages*.
+(Profil → *Confidentialité des annonces*), où s'affiche également l'état réel
+de la régie (annonces actives / indisponibles). Créer et **publier** le
+**message RGPD** dans la console AdMob → *Confidentialité et messages*.
 
 ## Notifications (F10)
 

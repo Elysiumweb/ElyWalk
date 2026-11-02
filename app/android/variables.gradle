@@ -13,4 +13,11 @@ ext {
     androidxJunitVersion = '1.3.0'
     androidxEspressoCoreVersion = '3.7.0'
     cordovaAndroidVersion = '14.0.1'
+    // Google Mobile Ads (AdMob) : la branche 25.x remplace l'API dépréciée
+    // LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES signalée par Google Play
+    // (com.google.android.gms.ads.internal.overlay) par un comportement
+    // compatible Android 15. Ne pas redescendre en 24.x.
+    playServicesAdsVersion = '25.4.+'
+    // Module de consentement RGPD (UMP / Funding Choices).
+    userMessagingPlatformVersion = '4.0.0'
 }

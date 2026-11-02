@@ -5,7 +5,7 @@ import { useToast } from '../components/Toast';
 import ProgressRing from '../components/ProgressRing';
 import Sheet from '../components/Sheet';
 import { pedometer } from '../lib/pedometer';
-import { showInterstitial, showRewardedAd } from '../lib/ads';
+import { getAdsDiagnostics, showInterstitial, showRewardedAd } from '../lib/ads';
 import { validateSteps, creditAdReward, syncTodaySteps } from '../lib/db';
 import { coinsForSteps, caloriesForSteps, fmtCoins, fmtNumber, dateStr, nextStepTier, formatDistance } from '../lib/coins';
 import { shareDailyStats } from '../lib/share';
@@ -123,9 +123,10 @@ export default function HomePage() {
     setBusyValidate(true);
     try {
       const stepsToValidate = pedometer.getTodaySteps();
-      // Annonce interstitielle avant le crédit.
-      await showInterstitial();
       const result = await validateSteps(profile.uid, stepsToValidate);
+      // Annonce interstitielle après le crédit : une pub qui ne charge pas ne
+      // doit jamais faire perdre la validation du jour.
+      await showInterstitial('steps-validation');
       toast(`+${fmtCoins(result.coins)} ElyCoins · Série de ${result.streak} jour${result.streak > 1 ? 's' : ''} !${result.freezeUsed ? ' Gel utilisé pour rattraper la journée manquée.' : ''}`, 'success');
       if (result.streak === 7 || result.streak === 30) celebrate(`Palier de série atteint : ${result.streak} jours !`);
     } catch (e) {
@@ -155,7 +156,13 @@ export default function HomePage() {
           toast(`+${fmtCoins(AD_REWARD_COINS)} ElyCoins !`, 'success');
         }
       } else {
-        toast('Publicité non terminée — aucune récompense.', 'error');
+        const diag = getAdsDiagnostics();
+        toast(
+          diag.adsAllowed
+            ? 'Publicité non terminée — aucune récompense.'
+            : 'Aucune publicité disponible pour le moment. Vérifiez votre connexion, puis vos choix dans Profil → Confidentialité des annonces.',
+          'error'
+        );
       }
     } catch (e) {
       toast((e as Error).message, 'error');

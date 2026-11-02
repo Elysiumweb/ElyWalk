@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.5.0 — 2026-11-02
+
+- **F24** Publicités réparées. Les identifiants AdMob pointaient vers un autre
+  compte que celui de l'application : aucune annonce ne pouvait être servie.
+  L'ID d'application (`ca-app-pub-5316598937383510~4963026878`) est désormais
+  identique dans `AndroidManifest.xml` et `src/lib/constants.ts`, et les trois
+  blocs d'annonces du compte ElyWalk sont câblés :
+  - *annonce à l'ouverture* (`…/6986554989`) au lancement et au retour dans l'app ;
+  - *interstitiel* (`…/7972992736`) à la validation des pas, **à la fin d'une
+    sortie** et **après une demande de retrait** ;
+  - *vidéo avec récompense* (`…/9832210178`) pour « Regarder une pub pour
+    gagner 0,1 ElyCoins » (identifiant transmis en SSV).
+- **F25** Chargement des annonces fiabilisé : initialisation unique (plus de
+  double `initialize()` concurrent), nouvelle tentative de consentement après
+  un échec réseau, préchargement et rechargement automatique de l'interstitiel,
+  délai minimal entre deux annonces, et aucune annonce d'ouverture enchaînée
+  sur une autre annonce plein écran. L'interstitiel passe **après** l'action
+  (validation, sortie, retrait) : une pub indisponible ne fait plus perdre
+  l'opération. Profil → *Confidentialité des annonces* affiche l'état réel de
+  la régie.
+- **F26** Optimisation du code DEX exigée par Google Play : la version de
+  production est minifiée et obscurcie par R8 (`minifyEnabled` +
+  `shrinkResources`) avec des règles de conservation pour Capacitor, les
+  plugins natifs et le widget.
+- **F27** Affichage de bord à bord (Android 15) : activation rétrocompatible
+  sans API obsolète (plus de `LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES` côté
+  application), barres système transparentes via le thème, encarts transmis au
+  CSS (`env(safe-area-inset-*)`), et SDK Google Mobile Ads aligné sur la
+  branche 25.x qui supprime l'usage de cette API dépréciée.
+- **Correctif** `@capacitor/filesystem` et `@capacitor/share` n'étaient pas
+  inclus dans le projet Android (partage d'image et export de fichiers).
+
 ## 1.4.0 — 2026-10-22
 
 - **F16** Pause / reprise d'une sortie : nouveau bouton dans l'écran Sortie GPS et méthodes `pause()` / `resume()` du plugin `Tracking`. Le service natif `TrackingService` gère l'état `paused` (GPS coupé, notification « en pause », reprise après kill du process) et le temps de pause est exclu de la durée active, de la vitesse et de l'allure.

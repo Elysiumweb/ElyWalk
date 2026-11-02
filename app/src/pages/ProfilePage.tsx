@@ -12,7 +12,7 @@ import { updateUserFields, setReferredBy, exportAccountData, deleteAccountData, 
 import { uploadAvatar, deleteAvatar } from '../lib/avatar';
 import { getNotificationSettings, setReminderEnabled, setPushEnabled, type NotificationSettings } from '../lib/notifications';
 import { ACCOUNT_DELETION_URL, DATA_DELETION_URL, BADGE_DEFINITIONS } from '../lib/constants';
-import { showPrivacyOptionsForm } from '../lib/ads';
+import { getAdsDiagnostics, showPrivacyOptionsForm, type AdsDiagnostics } from '../lib/ads';
 import { isPresidentUid } from '../lib/constants';
 import { fmtCoins, fmtNumber, formatDistance } from '../lib/coins';
 import type { UserBadge, BadgeDefinition } from '../lib/types';
@@ -32,9 +32,18 @@ export default function ProfilePage() {
   const [nextEmail, setNextEmail] = useState('');
 
   const [notifSettings, setNotifSettings] = useState<NotificationSettings | null>(null);
+  const [adsDiag, setAdsDiag] = useState<AdsDiagnostics>(() => getAdsDiagnostics());
 
   useEffect(() => {
     getNotificationSettings().then(setNotifSettings).catch(() => undefined);
+  }, []);
+
+  // État de la régie publicitaire (consentement UMP, disponibilité des annonces).
+  useEffect(() => {
+    const refresh = () => setAdsDiag(getAdsDiagnostics());
+    refresh();
+    const id = window.setTimeout(refresh, 2500);
+    return () => window.clearTimeout(id);
   }, []);
 
   const [referralOpen, setReferralOpen] = useState(false);
@@ -171,7 +180,7 @@ export default function ProfilePage() {
   const onChangeEmail = async () => { if(!profile)return; setBusy(true); try { await changeEmail(emailPassword, nextEmail); await updateUserFields(profile.uid, { email: nextEmail.trim() }); toast('Adresse e-mail mise à jour.','success'); setEmailOpen(false); setEmailPassword(''); setNextEmail(''); } catch(e){toast(frAuthError(e),'error')} finally{setBusy(false)} };
   const onToggleReminder = async (v: boolean) => { await setReminderEnabled(v); setNotifSettings((s) => s ? { ...s, reminder: v } : s); };
   const onTogglePush = async (v: boolean) => { if(!profile)return; await setPushEnabled(profile.uid, v); setNotifSettings((s) => s ? { ...s, push: v } : s); };
-  const onPrivacyOptions = async () => { await showPrivacyOptionsForm(); };
+  const onPrivacyOptions = async () => { await showPrivacyOptionsForm(); setAdsDiag(getAdsDiagnostics()); };
   const onExport = async () => { if(!profile)return; const data=await exportAccountData(profile.uid); const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'})); a.download=`elywalk-export-${profile.uid}.json`; a.click(); URL.revokeObjectURL(a.href); };
   const onDelete = async () => { if(!profile||!confirm('Suppression définitive : vos données et votre compte seront effacés. Continuer ?'))return; const pwd=prompt('Pour confirmer, saisissez votre mot de passe (laissez vide pour Google)')||undefined; setBusy(true); try { if(pwd) await reauthenticateAccount(pwd); await deleteAvatar(profile.uid); await deleteAccountData(profile.uid); await deleteAuthAccount(); } catch(e){toast(frAuthError(e),'error')} finally{setBusy(false)} };
   const copyText = async (value: string, label: string) => { await navigator.clipboard.writeText(value); toast(`${label} copié !`, 'success'); };
@@ -384,7 +393,14 @@ export default function ProfilePage() {
       <div className="card"><div className="card-title">Compte & données</div>
         <button className="btn btn-ghost" onClick={()=>setSecurityOpen(true)}>Changer le mot de passe</button>
         <button className="btn btn-ghost" onClick={()=>setEmailOpen(true)} data-testid="change-email-button">Changer l’adresse e-mail</button><div className="section-gap" />
-        <button className="btn btn-outline" onClick={onPrivacyOptions}>Confidentialité des annonces (AdMob)</button><div className="section-gap" />
+        <button className="btn btn-outline" onClick={onPrivacyOptions}>Confidentialité des annonces (AdMob)</button>
+        <p style={{ color: 'var(--muted)', fontSize: 12, marginTop: 6, lineHeight: 1.5 }} data-testid="ads-status">
+          {!adsDiag.native
+            ? 'Les publicités ne sont diffusées que dans l’application Android.'
+            : adsDiag.adsAllowed
+              ? 'Annonces activées — consentement : ' + (adsDiag.consentStatus === 'NOT_REQUIRED' ? 'non requis hors UE' : 'accordé') + '.'
+              : 'Annonces indisponibles pour l’instant (consentement non accordé ou réseau). Touchez le bouton ci-dessus pour revoir vos choix.'}
+        </p><div className="section-gap" />
         <button className="btn btn-outline" onClick={onExport}>Exporter mes données (RGPD)</button><div className="section-gap" />
         <a className="btn btn-outline" href={DATA_DELETION_URL} target="_blank" rel="noopener noreferrer">Supprimer une partie de mes données</a><div className="section-gap" />
         <button className="btn btn-danger" onClick={onDelete} disabled={busy}>Supprimer définitivement mon compte</button>
@@ -392,7 +408,7 @@ export default function ProfilePage() {
           Procédure détaillée, données supprimées et durées de conservation :{' '}
           <a href={ACCOUNT_DELETION_URL} target="_blank" rel="noopener noreferrer">{ACCOUNT_DELETION_URL}</a>
         </p>
-        <div className="legal-links"><a href="/legal/terms">CGU</a> · <a href="/legal/privacy">Confidentialité</a> · <a href="/legal/notices">Mentions légales</a> · <a href="mailto:contact@elysium-esport.fr?subject=Feedback%20ElyWalk">Donner mon avis</a> · <button className="text-button" style={{display:'inline',padding:0,width:'auto'}} onClick={()=>navigate('/whats-new')}>Nouveautés</button><br/>ElyWalk 1.4.0</div>
+        <div className="legal-links"><a href="/legal/terms">CGU</a> · <a href="/legal/privacy">Confidentialité</a> · <a href="/legal/notices">Mentions légales</a> · <a href="mailto:contact@elysium-esport.fr?subject=Feedback%20ElyWalk">Donner mon avis</a> · <button className="text-button" style={{display:'inline',padding:0,width:'auto'}} onClick={()=>navigate('/whats-new')}>Nouveautés</button><br/>ElyWalk 1.5.0</div>
       </div>
 
       {isAdmin && (

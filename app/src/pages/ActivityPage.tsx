@@ -15,6 +15,7 @@ import {
   type ActivityQueryCursor,
 } from '../lib/db';
 import { tracking, isTrackingSupported, type TrackingSnapshot } from '../lib/tracking';
+import { showInterstitial } from '../lib/ads';
 import { pedometer } from '../lib/pedometer';
 import type { ActivityPoint, ActivitySession, ActivityType } from '../lib/types';
 import { formatDistance } from '../lib/coins';
@@ -624,6 +625,8 @@ export default function ActivityPage() {
       setAccuracy(null);
       localStorage.removeItem(ACTIVE_SESSION_KEY);
       setReloadToken((n) => n + 1);
+      // Annonce interstitielle à la fin d'une sortie (après l'enregistrement).
+      await showInterstitial('activity-finished');
       const pauseLabel = pauseSeconds >= 60 ? ` · ${Math.round(pauseSeconds / 60)} min de pause` : '';
       toast(
         `Sortie enregistrée · ${formatDistance(finalDistance, unitSystem)} · ${Math.floor(duration / 60)} min${pauseLabel}`,
