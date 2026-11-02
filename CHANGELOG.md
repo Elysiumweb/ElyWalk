@@ -7,9 +7,13 @@
   site déclaré sur Google Play. `app/public/app-ads.txt` contient désormais
   l'enregistrement `google.com, pub-5316598937383510, DIRECT,
   f08c47fec0942fa0` ; Vite le copie dans `app/dist` et Firebase Hosting le sert
-  en `text/plain` (règle `headers` de `firebase.json`). Sans ce fichier,
-  certains acheteurs programmatiques refusent d'enchérir : moins d'annonces et
-  revenus plus faibles.
+  en `text/plain` (règle `headers` de `firebase.json`), avec un `robots.txt`
+  qui autorise explicitement le robot `Google-adstxt`. ⚠️ La fiche Play déclare
+  `https://elysium-esport.fr` : c'est **ce** domaine qu'AdMob explore, le
+  déploiement Firebase n'en est qu'un miroir (voir DEPLOYMENT.md). Script de
+  diagnostic : `scripts/check-app-ads.sh`. Sans ce fichier, certains acheteurs
+  programmatiques refusent d'enchérir : moins d'annonces et revenus plus
+  faibles.
 - **F29** Affichage de bord à bord désormais actif pour **tous** les
   utilisateurs : `WindowCompat.setDecorFitsSystemWindows(window, false)` n'est
   plus conditionné à la version de WebView installée (c'est ce test qui valait

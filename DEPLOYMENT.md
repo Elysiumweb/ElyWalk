@@ -300,36 +300,71 @@ GPS, partage et widget.
 
 ### `app-ads.txt` (validation AdMob)
 
-La console AdMob affichait « Impossible de valider Elywalk (Android) » :
-AdMob explore `https://<site web déclaré sur Google Play>/app-ads.txt` et n'y
-trouvait rien. Le fichier est maintenant versionné dans
-`app/public/app-ads.txt` (une seule ligne, sans espace superflu) :
+La console AdMob affiche « Impossible de valider Elywalk (Android) ».
+Le contenu du fichier n'est pas en cause (ASCII pur, LF, pas de BOM,
+4 champs exacts, identifiant éditeur conforme) : AdMob ne le trouve pas.
+
+**Le robot explore une seule URL : la racine du champ *Site Web* de la fiche
+Play.** Cette fiche déclare `https://elysium-esport.fr` (Play Console →
+*Paramètres du Store* → *Coordonnées sur la fiche Play Store*). L'URL
+réellement explorée est donc :
+
+```text
+https://elysium-esport.fr/app-ads.txt
+```
+
+⚠️ **Le déploiement Firebase n'est pas exploré** tant que la fiche Play
+déclare ce domaine. Le fichier versionné ici (`app/public/app-ads.txt`,
+publié sur `elywalk-2f7ba.web.app`) n'est qu'un **miroir**.
+
+Contenu exact, une seule ligne :
 
 ```text
 google.com, pub-5316598937383510, DIRECT, f08c47fec0942fa0
 ```
 
-Publication :
+#### Option A (recommandée) — déposer le fichier sur `elysium-esport.fr`
+
+Déposer `app-ads.txt` **à la racine du site**, pas dans un sous-dossier :
+
+| Hébergement | Où déposer |
+| --- | --- |
+| FTP / cPanel / OVH | dans `www/`, `public_html/` ou `htdocs/` (même niveau que `index.html`) |
+| WordPress | à la racine du site (même dossier que `wp-config.php`), **pas** dans le thème ; sinon extension « Ads.txt Manager » |
+| Wix | *Paramètres → Marketing & SEO → Fichiers racine* (ou *Gérer app-ads.txt*) |
+| Squarespace / Webflow | champ dédié dans les réglages SEO / fichiers racine |
+| Netlify, Vercel, GitHub Pages | dossier publié à la racine (`public/`, `static/`, racine du dépôt Pages) |
+| Firebase Hosting | déjà fait ici, via `app/public/app-ads.txt` |
+
+Puis vérifier, **sans redirection** :
+
+```bash
+./scripts/check-app-ads.sh      # teste apex + www + miroir Firebase
+```
+
+Si `elysium-esport.fr` redirige vers `www.elysium-esport.fr`, déposer le
+fichier **aux deux endroits** : AdMob n'unifie pas les deux hôtes et ne suit
+pas les redirections de façon fiable.
+
+#### Option B — pointer la fiche Play vers Firebase
+
+Si le fichier ne peut pas être déposé sur `elysium-esport.fr`, changer le champ
+*Site Web* de la fiche Play en `https://elywalk-2f7ba.web.app` : le fichier y
+est déjà servi correctement. Google recommande explicitement Firebase Hosting
+pour `app-ads.txt`. Inconvénients : l'URL est visible par les utilisateurs sur
+la fiche Play, et toute modification de fiche demande une republication puis
+~24 h de propagation avant qu'AdMob la voie.
+
+#### Publication du miroir Firebase
 
 ```bash
 cd app && npm run build      # Vite copie app/public/** dans app/dist
 cd .. && firebase deploy --only hosting
-curl -i https://elywalk-2f7ba.web.app/app-ads.txt   # 200 + text/plain
 ```
 
 `firebase.json` ajoute un en-tête `Content-Type: text/plain; charset=utf-8`
 sur `/app-ads.txt` (la réécriture `** → /index.html` ne masque pas les
 fichiers statiques).
-
-⚠️ Deux conditions impératives :
-
-1. l'URL explorée est **exactement** celle du champ *Site Web* de la fiche
-   Google Play. Si la fiche déclare `https://elywalk-2f7ba.web.app`, le
-   déploiement Firebase suffit ; si elle déclare `https://elysium-esport.fr`,
-   le **même fichier doit exister à la racine de ce domaine**
-   (`https://elysium-esport.fr/app-ads.txt`), sous-domaine `www` compris ;
-2. le fichier doit être servi en **HTTP 200 texte brut**, sans redirection
-   vers une page HTML.
 
 Ensuite, dans AdMob → *Applications → app-ads.txt*, cliquer sur **Vérifier les
 modifications** (ou *Rechercher à nouveau*). L'exploration peut prendre jusqu'à
@@ -346,24 +381,25 @@ par mille plus faible.
    fiche publique → le robot n'a aucun domaine à explorer → message « vos
    informations ne correspondent pas ». C'est la cause la plus probable tant
    que la 1.6.0 n'est pas en production.
-2. **Le champ « Site Web » doit être renseigné dans la fiche.**
-   Play Console → *Croissance* (Grow users) → *Présence sur le Store* →
-   *Paramètres du Store* → **Coordonnées de la fiche Play** → *Site Web*.
-   Mettre exactement `https://elywalk-2f7ba.web.app` (sans `www`, sans chemin,
-   sans barre oblique finale). Toute modification de la fiche demande ~24 h
-   avant d'être vue par AdMob.
+2. **Le champ « Site Web » de la fiche détermine l'URL explorée.**
+   Play Console → *Croissance* → *Présence sur le Store* → *Paramètres du
+   Store* → *Coordonnées sur la fiche Play Store* → **Site Web**.
+   Valeur actuelle : `https://elysium-esport.fr` (apex, sans `www`, sans
+   chemin). Toute modification de ce champ demande une republication de la
+   fiche puis ~24 h avant d'être vue par AdMob.
 3. **Le fichier doit répondre 200 en texte brut à cette URL exacte.**
 
 #### Vérifier ce que voit le robot
 
 ```bash
-./scripts/check-app-ads.sh                          # domaine Firebase par défaut
-./scripts/check-app-ads.sh https://elysium-esport.fr
+./scripts/check-app-ads.sh                       # apex + www + miroir Firebase
+./scripts/check-app-ads.sh https://un-autre.fr   # un domaine precis
 ```
 
-Le script contrôle le code HTTP, les redirections, le type MIME, la présence de
-HTML (piège du *fallback* SPA), l'enregistrement exact et les identifiants
-éditeur parasites.
+Le script affiche l'hébergeur de chaque domaine (en-tête `Server`), puis
+contrôle le code HTTP, les redirections, le type MIME, la présence de HTML
+(piège du *fallback* SPA), un éventuel BOM, l'enregistrement exact, les
+identifiants éditeur parasites et le `robots.txt` du domaine.
 
 #### Pièges connus (liste officielle + retours terrain)
 
