@@ -337,6 +337,55 @@ modifications** (ou *Rechercher à nouveau*). L'exploration peut prendre jusqu'�
 programmatiques refuse d'enchérir : moins d'annonces remplies et un revenu
 par mille plus faible.
 
+#### Les trois conditions, dans l'ordre où AdMob les vérifie
+
+1. **L'application doit être publiée sur le Play Store.** C'est écrit noir sur
+   blanc dans la FAQ Google (« Do I need to publish my app to verify the
+   app-ads.txt file? → **Yes** ») : le robot part de la **fiche publique** pour
+   y lire le site du développeur. Une application en **test fermé** n'a pas de
+   fiche publique → le robot n'a aucun domaine à explorer → message « vos
+   informations ne correspondent pas ». C'est la cause la plus probable tant
+   que la 1.6.0 n'est pas en production.
+2. **Le champ « Site Web » doit être renseigné dans la fiche.**
+   Play Console → *Croissance* (Grow users) → *Présence sur le Store* →
+   *Paramètres du Store* → **Coordonnées de la fiche Play** → *Site Web*.
+   Mettre exactement `https://elywalk-2f7ba.web.app` (sans `www`, sans chemin,
+   sans barre oblique finale). Toute modification de la fiche demande ~24 h
+   avant d'être vue par AdMob.
+3. **Le fichier doit répondre 200 en texte brut à cette URL exacte.**
+
+#### Vérifier ce que voit le robot
+
+```bash
+./scripts/check-app-ads.sh                          # domaine Firebase par défaut
+./scripts/check-app-ads.sh https://elysium-esport.fr
+```
+
+Le script contrôle le code HTTP, les redirections, le type MIME, la présence de
+HTML (piège du *fallback* SPA), l'enregistrement exact et les identifiants
+éditeur parasites.
+
+#### Pièges connus (liste officielle + retours terrain)
+
+| Symptôme | Cause | Correctif |
+| --- | --- | --- |
+| « app-ads.txt introuvable » | application non publiée, ou champ *Site Web* vide | publier en production, renseigner le site, attendre 24 h |
+| Validation échoue alors que l'URL marche | le domaine déclaré sur Play n'est **pas** celui qui héberge le fichier | aligner les deux |
+| `www` contre domaine nu | AdMob n'unifie **pas** `example.com` et `www.example.com` | héberger le fichier sur l'hôte exact déclaré |
+| Redirection apex → www | le robot ne suit pas toujours les redirections | servir le fichier en 200 direct sur l'hôte déclaré |
+| Réponse en `text/html` | fichier absent, c'est la page 404 ou le *fallback* SPA qui répond | règle `headers` de `firebase.json` + fichier réellement déployé |
+| Fichier illisible | BOM UTF-8, CRLF, espaces insécables | fichier ASCII pur, LF (vérifié : `od -c app/public/app-ads.txt`) |
+| Robot bloqué | `robots.txt` restrictif | `app/public/robots.txt` autorise `Google-adstxt`, `Googlebot`, `Mediapartners-Google` |
+| Rien ne bouge après 24 h | cache CDN ou fiche non propagée | purger le cache, revérifier après 48–72 h |
+
+Google recommande explicitement **Firebase Hosting** pour héberger
+`app-ads.txt` (et refuse Google Sites) : le domaine `*.web.app` convient, c'est
+un suffixe public, donc `elywalk-2f7ba.web.app` est bien une racine de domaine.
+
+⚠️ Ne pas confondre avec la **validation du compte AdMob** (identité,
+paiements) : `app-ads.txt` ne valide que l'autorisation de vente de
+l'inventaire.
+
 ## Publicités AdMob (F24 / F25)
 
 Compte AdMob ElyWalk — **ID d'application** :
