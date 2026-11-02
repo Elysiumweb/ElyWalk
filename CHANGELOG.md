@@ -9,9 +9,10 @@
   f08c47fec0942fa0` ; Vite le copie dans `app/dist` et Firebase Hosting le sert
   en `text/plain` (règle `headers` de `firebase.json`), avec un `robots.txt`
   qui autorise explicitement le robot `Google-adstxt`. ⚠️ La fiche Play déclare
-  `https://elysium-esport.fr` : c'est **ce** domaine qu'AdMob explore, le
-  déploiement Firebase n'en est qu'un miroir (voir DEPLOYMENT.md). Script de
-  diagnostic : `scripts/check-app-ads.sh`. Sans ce fichier, certains acheteurs
+  `https://elysium-esport.fr` (site Vercel) : c'est **ce** domaine qu'AdMob
+  explore — le fichier y est en ligne depuis le 2026-11-02 — et le déploiement
+  Firebase n'en est qu'un miroir (voir DEPLOYMENT.md). Script de diagnostic :
+  `scripts/check-app-ads.sh`. Sans ce fichier, certains acheteurs
   programmatiques refusent d'enchérir : moins d'annonces et revenus plus
   faibles.
 - **F29** Affichage de bord à bord désormais actif pour **tous** les

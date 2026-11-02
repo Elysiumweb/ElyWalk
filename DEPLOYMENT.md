@@ -300,22 +300,29 @@ GPS, partage et widget.
 
 ### `app-ads.txt` (validation AdMob)
 
-La console AdMob affiche « Impossible de valider Elywalk (Android) ».
-Le contenu du fichier n'est pas en cause (ASCII pur, LF, pas de BOM,
-4 champs exacts, identifiant éditeur conforme) : AdMob ne le trouve pas.
+**État : fichier en ligne, validation en attente de la mise en production.**
 
-**Le robot explore une seule URL : la racine du champ *Site Web* de la fiche
-Play.** Cette fiche déclare `https://elysium-esport.fr` (Play Console →
-*Paramètres du Store* → *Coordonnées sur la fiche Play Store*). L'URL
-réellement explorée est donc :
+Le robot d'AdMob explore une seule URL : la racine du champ *Site Web* de la
+fiche Play. Cette fiche déclare `https://elysium-esport.fr` (Play Console →
+*Paramètres du Store* → *Coordonnées sur la fiche Play Store*), site hébergé
+sur **Vercel**. L'URL explorée est donc :
 
 ```text
-https://elysium-esport.fr/app-ads.txt
+https://elysium-esport.fr/app-ads.txt     ← en ligne (2026-11-02)
 ```
 
 ⚠️ **Le déploiement Firebase n'est pas exploré** tant que la fiche Play
 déclare ce domaine. Le fichier versionné ici (`app/public/app-ads.txt`,
-publié sur `elywalk-2f7ba.web.app`) n'est qu'un **miroir**.
+publié sur `elywalk-2f7ba.web.app`) n'est qu'un **miroir** : la source de
+vérité pour AdMob est le dépôt Vercel du site.
+
+Il reste deux conditions, hors de ce dépôt :
+
+1. l'application doit être **publiée en production** sur le Play Store (le
+   robot lit le site du développeur sur la fiche **publique** ; une app en
+   test fermé n'en a pas) ;
+2. compter jusqu'à 24 h d'exploration, puis *Vérifier les modifications* dans
+   AdMob → *Applications → app-ads.txt*.
 
 Contenu exact, une seule ligne :
 
