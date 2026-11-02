@@ -65,6 +65,27 @@ for base in "${HOSTS[@]}"; do
   # 1. Statut HTTP
   if [ "$code" = "200" ]; then green "HTTP 200"; else red "HTTP ${code:-aucun} (doit etre 200)"; overall=1; fi
 
+  # 1 bis. Diagnostics specifiques Vercel
+  if printf '%s' "$headers" | tr -d '\r' | grep -qi '^x-vercel-id:'; then
+    info "servi par Vercel"
+    vercel_err=$(printf '%s' "$headers" | tr -d '\r' | awk -F': ' 'tolower($1)=="x-vercel-error"{e=$2} END{print e}')
+    [ -n "${vercel_err:-}" ] && red "x-vercel-error: ${vercel_err}"
+    case "$code" in
+      401|403)
+        red "Vercel renvoie ${code} : Deployment Protection (Vercel Authentication"
+        red "ou mot de passe) bloque le robot. Settings > Deployment Protection"
+        red "> desactiver pour la Production."
+        overall=1
+        ;;
+    esac
+    case "$body" in
+      *"Authentication Required"*|*"vercel.com/sso"*)
+        red "page d'authentification Vercel renvoyee a la place du fichier"
+        overall=1
+        ;;
+    esac
+  fi
+
   # 2. Redirections : AdMob ne les suit pas de facon fiable
   if [ "${redirects:-0}" -gt 0 ]; then
     warn "${redirects} redirection(s) -> ${final}"

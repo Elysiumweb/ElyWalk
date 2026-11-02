@@ -323,32 +323,91 @@ Contenu exact, une seule ligne :
 google.com, pub-5316598937383510, DIRECT, f08c47fec0942fa0
 ```
 
-#### Option A (recommandée) — déposer le fichier sur `elysium-esport.fr`
+#### Option A (recommandée) — déposer le fichier sur `elysium-esport.fr` (Vercel)
 
-Déposer `app-ads.txt` **à la racine du site**, pas dans un sous-dossier :
+Le site `elysium-esport.fr` est hébergé sur **Vercel**. Le fichier se dépose
+dans le dépôt de CE site (pas dans ce dépôt-ci), puis part au déploiement.
 
-| Hébergement | Où déposer |
-| --- | --- |
-| FTP / cPanel / OVH | dans `www/`, `public_html/` ou `htdocs/` (même niveau que `index.html`) |
-| WordPress | à la racine du site (même dossier que `wp-config.php`), **pas** dans le thème ; sinon extension « Ads.txt Manager » |
-| Wix | *Paramètres → Marketing & SEO → Fichiers racine* (ou *Gérer app-ads.txt*) |
-| Squarespace / Webflow | champ dédié dans les réglages SEO / fichiers racine |
-| Netlify, Vercel, GitHub Pages | dossier publié à la racine (`public/`, `static/`, racine du dépôt Pages) |
-| Firebase Hosting | déjà fait ici, via `app/public/app-ads.txt` |
+**1. Où placer le fichier selon le framework**
 
-Puis vérifier, **sans redirection** :
+| Projet Vercel | Emplacement dans le dépôt | URL servie |
+| --- | --- | --- |
+| Next.js (App ou Pages Router) | `public/app-ads.txt` | `/app-ads.txt` |
+| Vite, React, Vue, Svelte | `public/app-ads.txt` | `/app-ads.txt` |
+| Astro | `public/app-ads.txt` | `/app-ads.txt` |
+| Nuxt 3 | `public/app-ads.txt` | `/app-ads.txt` |
+| Site statique sans framework | racine du dépôt | `/app-ads.txt` |
+
+Contenu : la ligne unique ci-dessus, en texte brut, sans BOM, sans `<html>`
+autour. Vercel sert les fichiers de `public/` en `text/plain` automatiquement
+pour une extension `.txt` ; aucun réglage supplémentaire n'est nécessaire.
+
+**2. Mettre le domaine nu en domaine principal**
+
+C'est le piège Vercel le plus fréquent. Si `elysium-esport.fr` redirige en 308
+vers `www.elysium-esport.fr`, le robot d'AdMob — qui explore l'apex déclaré sur
+Play — peut abandonner. Dans *Vercel → Project → Settings → Domains*, mettre
+**`elysium-esport.fr` en domaine principal** (`www` redirige alors vers l'apex,
+et non l'inverse). À défaut, déposer le fichier de sorte que les deux hôtes le
+servent en 200.
+
+**3. Vérifier la Deployment Protection**
+
+*Settings → Deployment Protection* : si *Vercel Authentication* ou *Password
+Protection* est actif sur la Production, toute requête anonyme reçoit un 401 —
+le robot d'AdMob aussi. Désactiver la protection pour la Production (ou au
+minimum exclure la racine du site).
+
+**4. Attention aux réécritures fourre-tout**
+
+Avec `rewrites` dans `vercel.json`, les fichiers statiques passent avant les
+réécritures : rien à faire. Avec l'ancienne clé `routes`, il faut un
+`{ "handle": "filesystem" }` **avant** la route fourre-tout, sinon
+`/app-ads.txt` renvoie le HTML de la SPA.
+
+Pour forcer explicitement le type MIME (facultatif) :
+
+```json
+{
+  "headers": [
+    {
+      "source": "/app-ads.txt",
+      "headers": [{ "key": "Content-Type", "value": "text/plain; charset=utf-8" }]
+    }
+  ]
+}
+```
+
+**Variante — proxy vers le miroir Firebase** (une seule source de vérité, le
+fichier reste versionné dans ce dépôt) :
+
+```json
+{
+  "rewrites": [
+    {
+      "source": "/app-ads.txt",
+      "destination": "https://elywalk-2f7ba.web.app/app-ads.txt"
+    }
+  ]
+}
+```
+
+Plus pratique à maintenir, mais ajoute une dépendance réseau au moment de
+l'exploration : le fichier statique reste le choix le plus sûr.
+
+**5. Vérifier**
 
 ```bash
 ./scripts/check-app-ads.sh      # teste apex + www + miroir Firebase
 ```
 
-Si `elysium-esport.fr` redirige vers `www.elysium-esport.fr`, déposer le
-fichier **aux deux endroits** : AdMob n'unifie pas les deux hôtes et ne suit
-pas les redirections de façon fiable.
+Le script signale les erreurs propres à Vercel (en-tête `x-vercel-error`, 401
+de la Deployment Protection, page d'authentification renvoyée à la place du
+fichier).
 
 #### Option B — pointer la fiche Play vers Firebase
 
-Si le fichier ne peut pas être déposé sur `elysium-esport.fr`, changer le champ
+Si le dépôt Vercel d'`elysium-esport.fr` n'est pas accessible, changer le champ
 *Site Web* de la fiche Play en `https://elywalk-2f7ba.web.app` : le fichier y
 est déjà servi correctement. Google recommande explicitement Firebase Hosting
 pour `app-ads.txt`. Inconvénients : l'URL est visible par les utilisateurs sur
