@@ -14,12 +14,14 @@
 
       Affichage de bord à bord : les barres système sont transparentes via le
       thème (ressources, pas d'appel aux API dépréciées
-      Window#setStatusBarColor / setNavigationBarColor, retirées de l'usage
-      recommandé dans Android 15). Le fond de fenêtre reprend le noir de
-      l'application pour éviter tout flash blanc au lancement et pour que la
-      zone des barres reste cohérente sur les appareils antérieurs à Android 15.
+      Window#setStatusBarColor / setNavigationBarColor dans Android 15). Le
+      fond de fenêtre reprend le noir de l'application pour éviter tout flash
+      blanc au lancement.
+
+      Le mode d'affichage dans les encoches est défini dans values-v30
+      (`always`, remplaçant non déprécié de `shortEdges`).
     -->
-    <style name="AppTheme.NoActionBar" parent="Theme.AppCompat.DayNight.NoActionBar">
+    <style name="AppTheme.NoActionBarBase" parent="Theme.AppCompat.DayNight.NoActionBar">
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
         <item name="android:background">@null</item>
@@ -35,6 +37,7 @@
         <item name="android:enforceNavigationBarContrast" tools:targetApi="q">false</item>
     </style>
 
+    <style name="AppTheme.NoActionBar" parent="AppTheme.NoActionBarBase" />
 
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
         <item name="android:background">@drawable/splash</item>

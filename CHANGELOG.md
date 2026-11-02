@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.6.0 — 2026-11-02
+
+- **F28** `app-ads.txt` publié. La validation échouait dans la console AdMob
+  (« Impossible de valider Elywalk (Android) ») faute de fichier à la racine du
+  site déclaré sur Google Play. `app/public/app-ads.txt` contient désormais
+  l'enregistrement `google.com, pub-5316598937383510, DIRECT,
+  f08c47fec0942fa0` ; Vite le copie dans `app/dist` et Firebase Hosting le sert
+  en `text/plain` (règle `headers` de `firebase.json`). Sans ce fichier,
+  certains acheteurs programmatiques refusent d'enchérir : moins d'annonces et
+  revenus plus faibles.
+- **F29** Affichage de bord à bord désormais actif pour **tous** les
+  utilisateurs : `WindowCompat.setDecorFitsSystemWindows(window, false)` n'est
+  plus conditionné à la version de WebView installée (c'est ce test qui valait
+  l'avertissement Play « peut ne pas être disponible pour tous les
+  utilisateurs »). Un repli natif applique les marges de sécurité uniquement
+  sur les appareils antérieurs à Android 15 dont la WebView ne gère pas
+  `env(safe-area-inset-*)`.
+- **F30** Mode encoche `always` déclaré aussi dans le thème (`values-v30`),
+  pour la fenêtre de l'application **et** pour l'écran de lancement : plus
+  aucune ressource de l'application ne demande `shortEdges`, déprécié depuis
+  Android 15.
+- **F31** Optimisation R8 poussée (recommandation « mémoire et performances »
+  de Google Play) : `android.enableR8.fullMode=true`,
+  `-allowaccessmodification` et `-repackageclasses ''`, mémoire du démon Gradle
+  portée à 4 Go pour absorber la passe d'optimisation complète.
+- **F32** SDK Google Mobile Ads aligné sur `25.5.+` (dernière version de la
+  branche recommandée par Google pour Android 15).
+
 ## 1.5.0 — 2026-11-02
 
 - **F24** Publicités réparées. Les identifiants AdMob pointaient vers un autre

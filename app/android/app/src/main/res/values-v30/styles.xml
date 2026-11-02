@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 11+ : `always` est le mode d'affichage dans les encoches recommandé
+  depuis Android 15, en remplacement de `shortEdges` (déprécié). Il est posé
+  ici pour la fenêtre de l'application ET pour la fenêtre de lancement
+  (splash), afin qu'aucune de nos ressources ne demande `shortEdges`.
+-->
+<resources>
+
+    <style name="AppTheme.NoActionBar" parent="AppTheme.NoActionBarBase">
+        <item name="android:windowLayoutInDisplayCutoutMode">always</item>
+    </style>
+
+    <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
+        <item name="android:background">@drawable/splash</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">always</item>
+    </style>
+</resources>

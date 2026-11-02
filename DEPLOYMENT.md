@@ -198,8 +198,8 @@ npx cap sync android
 npx cap open android
 ```
 
-La version Android est `5 / 1.5.0` (la 1.4.0 publiée en test fermé portait le
-`versionCode` 4 : tout nouvel envoi doit être strictement supérieur).
+La version Android est `6 / 1.6.0` (chaque envoi doit porter un `versionCode`
+strictement supérieur au précédent : 4 = 1.4.0, 5 = 1.5.0, 6 = 1.6.0).
 
 ### Build de production (AAB signé)
 
@@ -226,13 +226,28 @@ non signé, à signer depuis Android Studio (*Build → Generate Signed App
 Bundle*). ⚠️ Conserver la **même clé d'upload** que la 1.4.0, sinon Play
 refuse l'envoi.
 
-### Optimisation du code DEX (exigence Google Play)
+### Optimisation du code DEX et R8 (exigences Google Play)
 
 Play signalait « L'optimisation du code DEX est inférieure à notre seuil —
 Obscurcissement (1 %) » : la version release n'était pas minifiée. Elle l'est
-désormais (`app/android/app/build.gradle`) :
+depuis la 1.5.0, et l'avertissement a disparu sur le build 5. Play affiche
+maintenant une recommandation plus douce (« Améliorez la mémoire et les
+performances de votre appli avec l'optimisation R8 ») ; la 1.6.0 pousse donc
+l'optimisation un cran plus loin.
+
+Réglages actuels (`app/android/app/build.gradle`, `gradle.properties`,
+`proguard-rules.pro`) :
 
 - `minifyEnabled true` + `shrinkResources true` ;
+- `android.enableR8.fullMode=true` (optimisations inter-classes, fusion de
+  classes, analyse de nullité) ;
+- `-allowaccessmodification` + `-repackageclasses ''` : R8 peut élargir la
+  visibilité des membres et regrouper tout le code non conservé dans un paquet
+  racine — ce sont les deux réglages qui font monter les pourcentages
+  d'obscurcissement et d'optimisation mesurés par Play ;
+- `org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=512m` : le mode complet de
+  R8 dépasse les 1,5 Go d'origine sur ce projet (Firebase + Google Mobile Ads)
+  et échouerait en `OutOfMemoryError` ;
 - `proguard-android-optimize.txt` + `app/android/app/proguard-rules.pro`
   (conserve les classes chargées par réflexion : plugins Capacitor listés dans
   `assets/capacitor.plugins.json`, plugins natifs `StepCounterPlugin` /
@@ -258,16 +273,69 @@ GPS, partage et widget.
 - Les encarts sont consommés côté web : `viewport-fit=cover` (index.html) et
   `env(safe-area-inset-*)` dans les feuilles de style ; Capacitor injecte aussi
   `--safe-area-inset-*` (`SystemBars.insetsHandling: 'css'`).
-- Avant Android 15, le bord à bord n'est activé que si la WebView sait exposer
-  les safe-area (Chromium 140+) ; sinon Capacitor applique les marges et
-  l'affichage reste correct.
+- Le bord à bord est activé **sans condition**, sur toutes les versions
+  d'Android. Il l'était auparavant seulement quand la WebView installée savait
+  exposer les safe-area (Chromium 140+) : c'est ce test à l'exécution qui
+  valait l'avertissement Play « l'affichage de bord à bord peut ne pas être
+  disponible pour tous les utilisateurs ».
+- Repli natif (`MainActivity.applyInsetsFallback()`) : sur les appareils
+  **antérieurs à Android 15 dont la WebView est ancienne**, les marges système
+  (barres + encoche + clavier) sont appliquées sur `android.R.id.content`.
+  À partir d'Android 15, c'est Capacitor qui s'en charge : pas de double marge.
+- Le mode encoche `always` est aussi déclaré dans le thème
+  (`res/values-v30/styles.xml`) pour la fenêtre de l'application **et** pour
+  l'écran de lancement : plus aucune ressource de l'app ne demande
+  `shortEdges`.
 - Les occurrences restantes de `LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES`
-  signalées par Play provenaient des bibliothèques Google
+  signalées par Play proviennent des bibliothèques Google elles-mêmes
   (`com.google.android.gms.ads.internal.overlay`,
-  `com.google.android.play.core.hsdp`). Le SDK d'annonces est pinné sur la
-  branche **25.4.x** (`app/android/variables.gradle`), qui a migré ; la partie
-  `play.core.hsdp` est interne au Play Store et se résorbe avec les montées de
-  version des SDK Google.
+  `com.google.android.play.core.hsdp.service.HsdpShimActivity`,
+  `androidx.activity.EdgeToEdgeApi28`), **pas du code ElyWalk**. Le SDK
+  d'annonces suit la dernière version de la branche recommandée
+  (`playServicesAdsVersion = '25.5.+'` dans `app/android/variables.gradle`) ;
+  le module `play.core.hsdp` arrive en dépendance transitive de ce SDK et ne
+  peut pas être exclu sans risque de plantage. Cet avertissement est une
+  **recommandation, pas un blocage de publication** : il se résorbera avec les
+  prochaines versions des SDK Google.
+
+### `app-ads.txt` (validation AdMob)
+
+La console AdMob affichait « Impossible de valider Elywalk (Android) » :
+AdMob explore `https://<site web déclaré sur Google Play>/app-ads.txt` et n'y
+trouvait rien. Le fichier est maintenant versionné dans
+`app/public/app-ads.txt` (une seule ligne, sans espace superflu) :
+
+```text
+google.com, pub-5316598937383510, DIRECT, f08c47fec0942fa0
+```
+
+Publication :
+
+```bash
+cd app && npm run build      # Vite copie app/public/** dans app/dist
+cd .. && firebase deploy --only hosting
+curl -i https://elywalk-2f7ba.web.app/app-ads.txt   # 200 + text/plain
+```
+
+`firebase.json` ajoute un en-tête `Content-Type: text/plain; charset=utf-8`
+sur `/app-ads.txt` (la réécriture `** → /index.html` ne masque pas les
+fichiers statiques).
+
+⚠️ Deux conditions impératives :
+
+1. l'URL explorée est **exactement** celle du champ *Site Web* de la fiche
+   Google Play. Si la fiche déclare `https://elywalk-2f7ba.web.app`, le
+   déploiement Firebase suffit ; si elle déclare `https://elysium-esport.fr`,
+   le **même fichier doit exister à la racine de ce domaine**
+   (`https://elysium-esport.fr/app-ads.txt`), sous-domaine `www` compris ;
+2. le fichier doit être servi en **HTTP 200 texte brut**, sans redirection
+   vers une page HTML.
+
+Ensuite, dans AdMob → *Applications → app-ads.txt*, cliquer sur **Vérifier les
+modifications** (ou *Rechercher à nouveau*). L'exploration peut prendre jusqu'à
+24 h. Tant que le fichier n'est pas validé, une partie des acheteurs
+programmatiques refuse d'enchérir : moins d'annonces remplies et un revenu
+par mille plus faible.
 
 ## Publicités AdMob (F24 / F25)
 
@@ -294,6 +362,8 @@ Checklist console AdMob avant publication :
 
 - [ ] L'application `com.elysium.elywalk` est **liée au Play Store** dans AdMob
       (*Applications → Paramètres de l'application*).
+- [ ] `app-ads.txt` **validé** (voir la section dédiée plus haut) : le fichier
+      doit répondre en 200 à la racine du site déclaré sur la fiche Play.
 - [ ] Les trois blocs d'annonces sont **actifs** (un bloc tout juste créé peut
       rester sans impression pendant quelques heures).
 - [ ] *Confidentialité et messages → Message RGPD* : message **publié** pour

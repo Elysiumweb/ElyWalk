@@ -15,6 +15,16 @@
 -keepattributes SourceFile, LineNumberTable
 -renamesourcefileattribute SourceFile
 
+# --- Optimisation maximale (recommandation R8 de Google Play) --------------
+# `-allowaccessmodification` autorise R8 à élargir la visibilité des membres,
+# ce qui débloque l'inlining et la fusion de classes ; `-repackageclasses`
+# regroupe tout le code non conservé dans un paquet racine unique. Les deux
+# augmentent nettement les pourcentages d'obscurcissement et d'optimisation
+# mesurés par Play, sans effet sur les classes protégées par les règles
+# `-keep` ci-dessous (elles gardent leur nom complet).
+-allowaccessmodification
+-repackageclasses ''
+
 # --- Capacitor -------------------------------------------------------------
 # `assets/capacitor.plugins.json` référence chaque plugin par son nom complet
 # de classe : ces classes (et leurs méthodes annotées) sont chargées par
