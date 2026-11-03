@@ -62,13 +62,16 @@ différent de celui du compte.
   par Firebase Hosting, **avant** la réécriture SPA (`rewrites: **`) : les
   fichiers statiques sont servis en priorité.
 - En-tête forcé en `text/plain; charset=utf-8` dans `firebase.json` (`headers`).
-- **URL exigée par AdMob**, identique au domaine de la fiche Play :
 
-  ```
-  https://elywalk-2f7ba.web.app/app-ads.txt
-  ```
+**La fiche Play Store pointe sur `https://elysium-esport.fr`** : c'est donc
+`https://elysium-esport.fr/app-ads.txt` qu'AdMob interroge, et c'est ce fichier
+qui fait foi. Il est publié depuis le dépôt du site (`Elysiumweb/main`,
+`public/app-ads.txt`, déployé par Vercel, 59 octets identiques).
 
-  (`https://elywalk-2f7ba.firebaseapp.com/app-ads.txt` fonctionne aussi.)
+La copie de ce dépôt (`https://elywalk-2f7ba.web.app/app-ads.txt`, servie aussi
+sur `.firebaseapp.com`) reste utile comme **secours** : si la fiche Play devait
+basculer vers ce domaine, le fichier est déjà en place. Elle n'est pas lue par
+AdMob tant que la fiche Play indique `elysium-esport.fr`.
 
 Contenu actuel :
 
@@ -88,8 +91,17 @@ Vérification locale et distante :
 ```bash
 cd app
 npm run check:app-ads                        # format + cohérence avec le code
-npm run check:app-ads -- --url https://elywalk-2f7ba.web.app/app-ads.txt
+npm run check:app-ads -- --url https://elysium-esport.fr/app-ads.txt
                                              # 200 + text/plain + contenu à jour
+npm run check:app-ads -- --url https://elywalk-2f7ba.web.app/app-ads.txt
+```
+
+Contrôle manuel de ce que voit le crawler (client HTTP simple, sans JavaScript) :
+
+```bash
+curl -sS -D - -o /dev/null https://elysium-esport.fr/app-ads.txt
+# attendu : HTTP/2 200 · content-type: text/plain; charset=utf-8 · aucun
+# en-tête x-vercel-mitigated
 ```
 
 Le script vérifie l'encodage (pas de BOM, pas de CRLF, pas d'espace parasite),
@@ -138,14 +150,41 @@ avec les anciens blocs. Les anciens identifiants du compte
 `pub-6906841385343667` (`~6481018527`, blocs `/3683414466`, `/6616749893`,
 `/3494240028`) sont obsolètes et ne doivent pas revenir.
 
-### Si un domaine personnalisé est utilisé
+### ⚠️ Vercel : le pare-feu doit laisser passer le crawler
 
-Le crawler interroge **exactement** le domaine saisi dans la fiche Play Store
-(*Site Web*), sans redirection. Si la fiche pointe vers un domaine autre que
-`elywalk-2f7ba.web.app` (ex. `elywalk.fr`), le fichier doit répondre en 200 sur
-`https://<ce-domaine>/app-ads.txt`. Un domaine personnalisé connecté à Firebase
-Hosting sert le même `dist/`, donc le fichier suit — mais l'ancien hébergeur, une
-redirection vers `www` ou une page de connexion cassent la validation.
+Le site `elysium-esport.fr` est hébergé sur **Vercel**. Le 2026-11-03, une
+requête HTTP simple sur `/app-ads.txt` renvoyait :
+
+```
+HTTP/1.1 429 Too Many Requests
+Server: Vercel
+X-Vercel-Mitigated: challenge
+```
+
+C'est le **Security Checkpoint** de Vercel (Attack Mode / challenge de bots) :
+seul un navigateur capable d'exécuter du JavaScript peut le franchir. Le crawler
+`app-ads.txt` d'AdMob est un client HTTP simple — il reçoit la page de challenge
+au lieu du fichier, donc **la validation échoue même quand le fichier est bon**.
+Les robots vérifiés (Googlebot, Bingbot) sont exemptés, mais le crawler AdMob
+n'est pas dans cette liste.
+
+À corriger dans le tableau de bord Vercel (projet du site) :
+
+1. *Firewall* → **Bot Management** → section **Attack Mode** : **Disable**
+   (ou `vercel firewall attack-mode disable --yes`). À ne pas laisser activé en
+   permanence : c'est un mode d'urgence anti-DDoS.
+2. Vérifier qu'aucune règle personnalisée (*Firewall* → *Rules*) ne cible
+   `/app-ads.txt` avec `challenge` ou `deny` ; sinon ajouter au-dessus une règle
+   `bypass` sur `path eq /app-ads.txt`.
+3. Vérifier dans *Firewall* → *Overview* qu'aucune requête `/app-ads.txt` n'est
+   encore marquée `challenge` après publication.
+
+Une règle `bypass` du WAF ne contourne pas Attaque Mode ni les mitigations
+système : tant que le challenge est global, le fichier reste illisible pour
+AdMob. Si le challenge doit rester actif, l'alternative est de pointer le champ
+*Site Web* de la fiche Play vers `elywalk-2f7ba.web.app` (Firebase Hosting, sans
+challenge), où le fichier est déjà publié — le champ se modifie sans nouvelle
+version de l'APK.
 
 ## Règles de confidentialité — URL publique (exigence Play Store)
 
