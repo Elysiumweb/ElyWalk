@@ -10,7 +10,8 @@
     "cap:android": "npx cap sync android",
     "cap:open": "npx cap open android",
     "expo": "node scripts/preview.js",
-    "test": "vitest run"
+    "test": "vitest run",
+    "check:app-ads": "node scripts/check-app-ads.mjs"
   },
   "dependencies": {
     "@capacitor-community/admob": "^8.1.0",

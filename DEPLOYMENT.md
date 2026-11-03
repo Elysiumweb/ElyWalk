@@ -47,6 +47,100 @@ keytool -printcert -jarfile app-release.apk | grep SHA256
 
 Puis `npm run build && firebase deploy --only hosting`.
 
+## app-ads.txt — validation AdMob (annonces monétisées)
+
+AdMob refuse de valider l'application tant qu'il ne trouve pas, à la **racine du
+domaine développeur déclaré sur Google Play**, un fichier `app-ads.txt` conforme à
+la spec IAB Tech Lab et contenant **l'ID éditeur du compte AdMob** qui possède
+l'application. Le message « vos informations ne correspondent pas à celles de
+votre compte AdMob » recouvre deux causes : fichier absent, ou ID éditeur
+différent de celui du compte.
+
+- Fichier source : `app/public/app-ads.txt` (une seule ligne de données, ASCII,
+  fins de ligne LF, sans BOM).
+- Vite copie `app/public/*` dans `app/dist/`, donc le fichier est publié tel quel
+  par Firebase Hosting, **avant** la réécriture SPA (`rewrites: **`) : les
+  fichiers statiques sont servis en priorité.
+- En-tête forcé en `text/plain; charset=utf-8` dans `firebase.json` (`headers`).
+- **URL exigée par AdMob**, identique au domaine de la fiche Play :
+
+  ```
+  https://elywalk-2f7ba.web.app/app-ads.txt
+  ```
+
+  (`https://elywalk-2f7ba.firebaseapp.com/app-ads.txt` fonctionne aussi.)
+
+Contenu actuel :
+
+```
+google.com, pub-5316598937383510, DIRECT, f08c47fec0942fa0
+```
+
+| Champ | Valeur | Rôle |
+| --- | --- | --- |
+| domaine | `google.com` | système publicitaire |
+| ID éditeur | `pub-5316598937383510` | compte AdMob propriétaire de l'app |
+| relation | `DIRECT` | inventaire vendu directement |
+| ID de certification | `f08c47fec0942fa0` | TAG ID de Google |
+
+Vérification locale et distante :
+
+```bash
+cd app
+npm run check:app-ads                        # format + cohérence avec le code
+npm run check:app-ads -- --url https://elywalk-2f7ba.web.app/app-ads.txt
+                                             # 200 + text/plain + contenu à jour
+```
+
+Le script vérifie l'encodage (pas de BOM, pas de CRLF, pas d'espace parasite),
+les 4 champs séparés par « , », la validité de l'ID éditeur, de la relation et
+de l'ID de certification, puis compare l'ID éditeur avec les identifiants AdMob
+du code (`constants.ts`, `AndroidManifest.xml`). Il sort en erreur si le fichier
+est mal formé ; `--strict` rend aussi bloquants les écarts de compte.
+
+Publication :
+
+```bash
+npm run build && firebase deploy --only hosting
+```
+
+Puis, dans la console AdMob, section *app-ads.txt* de l'application →
+**Vérifier les modifications** (le crawl peut prendre de quelques minutes à 24 h ;
+Google ne recrawle pas le fichier plus d'une fois par 24 h).
+
+### ⚠️ Écart d'ID éditeur à arbitrer
+
+Le code de l'application utilise l'éditeur **`pub-6906841385343667`**
+(`ca-app-pub-6906841385343667~6481018527` et les blocs
+`/3683414466`, `/6616749893`, `/3494240028`), alors que la console AdMob
+demande `pub-5316598937383510` dans `app-ads.txt`. Un fichier `app-ads.txt`
+valide ne peut déclarer que le compte réellement propriétaire de l'app :
+
+1. Si le compte qui possède ElyWalk est bien `pub-5316598937383510` (ce que dit
+   la console AdMob), alors les blocs publicitaires du code appartiennent à un
+   **autre** compte : ils ne serviront aucune annonce et la SSV du Worker
+   (`/ssv`) ne correspondra jamais. Il faut remplacer `ADMOB_APP_ID` et les
+   trois `AD_UNIT_*` dans `app/src/lib/constants.ts`, ainsi que la valeur
+   `com.google.android.gms.ads.APPLICATION_ID` de
+   `app/android/app/src/main/AndroidManifest.xml`, par les identifiants du
+   compte `pub-5316598937383510` (AdMob → *Applications* → *Blocs de pub*),
+   puis `npx cap sync android` et reconstruire l'APK/AAB.
+2. Si le compte réel est en fait `pub-6906841385343667`, la consigne AdMob
+   affichée provient d'un autre compte : il faut alors réécrire la ligne du
+   fichier en `google.com, pub-6906841385343667, DIRECT, f08c47fec0942fa0`.
+
+Tant que l'écart subsiste, `npm run check:app-ads -- --strict` échoue
+volontairement.
+
+### Si un domaine personnalisé est utilisé
+
+Le crawler interroge **exactement** le domaine saisi dans la fiche Play Store
+(*Site Web*), sans redirection. Si la fiche pointe vers un domaine autre que
+`elywalk-2f7ba.web.app` (ex. `elywalk.fr`), le fichier doit répondre en 200 sur
+`https://<ce-domaine>/app-ads.txt`. Un domaine personnalisé connecté à Firebase
+Hosting sert le même `dist/`, donc le fichier suit — mais l'ancien hébergeur, une
+redirection vers `www` ou une page de connexion cassent la validation.
+
 ## Règles de confidentialité — URL publique (exigence Play Store)
 
 Le Play Store exige une politique de confidentialité hébergée sur une **URL publique**
@@ -131,6 +225,7 @@ Récapitulatif des trois URL publiques à renseigner dans la fiche Play Store :
 https://elywalk-2f7ba.web.app/privacy.html          # règles de confidentialité
 https://elywalk-2f7ba.web.app/delete-account.html   # suppression du compte
 https://elywalk-2f7ba.web.app/delete-data.html      # suppression des données
+https://elywalk-2f7ba.web.app/app-ads.txt           # validation AdMob (fichier, pas une page)
 ```
 
 `deleteAccountData()` (`app/src/lib/db.ts`) doit rester exhaustif : il efface
@@ -221,6 +316,9 @@ Aucune permission n'est demandée de façon inconditionnelle.
   cohérence : publicité (AdMob), géolocalisation, activité physique/santé, âge
   minimum 15 ans.
 - Configurer `contact@elysium-esport.fr` comme adresse d'assistance Play Store.
+- **Fiche Play → *Site Web*** : saisir le domaine exact où `app-ads.txt` est publié
+  (`elywalk-2f7ba.web.app`), puis lancer *Vérifier les modifications* dans AdMob.
+  Le domaine de la fiche Play est celui que le crawler interroge, sans redirection.
 - Vérifier les modèles d'e-mails Firebase Authentication (vérification,
   changement d'e-mail) et les domaines autorisés.
 - Créer les offres dans `partnerOffers` (`title`, `description`, `partnerName`,
