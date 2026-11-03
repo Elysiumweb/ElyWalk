@@ -157,6 +157,13 @@ describe('ads — identifiants et initialisation', () => {
     expect(AD_UNIT_REWARDED).toBe('ca-app-pub-5316598937383510/9832210178');
   });
 
+  it('n’utilise les blocs de test Google que si VITE_TEST_ADS=1', async () => {
+    const { AD_UNITS, USE_TEST_ADS, AD_UNIT_INTERSTITIAL } = await import('./constants');
+    expect(USE_TEST_ADS).toBe(false);
+    expect(AD_UNITS.interstitial).toBe(AD_UNIT_INTERSTITIAL);
+    expect(AD_UNITS.interstitial).not.toContain('3940256099942544');
+  });
+
   it('n’initialise le SDK qu’une seule fois malgré les appels concurrents', async () => {
     const ads = await loadAds();
     await Promise.all([ads.initAds(), ads.initAds(), ads.prefetchAds()]);
@@ -260,5 +267,53 @@ describe('ads — annonce à l’ouverture', () => {
     await ads.recordAppOpenAdShown();
     await ads.recordAppOpenAdShown();
     await expect(ads.shouldShowAppOpenAd()).resolves.toBe(false);
+  });
+});
+
+describe('ads — diagnostic affiché dans Profil', () => {
+  const base = {
+    native: true,
+    initialized: true,
+    adsAllowed: true,
+    consentStatus: 'OBTAINED',
+    canRequestAds: true,
+    consentFormAvailable: true,
+    privacyOptionsRequired: false,
+    interstitialReady: true,
+    lastError: null,
+  };
+
+  it('désigne le message RGPD non publié quand le formulaire manque', async () => {
+    const ads = await loadAds();
+    const msg = ads.explainAdsState({
+      ...base,
+      consentStatus: 'REQUIRED',
+      consentFormAvailable: false,
+      adsAllowed: false,
+      canRequestAds: false,
+    });
+    expect(msg).toMatch(/message\s+RGPD/i);
+  });
+
+  it('désigne l’absence de remplissage quand la régie répond « no fill »', async () => {
+    const ads = await loadAds();
+    const msg = ads.explainAdsState({ ...base, lastError: 'Ad failed to load : no fill' });
+    expect(msg).toMatch(/no fill/i);
+    expect(msg).toMatch(/Play/);
+  });
+
+  it('distingue un consentement refusé d’une erreur technique', async () => {
+    const ads = await loadAds();
+    expect(ads.explainAdsState({ ...base, canRequestAds: false, adsAllowed: false }))
+      .toMatch(/Consentement non accordé/i);
+    expect(ads.explainAdsState({ ...base, initialized: false })).toMatch(/pas encore initialisé/i);
+  });
+
+  it('confirme l’état nominal et expose un diagnostic copiable', async () => {
+    const ads = await loadAds();
+    expect(ads.explainAdsState(base)).toMatch(/opérationnelles/i);
+    const dump = ads.formatAdsDiagnostics(base);
+    expect(dump).toContain('canRequestAds  : oui');
+    expect(dump).toContain('dernière erreur: aucune');
   });
 });

@@ -10,9 +10,8 @@ import {
 } from '@capacitor-community/admob';
 import type { AdmobConsentInfo } from '@capacitor-community/admob';
 import {
-  AD_UNIT_INTERSTITIAL,
-  AD_UNIT_REWARDED,
-  AD_UNIT_APP_OPEN,
+  AD_UNITS,
+  USE_TEST_ADS,
 } from './constants';
 
 const isNative = () => Capacitor.isNativePlatform();
@@ -237,6 +236,70 @@ export function getAdsDiagnostics(): AdsDiagnostics {
   };
 }
 
+/**
+ * Traduit l'état de la régie en une phrase actionnable.
+ *
+ * Sert à distinguer, depuis l'appareil et sans console AdMob, les trois causes
+ * possibles d'une absence d'annonces :
+ *
+ * 1. **consentement** : message RGPD non publié pour cette application ;
+ * 2. **diffusion** : la régie répond « aucune annonce » (`no fill`), ce qui
+ *    arrive tant que l'application n'est pas validée / associée au Play Store
+ *    dans AdMob ;
+ * 3. **technique** : SDK non initialisé, réseau, erreur de la régie.
+ */
+export function explainAdsState(d: AdsDiagnostics = getAdsDiagnostics()): string {
+  if (!d.native) {
+    return 'Les publicités ne sont diffusées que dans l’application Android.';
+  }
+  if (!d.initialized) {
+    return 'SDK AdMob pas encore initialisé — relancez l’application.';
+  }
+  if (d.consentStatus === 'REQUIRED' && d.consentFormAvailable === false) {
+    return (
+      'Consentement requis, mais aucun formulaire n’est disponible : le message ' +
+      'RGPD n’est pas publié pour cette application dans la console AdMob ' +
+      '(Confidentialité et messages → Message RGPD → cocher ElyWalk).'
+    );
+  }
+  if (d.canRequestAds === false) {
+    return 'Consentement non accordé : aucune annonce ne peut être demandée.';
+  }
+  if (d.lastError && /no.?fill|code\s*[:=]?\s*3\b/i.test(d.lastError)) {
+    return (
+      'La régie est interrogée mais ne renvoie aucune annonce (« no fill ») : ' +
+      'typique d’une application AdMob pas encore validée ou pas encore ' +
+      'associée à une fiche Play publique.'
+    );
+  }
+  if (d.lastError) {
+    return 'Dernière erreur de la régie : ' + d.lastError;
+  }
+  if (!d.adsAllowed) {
+    return 'Annonces indisponibles pour l’instant (consentement ou réseau).';
+  }
+  if (!d.interstitialReady) {
+    return 'Annonces autorisées — interstitiel en cours de préchargement.';
+  }
+  return 'Annonces opérationnelles.';
+}
+
+/** Diagnostic brut, copiable tel quel dans un message d'assistance. */
+export function formatAdsDiagnostics(d: AdsDiagnostics = getAdsDiagnostics()): string {
+  const yn = (v: boolean | null) => (v === null ? 'inconnu' : v ? 'oui' : 'non');
+  return [
+    `natif          : ${yn(d.native)}`,
+    `SDK initialisé : ${yn(d.initialized)}`,
+    `consentement   : ${d.consentStatus ?? 'inconnu'}`,
+    `formulaire     : ${yn(d.consentFormAvailable)}`,
+    `canRequestAds  : ${yn(d.canRequestAds)}`,
+    `options confid.: ${yn(d.privacyOptionsRequired)}`,
+    `interstitiel   : ${yn(d.interstitialReady)}`,
+    `dernière erreur: ${d.lastError ?? 'aucune'}`,
+    `annonces test  : ${USE_TEST_ADS ? 'OUI (VITE_TEST_ADS=1)' : 'non'}`,
+  ].join('\n');
+}
+
 // ---------------------------------------------------------------------------
 // Écouteurs globaux (enregistrés une seule fois)
 // ---------------------------------------------------------------------------
@@ -347,7 +410,7 @@ function registerAdListeners() {
       appOpenReady = false;
       endFullScreenAd();
       // Précharge la prochaine annonce d'ouverture.
-      void AdMob.loadAppOpen({ adId: AD_UNIT_APP_OPEN }).catch(() => undefined);
+      void AdMob.loadAppOpen({ adId: AD_UNITS.appOpen }).catch(() => undefined);
     })
   );
   track(
@@ -370,7 +433,7 @@ async function preloadInterstitial(): Promise<boolean> {
 
   interstitialLoading = (async () => {
     try {
-      await AdMob.prepareInterstitial({ adId: AD_UNIT_INTERSTITIAL });
+      await AdMob.prepareInterstitial({ adId: AD_UNITS.interstitial });
       interstitialReady = true;
       return true;
     } catch (e) {
@@ -451,7 +514,7 @@ export async function showRewardedAd(uid: string): Promise<boolean> {
   try {
     // La récompense est nominative (SSV) : on prépare juste avant l'affichage.
     await AdMob.prepareRewardVideoAd({
-      adId: AD_UNIT_REWARDED,
+      adId: AD_UNITS.rewarded,
       ssv: { userId: uid },
     });
   } catch (e) {
@@ -554,7 +617,7 @@ export async function loadAppOpenAd(): Promise<void> {
   if (!(await ensureAds())) return;
   if (appOpenReady) return;
   try {
-    await AdMob.loadAppOpen({ adId: AD_UNIT_APP_OPEN });
+    await AdMob.loadAppOpen({ adId: AD_UNITS.appOpen });
     appOpenReady = true;
   } catch (e) {
     warn('appOpen load', e);

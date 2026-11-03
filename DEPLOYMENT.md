@@ -528,6 +528,71 @@ Checklist console AdMob avant publication :
 - [ ] Pour tester sans risque d'« invalid traffic », utiliser un appareil de
       test déclaré dans AdMob ou les blocs de test Google.
 
+### Pourquoi les annonces sortent sur Orbit Hop et pas sur ElyWalk
+
+Comparaison faite ligne à ligne avec `Elysiumweb/Orbit-Hop` :
+
+| | Orbit Hop | ElyWalk |
+| --- | --- | --- |
+| Compte AdMob | `pub-5316598937383510` | **le même** |
+| `app-ads.txt` | `google.com, pub-5316598937383510, DIRECT, f08c47fec0942fa0` | **identique** |
+| ID d'application | `~9596939280` | `~4963026878` |
+| SDK | Google Mobile Ads natif (Kotlin) | même SDK, via `@capacitor-community/admob` |
+| Consentement | UMP, `MobileAds.initialize()` inconditionnel, chargement conditionné à `canRequestAds` | **même logique** (`lib/ads.ts`) |
+| Identifiants en debug | **blocs de test Google** | production (jusqu'à la 1.6.0) |
+| Publication Play | **production, fiche publique** | test fermé |
+
+Le compte, le fichier et le code ne sont donc pas en cause. Deux écarts
+expliquent la différence :
+
+1. **Orbit Hop est testé en `debug`, donc avec les blocs de test Google**, qui
+   sont *toujours* remplis quel que soit l'état du compte. Ce n'est pas une
+   preuve que la production fonctionne. ElyWalk utilisait les vrais blocs
+   partout : si la régie ne renvoie rien, l'écran reste vide.
+   → `VITE_TEST_ADS=1 npm run build && npx cap sync android` construit
+   maintenant ElyWalk avec les mêmes blocs de test. Si les annonces
+   apparaissent ainsi, **le câblage est bon** et le problème est côté console
+   AdMob. (Ne jamais publier un AAB construit ainsi.)
+2. **Les réglages AdMob qui bloquent la diffusion sont par application**, pas
+   par compte. À vérifier pour ElyWalk, en comparant avec la fiche Orbit Hop :
+   - *Applications → ElyWalk → Paramètres* : **associée au Play Store** ?
+     Une app en test fermé n'a pas de fiche publique à associer.
+   - *État de l'application* : « Prêt », « Examen requis » ou « Diffusion
+     limitée » ? Depuis janvier 2025, une nouvelle application doit passer la
+     vérification `app-ads.txt` **et** l'examen de préparation avant de
+     diffuser à plein régime.
+   - *Confidentialité et messages → Message RGPD* : le message publié
+     couvre-t-il **ElyWalk** ? La liste des applications est à cocher message
+     par message ; un message publié pour Orbit Hop seul laisse ElyWalk sans
+     formulaire, donc `canRequestAds = false` en France.
+   - *Blocs d'annonces* : créés il y a moins de quelques heures = inventaire
+     encore vide, normal.
+
+### Lire l'état réel depuis l'appareil
+
+Profil → *Confidentialité des annonces* affiche désormais une phrase
+d'interprétation et un bloc **Diagnostic technique** (copiable) :
+
+```text
+natif          : oui
+SDK initialisé : oui
+consentement   : REQUIRED | OBTAINED | NOT_REQUIRED | UNKNOWN
+formulaire     : oui/non
+canRequestAds  : oui/non
+interstitiel   : oui/non
+dernière erreur: …
+annonces test  : non
+```
+
+Lecture :
+
+- `consentement = REQUIRED` **et** `formulaire = non` → message RGPD non publié
+  pour ElyWalk dans AdMob ;
+- `canRequestAds = oui` mais `dernière erreur` contient *no fill* → la régie
+  est bien interrogée et ne renvoie rien : application pas encore validée /
+  associée, ou inventaire vide ;
+- `SDK initialisé = non` → problème d'initialisation (réseau, plugin).
+
 ## Consentement publicitaire RGPD (F03)
 
 AdMob est initialisé avec le module de consentement Google **UMP** (Funding

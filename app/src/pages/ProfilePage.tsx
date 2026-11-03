@@ -12,7 +12,7 @@ import { updateUserFields, setReferredBy, exportAccountData, deleteAccountData, 
 import { uploadAvatar, deleteAvatar } from '../lib/avatar';
 import { getNotificationSettings, setReminderEnabled, setPushEnabled, type NotificationSettings } from '../lib/notifications';
 import { ACCOUNT_DELETION_URL, DATA_DELETION_URL, BADGE_DEFINITIONS } from '../lib/constants';
-import { getAdsDiagnostics, showPrivacyOptionsForm, type AdsDiagnostics } from '../lib/ads';
+import { explainAdsState, formatAdsDiagnostics, getAdsDiagnostics, showPrivacyOptionsForm, type AdsDiagnostics } from '../lib/ads';
 import { isPresidentUid } from '../lib/constants';
 import { fmtCoins, fmtNumber, formatDistance } from '../lib/coins';
 import type { UserBadge, BadgeDefinition } from '../lib/types';
@@ -395,12 +395,15 @@ export default function ProfilePage() {
         <button className="btn btn-ghost" onClick={()=>setEmailOpen(true)} data-testid="change-email-button">Changer l’adresse e-mail</button><div className="section-gap" />
         <button className="btn btn-outline" onClick={onPrivacyOptions}>Confidentialité des annonces (AdMob)</button>
         <p style={{ color: 'var(--muted)', fontSize: 12, marginTop: 6, lineHeight: 1.5 }} data-testid="ads-status">
-          {!adsDiag.native
-            ? 'Les publicités ne sont diffusées que dans l’application Android.'
-            : adsDiag.adsAllowed
-              ? 'Annonces activées — consentement : ' + (adsDiag.consentStatus === 'NOT_REQUIRED' ? 'non requis hors UE' : 'accordé') + '.'
-              : 'Annonces indisponibles pour l’instant (consentement non accordé ou réseau). Touchez le bouton ci-dessus pour revoir vos choix.'}
-        </p><div className="section-gap" />
+          {explainAdsState(adsDiag)}
+        </p>
+        {adsDiag.native && (
+          <details style={{ marginTop: 4 }}>
+            <summary style={{ color: 'var(--muted)', fontSize: 12, cursor: 'pointer' }}>Diagnostic technique</summary>
+            <pre data-testid="ads-diagnostics" style={{ color: 'var(--muted)', fontSize: 11, lineHeight: 1.5, whiteSpace: 'pre-wrap', margin: '6px 0 0' }}>{formatAdsDiagnostics(adsDiag)}</pre>
+            <button className="btn btn-ghost btn-sm" onClick={() => { void navigator.clipboard?.writeText(formatAdsDiagnostics(adsDiag)); }}>Copier le diagnostic</button>
+          </details>
+        )}<div className="section-gap" />
         <button className="btn btn-outline" onClick={onExport}>Exporter mes données (RGPD)</button><div className="section-gap" />
         <a className="btn btn-outline" href={DATA_DELETION_URL} target="_blank" rel="noopener noreferrer">Supprimer une partie de mes données</a><div className="section-gap" />
         <button className="btn btn-danger" onClick={onDelete} disabled={busy}>Supprimer définitivement mon compte</button>

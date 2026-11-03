@@ -30,6 +30,15 @@
   de Google Play) : `android.enableR8.fullMode=true`,
   `-allowaccessmodification` et `-repackageclasses ''`, mémoire du démon Gradle
   portée à 4 Go pour absorber la passe d'optimisation complète.
+- **F33** Diagnostic publicitaire lisible. Profil → *Confidentialité des
+  annonces* explique désormais **pourquoi** aucune annonce ne sort (message
+  RGPD non publié pour l'application, consentement refusé, « no fill » de la
+  régie, SDK non initialisé) et propose un bloc technique copiable.
+- **F34** Blocs d'annonces de test Google activables au build
+  (`VITE_TEST_ADS=1 npm run build`), comme sur Orbit Hop : permet de vérifier
+  le câblage sans dépendre de l'état du compte AdMob, et sans risque de
+  « trafic invalide ». Les identifiants de test sont éliminés statiquement du
+  paquet de production.
 - **F32** SDK Google Mobile Ads aligné sur `25.5.+` (dernière version de la
   branche recommandée par Google pour Android 15).
 
