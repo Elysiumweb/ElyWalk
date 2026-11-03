@@ -5,7 +5,9 @@
 - **AdMob** Ajout de `app/public/app-ads.txt` (absent du dépôt, d'où l'échec de validation « Impossible de valider ElyWalk ») : `google.com, pub-5316598937383510, DIRECT, f08c47fec0942fa0`, publié à la racine de `https://elywalk-2f7ba.web.app/app-ads.txt` par Firebase Hosting.
 - `firebase.json` : en-tête `Content-Type: text/plain; charset=utf-8` explicite pour `/app-ads.txt` (les fichiers statiques restent servis avant la réécriture SPA).
 - Nouveau script `npm run check:app-ads` (`app/scripts/check-app-ads.mjs`) : encodage, format IAB des 4 champs, cohérence de l'ID éditeur avec `constants.ts` / `AndroidManifest.xml`, et `--url` pour contrôler la copie publiée (200, `text/plain`, contenu à jour).
-- ⚠️ Écart signalé : les blocs AdMob de l'app utilisent `pub-6906841385343667` alors que la console demande `pub-5316598937383510` (détail et arbitrage dans `DEPLOYMENT.md`).
+- **AdMob** Migration complète sur le compte `pub-5316598937383510` (celui qui valide `app-ads.txt`) : `ADMOB_APP_ID` → `ca-app-pub-5316598937383510~4963026878`, récompensée → `/9832210178`, ouverture → `/6986554989`, interstitielle → `/7972992736`, et `APPLICATION_ID` du `AndroidManifest.xml`. Les anciens IDs `pub-6906841385343667` ne servaient aucune annonce.
+- Bundle web Android resynchronisé (`npx cap sync android`) : `assets/public` embarquait encore l'ancien éditeur, et `capacitor.settings.gradle` / `capacitor.build.gradle` n'incluaient pas les plugins `@capacitor/filesystem` et `@capacitor/share` (partage de fichiers et de pas, F13).
+- Le script `check:app-ads` contrôle en plus le bundle Android embarqué et échoue si un éditeur obsolète y subsiste (`--strict` désormais au vert).
 
 ## 1.4.0 — 2026-10-22
 

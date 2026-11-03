@@ -108,29 +108,35 @@ Puis, dans la console AdMob, section *app-ads.txt* de l'application →
 **Vérifier les modifications** (le crawl peut prendre de quelques minutes à 24 h ;
 Google ne recrawle pas le fichier plus d'une fois par 24 h).
 
-### ⚠️ Écart d'ID éditeur à arbitrer
+### Identifiants AdMob — compte `pub-5316598937383510`
 
-Le code de l'application utilise l'éditeur **`pub-6906841385343667`**
-(`ca-app-pub-6906841385343667~6481018527` et les blocs
-`/3683414466`, `/6616749893`, `/3494240028`), alors que la console AdMob
-demande `pub-5316598937383510` dans `app-ads.txt`. Un fichier `app-ads.txt`
-valide ne peut déclarer que le compte réellement propriétaire de l'app :
+Tous les identifiants publicitaires de l'application sont alignés sur le compte
+qui valide `app-ads.txt`. Ils doivent rester ensemble : un bloc d'annonce d'un
+autre compte ne remplit pas et la SSV du Worker (`/ssv`) ne correspond jamais.
 
-1. Si le compte qui possède ElyWalk est bien `pub-5316598937383510` (ce que dit
-   la console AdMob), alors les blocs publicitaires du code appartiennent à un
-   **autre** compte : ils ne serviront aucune annonce et la SSV du Worker
-   (`/ssv`) ne correspondra jamais. Il faut remplacer `ADMOB_APP_ID` et les
-   trois `AD_UNIT_*` dans `app/src/lib/constants.ts`, ainsi que la valeur
-   `com.google.android.gms.ads.APPLICATION_ID` de
-   `app/android/app/src/main/AndroidManifest.xml`, par les identifiants du
-   compte `pub-5316598937383510` (AdMob → *Applications* → *Blocs de pub*),
-   puis `npx cap sync android` et reconstruire l'APK/AAB.
-2. Si le compte réel est en fait `pub-6906841385343667`, la consigne AdMob
-   affichée provient d'un autre compte : il faut alors réécrire la ligne du
-   fichier en `google.com, pub-6906841385343667, DIRECT, f08c47fec0942fa0`.
+| Emplacement | Constante | Valeur |
+| --- | --- | --- |
+| `app/src/lib/constants.ts` | `ADMOB_APP_ID` | `ca-app-pub-5316598937383510~4963026878` |
+| `app/src/lib/constants.ts` | `AD_UNIT_REWARDED` | `ca-app-pub-5316598937383510/9832210178` |
+| `app/src/lib/constants.ts` | `AD_UNIT_APP_OPEN` | `ca-app-pub-5316598937383510/6986554989` |
+| `app/src/lib/constants.ts` | `AD_UNIT_INTERSTITIAL` | `ca-app-pub-5316598937383510/7972992736` |
+| `AndroidManifest.xml` | `com.google.android.gms.ads.APPLICATION_ID` | `ca-app-pub-5316598937383510~4963026878` |
 
-Tant que l'écart subsiste, `npm run check:app-ads -- --strict` échoue
-volontairement.
+Après toute modification de ces identifiants :
+
+```bash
+cd app
+npm run build                # régénère dist/ avec les nouveaux IDs
+npx cap sync android         # les recopie dans android/app/src/main/assets/public
+npm run check:app-ads -- --strict   # vérifie code, manifest, bundle et app-ads.txt
+```
+
+`check:app-ads` échoue aussi si le bundle web embarqué dans le projet Android
+(`app/android/app/src/main/assets/public`) contient encore un éditeur absent de
+`app-ads.txt` — c'est le symptôme d'un `cap sync` oublié, donc d'un APK qui part
+avec les anciens blocs. Les anciens identifiants du compte
+`pub-6906841385343667` (`~6481018527`, blocs `/3683414466`, `/6616749893`,
+`/3494240028`) sont obsolètes et ne doivent pas revenir.
 
 ### Si un domaine personnalisé est utilisé
 

@@ -1,10 +1,14 @@
 // ===== ElyWalk — Constantes globales =====
 
 // --- AdMob (production) ---
-export const ADMOB_APP_ID = 'ca-app-pub-6906841385343667~6481018527';
-export const AD_UNIT_REWARDED = 'ca-app-pub-6906841385343667/3683414466';
-export const AD_UNIT_APP_OPEN = 'ca-app-pub-6906841385343667/6616749893';
-export const AD_UNIT_INTERSTITIAL = 'ca-app-pub-6906841385343667/3494240028';
+// Compte éditeur : pub-5316598937383510 (celui qui valide app-ads.txt).
+// Ces quatre identifiants doivent rester sur le MÊME compte que la ligne
+// `google.com, pub-5316598937383510, …` de app/public/app-ads.txt, sinon les
+// annonces ne remplissent pas et la SSV du Worker ne correspond jamais.
+export const ADMOB_APP_ID = 'ca-app-pub-5316598937383510~4963026878';
+export const AD_UNIT_REWARDED = 'ca-app-pub-5316598937383510/9832210178';
+export const AD_UNIT_APP_OPEN = 'ca-app-pub-5316598937383510/6986554989';
+export const AD_UNIT_INTERSTITIAL = 'ca-app-pub-5316598937383510/7972992736';
 
 // --- Documents légaux en ligne (exigence Play Store : URL publique) ---
 // Page statique servie par Firebase Hosting (app/public/privacy.html).

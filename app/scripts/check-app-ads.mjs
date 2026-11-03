@@ -21,7 +21,7 @@
  * Codes de sortie : 0 = tout est bon, 1 = au moins une erreur.
  */
 
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -30,6 +30,7 @@ const APP_DIR = join(HERE, '..');
 const ADS_FILE = join(APP_DIR, 'public', 'app-ads.txt');
 const CONSTANTS_FILE = join(APP_DIR, 'src', 'lib', 'constants.ts');
 const MANIFEST_FILE = join(APP_DIR, 'android', 'app', 'src', 'main', 'AndroidManifest.xml');
+const ANDROID_ASSETS = join(APP_DIR, 'android', 'app', 'src', 'main', 'assets', 'public', 'assets');
 
 const GOOGLE_CERT_AUTHORITY = 'f08c47fec0942fa0';
 const VALID_RELATIONSHIPS = new Set(['DIRECT', 'RESELLER']);
@@ -167,6 +168,29 @@ if (!existsSync(ADS_FILE)) {
     }
     if ([...appPublisherIds].some((id) => adsPublisherIds.has(id))) {
       pass(`Éditeur AdMob cohérent (${[...appPublisherIds].join(', ')}).`);
+    }
+
+    // Le bundle web embarqué dans le projet Android est un instantané de dist/ :
+    // s'il est plus ancien que constants.ts, l'APK part avec les anciens blocs.
+    const bundledPublisherIds = new Set();
+    if (existsSync(ANDROID_ASSETS)) {
+      for (const entry of readdirSync(ANDROID_ASSETS).filter((f) => f.endsWith('.js'))) {
+        const content = readFileSync(join(ANDROID_ASSETS, entry), 'utf8');
+        for (const match of content.matchAll(/ca-app-pub-(\d{16})/g)) {
+          bundledPublisherIds.add(`pub-${match[1]}`);
+        }
+      }
+    }
+    if (bundledPublisherIds.size > 0) {
+      const stale = [...bundledPublisherIds].filter((id) => !adsPublisherIds.has(id));
+      if (stale.length > 0) {
+        fail(
+          `Bundle Android obsolète (assets/public) : éditeur ${stale.join(', ')} absent de ` +
+            'app-ads.txt. Relancer « npm run build && npx cap sync android ».',
+        );
+      } else {
+        pass(`Bundle Android à jour (${[...bundledPublisherIds].join(', ')}).`);
+      }
     }
   }
 
