@@ -8,7 +8,7 @@
 - **AdMob** Migration complète sur le compte `pub-5316598937383510` (celui qui valide `app-ads.txt`) : `ADMOB_APP_ID` → `ca-app-pub-5316598937383510~4963026878`, récompensée → `/9832210178`, ouverture → `/6986554989`, interstitielle → `/7972992736`, et `APPLICATION_ID` du `AndroidManifest.xml`. Les anciens IDs `pub-6906841385343667` ne servaient aucune annonce.
 - Bundle web Android resynchronisé (`npx cap sync android`) : `assets/public` embarquait encore l'ancien éditeur, et `capacitor.settings.gradle` / `capacitor.build.gradle` n'incluaient pas les plugins `@capacitor/filesystem` et `@capacitor/share` (partage de fichiers et de pas, F13).
 - Le script `check:app-ads` contrôle en plus le bundle Android embarqué et échoue si un éditeur obsolète y subsiste (`--strict` désormais au vert).
-- **AdMob** La fiche Play Store déclare `https://elysium-esport.fr` : c'est ce domaine que le crawler interroge. Son `public/app-ads.txt` est identique (59 octets), mais Vercel renvoie `429` + `X-Vercel-Mitigated: challenge` (Security Checkpoint / Attack Mode) aux clients HTTP simples — le crawler AdMob ne peut donc pas lire le fichier. Procédure de déblocage documentée dans `DEPLOYMENT.md`.
+- **AdMob** La fiche Play Store (publiée, éditeur *Elysium Esport*) déclare `https://elysium-esport.fr` : c'est ce domaine que le crawler interroge. Son `public/app-ads.txt` est identique au caractère près (59 octets, `text/plain`). Une sonde a rencontré un `429` + `X-Vercel-Mitigated: challenge` (Security Checkpoint Vercel) ; les sondes suivantes répondent `200`, mais la procédure de déblocage reste documentée dans `DEPLOYMENT.md` au cas où le challenge reviendrait.
 
 ## 1.4.0 — 2026-10-22
 

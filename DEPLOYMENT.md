@@ -150,10 +150,10 @@ avec les anciens blocs. Les anciens identifiants du compte
 `pub-6906841385343667` (`~6481018527`, blocs `/3683414466`, `/6616749893`,
 `/3494240028`) sont obsolètes et ne doivent pas revenir.
 
-### ⚠️ Vercel : le pare-feu doit laisser passer le crawler
+### Vercel : vérifier que le pare-feu ne challenge pas le crawler
 
-Le site `elysium-esport.fr` est hébergé sur **Vercel**. Le 2026-11-03, une
-requête HTTP simple sur `/app-ads.txt` renvoyait :
+Le site `elysium-esport.fr` est hébergé sur **Vercel**. Une sonde HTTP simple a
+renvoyé une fois, le 2026-11-03 :
 
 ```
 HTTP/1.1 429 Too Many Requests
@@ -162,29 +162,53 @@ X-Vercel-Mitigated: challenge
 ```
 
 C'est le **Security Checkpoint** de Vercel (Attack Mode / challenge de bots) :
-seul un navigateur capable d'exécuter du JavaScript peut le franchir. Le crawler
-`app-ads.txt` d'AdMob est un client HTTP simple — il reçoit la page de challenge
-au lieu du fichier, donc **la validation échoue même quand le fichier est bon**.
-Les robots vérifiés (Googlebot, Bingbot) sont exemptés, mais le crawler AdMob
-n'est pas dans cette liste.
+seul un navigateur capable d'exécuter du JavaScript le franchit. Le crawler
+`app-ads.txt` d'AdMob est un client HTTP simple — il recevrait la page de
+challenge au lieu du fichier. Les robots vérifiés (Googlebot, Bingbot) sont
+exemptés, mais le crawler AdMob n'est pas dans cette liste.
 
-À corriger dans le tableau de bord Vercel (projet du site) :
+Les sondes suivantes, quelques minutes plus tard, renvoyaient bien `200` avec
+`Content-Type: text/plain; charset=utf-8` et 59 octets : le blocage n'était donc
+pas permanent. À recontrôler si la validation AdMob échoue encore.
 
-1. *Firewall* → **Bot Management** → section **Attack Mode** : **Disable**
-   (ou `vercel firewall attack-mode disable --yes`). À ne pas laisser activé en
-   permanence : c'est un mode d'urgence anti-DDoS.
-2. Vérifier qu'aucune règle personnalisée (*Firewall* → *Rules*) ne cible
-   `/app-ads.txt` avec `challenge` ou `deny` ; sinon ajouter au-dessus une règle
-   `bypass` sur `path eq /app-ads.txt`.
-3. Vérifier dans *Firewall* → *Overview* qu'aucune requête `/app-ads.txt` n'est
-   encore marquée `challenge` après publication.
+```
+HTTP/2 200
+Content-Type: text/plain; charset=utf-8
+Content-Length: 59
+Cache-Control: public, max-age=0, must-revalidate
+Content-Disposition: inline; filename="app-ads.txt"
+```
 
-Une règle `bypass` du WAF ne contourne pas Attaque Mode ni les mitigations
-système : tant que le challenge est global, le fichier reste illisible pour
-AdMob. Si le challenge doit rester actif, l'alternative est de pointer le champ
-*Site Web* de la fiche Play vers `elywalk-2f7ba.web.app` (Firebase Hosting, sans
-challenge), où le fichier est déjà publié — le champ se modifie sans nouvelle
-version de l'APK.
+Si le challenge réapparaît, dans le tableau de bord Vercel (projet du site) :
+
+1. *Firewall* → **Bot Management** → **Attack Mode** : **Disable**
+   (ou `vercel firewall attack-mode disable --yes`). Ce mode est un outil
+   d'urgence anti-DDoS, pas un réglage permanent.
+2. *Firewall* → *Rules* : aucune règle ne doit faire `challenge`/`deny` sur
+   `/app-ads.txt` ; ajouter au-dessus une règle `bypass` sur
+   `path eq /app-ads.txt` si nécessaire (les règles personnalisées passent avant
+   les règles gérées).
+3. *Firewall* → *Overview* : plus aucune requête `/app-ads.txt` marquée
+   `challenge`.
+
+Une règle `bypass` du WAF ne contourne ni Attack Mode ni les mitigations
+système. Si le challenge doit rester global, l'alternative est de pointer le
+champ *Site Web* de la fiche Play vers `elywalk-2f7ba.web.app` (Firebase
+Hosting, sans challenge), où le fichier est déjà publié — le champ se modifie
+sans nouvelle version de l'APK.
+
+Le rewrite SPA du site (`/(.*) → /index.html` dans `vercel.json`) ne masque pas
+le fichier : Vercel sert les fichiers statiques avant les rewrites. En revanche,
+si `public/app-ads.txt` disparaissait du déploiement, `/app-ads.txt` renverrait
+`index.html` en 200 HTML — donc un contenu invalide plutôt qu'un 404.
+
+### Fiche Play Store (vérifiée le 2026-11-03)
+
+`https://play.google.com/store/apps/details?id=com.elysium.elywalk` est publiée
+(éditeur *Elysium Esport*, mention « Contient des annonces ») et son champ
+*Site Web* vaut **`https://elysium-esport.fr/`** : c'est exactement ce domaine
+qu'AdMob interroge. Les trois conditions de validation sont donc réunies —
+fichier au bon endroit, bon ID éditeur, domaine correspondant à la fiche.
 
 ## Règles de confidentialité — URL publique (exigence Play Store)
 
