@@ -30,7 +30,10 @@
   de Google Play) : `android.enableR8.fullMode=true`,
   `-allowaccessmodification` et `-repackageclasses ''`, mémoire du démon Gradle
   portée à 4 Go pour absorber la passe d'optimisation complète.
-- **F33** Diagnostic publicitaire lisible. Profil → *Confidentialité des
+- **F33** Diagnostic publicitaire lisible. Détecte notamment l'absence de
+  message de consentement dans AdMob (`NOT_REQUIRED` + aucun formulaire +
+  aucune option de confidentialité), cause d'un remplissage nul en EEE/UK
+  depuis que Google impose une CMP certifiée. Profil → *Confidentialité des
   annonces* explique désormais **pourquoi** aucune annonce ne sort (message
   RGPD non publié pour l'application, consentement refusé, « no fill » de la
   régie, SDK non initialisé) et propose un bloc technique copiable.

@@ -302,6 +302,19 @@ describe('ads — diagnostic affiché dans Profil', () => {
     expect(msg).toMatch(/Play/);
   });
 
+  it('désigne l’absence de message RGPD quand l’UMP n’expose rien', async () => {
+    const ads = await loadAds();
+    const msg = ads.explainAdsState({
+      ...base,
+      consentStatus: 'NOT_REQUIRED',
+      consentFormAvailable: false,
+      privacyOptionsRequired: false,
+      interstitialReady: false,
+    });
+    expect(msg).toMatch(/message de consentement/i);
+    expect(msg).toMatch(/EEE\/UK/);
+  });
+
   it('distingue un consentement refusé d’une erreur technique', async () => {
     const ads = await loadAds();
     expect(ads.explainAdsState({ ...base, canRequestAds: false, adsAllowed: false }))

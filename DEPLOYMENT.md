@@ -440,13 +440,13 @@ par mille plus faible.
 
 #### Les trois conditions, dans l'ordre où AdMob les vérifie
 
-1. **L'application doit être publiée sur le Play Store.** C'est écrit noir sur
-   blanc dans la FAQ Google (« Do I need to publish my app to verify the
-   app-ads.txt file? → **Yes** ») : le robot part de la **fiche publique** pour
-   y lire le site du développeur. Une application en **test fermé** n'a pas de
-   fiche publique → le robot n'a aucun domaine à explorer → message « vos
-   informations ne correspondent pas ». C'est la cause la plus probable tant
-   que la 1.6.0 n'est pas en production.
+1. **L'application doit être publiée sur le Play Store** (FAQ Google : « Do I
+   need to publish my app to verify the app-ads.txt file? → **Yes** ») : le
+   robot part de la **fiche publique** pour y lire le site du développeur.
+   ✅ ElyWalk est en production. Vérifier tout de même que le lien *Site Web*
+   apparaît bien sur la **fiche publique** (page Play → *Assistance de
+   l'appli*) : une modification de fiche non republiée reste invisible du
+   robot.
 2. **Le champ « Site Web » de la fiche détermine l'URL explorée.**
    Play Console → *Croissance* → *Présence sur le Store* → *Paramètres du
    Store* → *Coordonnées sur la fiche Play Store* → **Site Web**.
@@ -471,7 +471,7 @@ identifiants éditeur parasites et le `robots.txt` du domaine.
 
 | Symptôme | Cause | Correctif |
 | --- | --- | --- |
-| « app-ads.txt introuvable » | application non publiée, ou champ *Site Web* vide | publier en production, renseigner le site, attendre 24 h |
+| « app-ads.txt introuvable » | champ *Site Web* absent de la fiche **publique** (modification non republiée) | republier la fiche, attendre 24 h |
 | Validation échoue alors que l'URL marche | le domaine déclaré sur Play n'est **pas** celui qui héberge le fichier | aligner les deux |
 | `www` contre domaine nu | AdMob n'unifie **pas** `example.com` et `www.example.com` | héberger le fichier sur l'hôte exact déclaré |
 | Redirection apex → www | le robot ne suit pas toujours les redirections | servir le fichier en 200 direct sur l'hôte déclaré |
@@ -540,7 +540,7 @@ Comparaison faite ligne à ligne avec `Elysiumweb/Orbit-Hop` :
 | SDK | Google Mobile Ads natif (Kotlin) | même SDK, via `@capacitor-community/admob` |
 | Consentement | UMP, `MobileAds.initialize()` inconditionnel, chargement conditionné à `canRequestAds` | **même logique** (`lib/ads.ts`) |
 | Identifiants en debug | **blocs de test Google** | production (jusqu'à la 1.6.0) |
-| Publication Play | **production, fiche publique** | test fermé |
+| Publication Play | production | production |
 
 Le compte, le fichier et le code ne sont donc pas en cause. Deux écarts
 expliquent la différence :
@@ -556,7 +556,6 @@ expliquent la différence :
 2. **Les réglages AdMob qui bloquent la diffusion sont par application**, pas
    par compte. À vérifier pour ElyWalk, en comparant avec la fiche Orbit Hop :
    - *Applications → ElyWalk → Paramètres* : **associée au Play Store** ?
-     Une app en test fermé n'a pas de fiche publique à associer.
    - *État de l'application* : « Prêt », « Examen requis » ou « Diffusion
      limitée » ? Depuis janvier 2025, une nouvelle application doit passer la
      vérification `app-ads.txt` **et** l'examen de préparation avant de
@@ -592,6 +591,43 @@ Lecture :
   est bien interrogée et ne renvoie rien : application pas encore validée /
   associée, ou inventaire vide ;
 - `SDK initialisé = non` → problème d'initialisation (réseau, plugin).
+
+### ⚠️ Message RGPD manquant = zéro annonce en Europe
+
+**Cause confirmée de l'absence d'annonces en production.** Aucun message de
+consentement n'était créé dans la console AdMob. Depuis janvier 2024, Google
+impose une **CMP certifiée** pour tout trafic EEE/UK : sans message publié, les
+demandes d'annonces venant d'Europe ne sont pas remplies — l'application
+fonctionne, le SDK s'initialise, mais l'inventaire reste vide. Les annonces de
+test (`VITE_TEST_ADS=1`) continuent de s'afficher : c'est le signe que le
+câblage est bon et que le blocage est côté console.
+
+Procédure (console AdMob, ~5 minutes) :
+
+1. **Confidentialité et messages** → onglet **RGPD** → *Créer un message*.
+2. Sélectionner **ElyWalk** dans la liste des applications. ⚠️ La sélection se
+   fait application par application : un message publié pour Orbit Hop ne
+   couvre pas ElyWalk.
+3. Régions : **EEE et Royaume-Uni** (valeur par défaut).
+4. Choix de l'utilisateur : garder **Consentir / Gérer les options** et, si
+   vous voulez maximiser le remplissage, activer aussi *Refuser* (obligatoire
+   dans plusieurs pays, dont la France — la CNIL exige un refus aussi simple
+   que l'acceptation).
+5. Partenaires publicitaires : laisser la sélection Google par défaut
+   (sinon le remplissage chute).
+6. Langue, logo, lien vers la politique de confidentialité
+   (`https://elywalk-2f7ba.web.app/privacy.html`).
+7. **Publier** — un message enregistré mais non publié ne sert à rien.
+8. Onglet **Options de confidentialité** (IAB/CNIL) : créer et publier aussi
+   ce message. Il alimente le bouton *Confidentialité des annonces* du profil
+   et conditionne `privacyOptionsRequirementStatus`.
+9. Côté application : rien à redéployer. Forcer la relecture en vidant les
+   données de l'app, ou attendre : l'UMP réinterroge à chaque lancement.
+
+Contrôle : Profil → *Confidentialité des annonces* doit afficher
+`consentement : REQUIRED` puis, après le formulaire, `OBTAINED` et
+`canRequestAds : oui`. Tant qu'il affiche `NOT_REQUIRED` avec
+`formulaire : non`, aucun message n'est publié pour cette application.
 
 ## Consentement publicitaire RGPD (F03)
 

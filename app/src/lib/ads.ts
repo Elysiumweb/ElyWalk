@@ -265,11 +265,33 @@ export function explainAdsState(d: AdsDiagnostics = getAdsDiagnostics()): string
   if (d.canRequestAds === false) {
     return 'Consentement non accordé : aucune annonce ne peut être demandée.';
   }
+
+  // Signature d'un compte sans message de consentement publié : l'UMP ne
+  // réclame rien et n'expose ni formulaire ni options de confidentialité.
+  // Hors EEE/UK ce n'est pas bloquant ; en Europe, Google exige une CMP
+  // certifiée depuis janvier 2024 et les demandes sans signal TCF ne sont
+  // quasiment jamais remplies.
+  const noCmpConfigured =
+    d.consentFormAvailable === false &&
+    !d.privacyOptionsRequired &&
+    (d.consentStatus === 'NOT_REQUIRED' || d.consentStatus === 'UNKNOWN');
+
   if (d.lastError && /no.?fill|code\s*[:=]?\s*3\b/i.test(d.lastError)) {
+    return noCmpConfigured
+      ? 'Aucune annonce renvoyée (« no fill ») alors qu’aucun message de ' +
+        'consentement n’est configuré dans AdMob : en EEE/UK, les demandes ' +
+        'sans CMP certifiée ne sont pas remplies. Publiez un message RGPD ' +
+        'couvrant cette application.'
+      : 'La régie est interrogée mais ne renvoie aucune annonce (« no fill ») : ' +
+        'typique d’une application AdMob pas encore validée ou pas encore ' +
+        'associée à une fiche Play publique.';
+  }
+  if (noCmpConfigured && !d.interstitialReady) {
     return (
-      'La régie est interrogée mais ne renvoie aucune annonce (« no fill ») : ' +
-      'typique d’une application AdMob pas encore validée ou pas encore ' +
-      'associée à une fiche Play publique.'
+      'Aucun message de consentement n’est configuré dans AdMob pour cette ' +
+      'application (ni formulaire RGPD, ni options de confidentialité). En ' +
+      'EEE/UK, les annonces ne sont alors pas diffusées : publiez un message ' +
+      'RGPD dans Confidentialité et messages.'
     );
   }
   if (d.lastError) {
