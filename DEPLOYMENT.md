@@ -362,7 +362,7 @@ npx cap sync android
 npx cap open android
 ```
 
-La version Android est `3 / 1.4.0`.
+La version Android est `4 / 1.7.0` (versionCode 4, obligatoire pour publier un nouvel AAB).
 
 ## Consentement publicitaire RGPD (F03)
 

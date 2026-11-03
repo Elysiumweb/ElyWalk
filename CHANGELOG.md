@@ -1,6 +1,6 @@
 # Changelog
 
-## Correctif app-ads.txt — 2026-11-03
+## 1.7.0 — 2026-11-03
 
 - **AdMob** Ajout de `app/public/app-ads.txt` (absent du dépôt, d'où l'échec de validation « Impossible de valider ElyWalk ») : `google.com, pub-5316598937383510, DIRECT, f08c47fec0942fa0`, publié à la racine de `https://elywalk-2f7ba.web.app/app-ads.txt` par Firebase Hosting.
 - `firebase.json` : en-tête `Content-Type: text/plain; charset=utf-8` explicite pour `/app-ads.txt` (les fichiers statiques restent servis avant la réécriture SPA).
