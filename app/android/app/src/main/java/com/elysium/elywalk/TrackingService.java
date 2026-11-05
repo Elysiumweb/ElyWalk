@@ -12,6 +12,7 @@ import android.content.pm.ServiceInfo;
 import android.location.Location;
 import android.os.Build;
 import android.os.IBinder;
+import android.util.Log;
 
 import androidx.annotation.NonNull;
 import androidx.core.app.NotificationCompat;
@@ -102,7 +103,12 @@ public class TrackingService extends Service {
         }
         persistClear(ctx);
         Intent i = new Intent(ctx.getApplicationContext(), TrackingService.class);
-        ContextCompat.startForegroundService(ctx.getApplicationContext(), i);
+        try {
+            ContextCompat.startForegroundService(ctx.getApplicationContext(), i);
+        } catch (RuntimeException e) {
+            synchronized (LOCK) { running = false; }
+            throw e;
+        }
     }
 
     /** Met la sortie en pause : GPS coupé, chronomètre actif gelé. */
@@ -224,7 +230,7 @@ public class TrackingService extends Service {
         createChannel();
         // Reprise après un éventuel kill du process (START_STICKY).
         restoreIfNeeded();
-        promoteToForeground(currentDistanceKm(), currentDurationMin(), isPaused());
+        if (!promoteToForeground(currentDistanceKm(), currentDurationMin(), isPaused())) return;
         fusedClient = LocationServices.getFusedLocationProviderClient(this);
         locationCallback = new LocationCallback() {
             @Override
@@ -238,6 +244,7 @@ public class TrackingService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        if (!foregroundReady) return START_NOT_STICKY;
         String action = intent == null ? null : intent.getAction();
         if (ACTION_PAUSE.equals(action)) {
             removeLocationUpdates();
@@ -249,7 +256,10 @@ public class TrackingService extends Service {
             applyLocationState();
         }
         if (isRunning()) {
-            promoteToForeground(currentDistanceKm(), currentDurationMin(), isPaused());
+            if (!promoteToForeground(currentDistanceKm(), currentDurationMin(), isPaused())) return START_NOT_STICKY;
+        } else {
+            stopSelf();
+            return START_NOT_STICKY;
         }
         return START_STICKY;
     }
@@ -294,12 +304,29 @@ public class TrackingService extends Service {
         }
     }
 
-    private void promoteToForeground(double km, double min, boolean isPaused) {
-        Notification n = buildNotification(km, min, isPaused);
-        if (buildForegroundType() > 0) {
-            startForeground(NOTIF_ID, n, buildForegroundType());
-        } else {
-            startForeground(NOTIF_ID, n);
+    private boolean foregroundReady;
+
+    private boolean promoteToForeground(double km, double min, boolean isPaused) {
+        try {
+            Notification n = buildNotification(km, min, isPaused);
+            if (buildForegroundType() > 0) {
+                startForeground(NOTIF_ID, n, buildForegroundType());
+            } else {
+                startForeground(NOTIF_ID, n);
+            }
+            foregroundReady = true;
+            return true;
+        } catch (RuntimeException e) {
+            Log.e("ElyWalkTracking", "Foreground service unavailable", e);
+            foregroundReady = false;
+            synchronized (LOCK) { running = false; }
+            persist(); // Conserver la trace même si la reprise GPS échoue.
+            SnapshotListener l = listener;
+            if (l != null) {
+                try { l.onSnapshot(snapshot()); } catch (Exception ignored) { }
+            }
+            stopSelf();
+            return false;
         }
     }
 

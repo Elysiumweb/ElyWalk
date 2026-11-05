@@ -43,9 +43,7 @@ public class TrackingPlugin extends Plugin {
             requestPermissionForAlias("location", call, "onStartPerms");
             return;
         }
-        TrackingService.startSession(getContext(), call.getString("type", "walk"),
-            Boolean.TRUE.equals(call.getBoolean("batterySaver", false)));
-        call.resolve(TrackingService.snapshot());
+        startSession(call);
     }
 
     @PermissionCallback
@@ -54,9 +52,17 @@ public class TrackingPlugin extends Plugin {
             call.reject("Permission de localisation refusée");
             return;
         }
-        TrackingService.startSession(getContext(), call.getString("type", "walk"),
-            Boolean.TRUE.equals(call.getBoolean("batterySaver", false)));
-        call.resolve(TrackingService.snapshot());
+        startSession(call);
+    }
+
+    private void startSession(PluginCall call) {
+        try {
+            TrackingService.startSession(getContext(), call.getString("type", "walk"),
+                Boolean.TRUE.equals(call.getBoolean("batterySaver", false)));
+            call.resolve(TrackingService.snapshot());
+        } catch (RuntimeException e) {
+            call.reject("Impossible de démarrer le suivi GPS. Vérifiez les autorisations et réessayez.", e);
+        }
     }
 
     /** Met la sortie en pause : GPS coupé, temps de pause exclu de l'allure. */
