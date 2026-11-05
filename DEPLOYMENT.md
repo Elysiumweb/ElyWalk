@@ -198,15 +198,445 @@ npx cap sync android
 npx cap open android
 ```
 
-La version Android est `3 / 1.4.0`.
+La version Android est `6 / 1.6.0` (chaque envoi doit porter un `versionCode`
+strictement supérieur au précédent : 4 = 1.4.0, 5 = 1.5.0, 6 = 1.6.0).
+
+### Build de production (AAB signé)
+
+```bash
+cd app
+npm ci && npm test && npm run build
+npx cap sync android
+cd android
+./gradlew clean bundleRelease      # app/android/app/build/outputs/bundle/release/app-release.aab
+```
+
+Signature : créer `app/android/keystore.properties` (ignoré par Git)
+
+```properties
+storeFile=/chemin/absolu/elywalk-upload.jks
+storePassword=…
+keyAlias=upload
+keyPassword=…
+```
+
+ou exporter `ELYWALK_STORE_FILE`, `ELYWALK_STORE_PASSWORD`, `ELYWALK_KEY_ALIAS`,
+`ELYWALK_KEY_PASSWORD` (CI). Sans ces valeurs, `bundleRelease` produit un AAB
+non signé, à signer depuis Android Studio (*Build → Generate Signed App
+Bundle*). ⚠️ Conserver la **même clé d'upload** que la 1.4.0, sinon Play
+refuse l'envoi.
+
+### Optimisation du code DEX et R8 (exigences Google Play)
+
+Play signalait « L'optimisation du code DEX est inférieure à notre seuil —
+Obscurcissement (1 %) » : la version release n'était pas minifiée. Elle l'est
+depuis la 1.5.0, et l'avertissement a disparu sur le build 5. Play affiche
+maintenant une recommandation plus douce (« Améliorez la mémoire et les
+performances de votre appli avec l'optimisation R8 ») ; la 1.6.0 pousse donc
+l'optimisation un cran plus loin.
+
+Réglages actuels (`app/android/app/build.gradle`, `gradle.properties`,
+`proguard-rules.pro`) :
+
+- `minifyEnabled true` + `shrinkResources true` ;
+- `android.enableR8.fullMode=true` (optimisations inter-classes, fusion de
+  classes, analyse de nullité) ;
+- `-allowaccessmodification` + `-repackageclasses ''` : R8 peut élargir la
+  visibilité des membres et regrouper tout le code non conservé dans un paquet
+  racine — ce sont les deux réglages qui font monter les pourcentages
+  d'obscurcissement et d'optimisation mesurés par Play ;
+- `org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=512m` : le mode complet de
+  R8 dépasse les 1,5 Go d'origine sur ce projet (Firebase + Google Mobile Ads)
+  et échouerait en `OutOfMemoryError` ;
+- `proguard-android-optimize.txt` + `app/android/app/proguard-rules.pro`
+  (conserve les classes chargées par réflexion : plugins Capacitor listés dans
+  `assets/capacitor.plugins.json`, plugins natifs `StepCounterPlugin` /
+  `TrackingPlugin`, widget, services de premier plan, interfaces JavaScript) ;
+- `app/android/app/src/main/res/raw/keep.xml` protège les ressources
+  référencées par nom (icône de notification, splash, widget, launcher).
+
+Le fichier de correspondance R8 (`mapping.txt`) est inclus automatiquement dans
+l'AAB : les rapports de plantage Play restent lisibles.
+
+⚠️ Après un changement de règles, tester un **APK release** réel
+(`./gradlew assembleRelease` puis `adb install -r`) : pubs, podomètre, sortie
+GPS, partage et widget.
+
+### Affichage de bord à bord (Android 15 / SDK 35+)
+
+- `MainActivity.enableEdgeToEdgeCompat()` active le bord à bord **sans API
+  obsolète** : `WindowCompat.setDecorFitsSystemWindows(false)` et
+  `LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS` (API 30+) à la place de
+  `LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES`, déprécié dans Android 15.
+- Les couleurs transparentes des barres viennent du thème
+  (`res/values/styles.xml`), jamais de `Window#setStatusBarColor`.
+- Les encarts sont consommés côté web : `viewport-fit=cover` (index.html) et
+  `env(safe-area-inset-*)` dans les feuilles de style ; Capacitor injecte aussi
+  `--safe-area-inset-*` (`SystemBars.insetsHandling: 'css'`).
+- Le bord à bord est activé **sans condition**, sur toutes les versions
+  d'Android. Il l'était auparavant seulement quand la WebView installée savait
+  exposer les safe-area (Chromium 140+) : c'est ce test à l'exécution qui
+  valait l'avertissement Play « l'affichage de bord à bord peut ne pas être
+  disponible pour tous les utilisateurs ».
+- Repli natif (`MainActivity.applyInsetsFallback()`) : sur les appareils
+  **antérieurs à Android 15 dont la WebView est ancienne**, les marges système
+  (barres + encoche + clavier) sont appliquées sur `android.R.id.content`.
+  À partir d'Android 15, c'est Capacitor qui s'en charge : pas de double marge.
+- Le mode encoche `always` est aussi déclaré dans le thème
+  (`res/values-v30/styles.xml`) pour la fenêtre de l'application **et** pour
+  l'écran de lancement : plus aucune ressource de l'app ne demande
+  `shortEdges`.
+- Les occurrences restantes de `LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES`
+  signalées par Play proviennent des bibliothèques Google elles-mêmes
+  (`com.google.android.gms.ads.internal.overlay`,
+  `com.google.android.play.core.hsdp.service.HsdpShimActivity`,
+  `androidx.activity.EdgeToEdgeApi28`), **pas du code ElyWalk**. Le SDK
+  d'annonces suit la dernière version de la branche recommandée
+  (`playServicesAdsVersion = '25.5.+'` dans `app/android/variables.gradle`) ;
+  le module `play.core.hsdp` arrive en dépendance transitive de ce SDK et ne
+  peut pas être exclu sans risque de plantage. Cet avertissement est une
+  **recommandation, pas un blocage de publication** : il se résorbera avec les
+  prochaines versions des SDK Google.
+
+### `app-ads.txt` (validation AdMob)
+
+**État : fichier en ligne, validation en attente de la mise en production.**
+
+Le robot d'AdMob explore une seule URL : la racine du champ *Site Web* de la
+fiche Play. Cette fiche déclare `https://elysium-esport.fr` (Play Console →
+*Paramètres du Store* → *Coordonnées sur la fiche Play Store*), site hébergé
+sur **Vercel**. L'URL explorée est donc :
+
+```text
+https://elysium-esport.fr/app-ads.txt     ← en ligne (2026-11-02)
+```
+
+⚠️ **Le déploiement Firebase n'est pas exploré** tant que la fiche Play
+déclare ce domaine. Le fichier versionné ici (`app/public/app-ads.txt`,
+publié sur `elywalk-2f7ba.web.app`) n'est qu'un **miroir** : la source de
+vérité pour AdMob est le dépôt Vercel du site.
+
+Il reste deux conditions, hors de ce dépôt :
+
+1. l'application doit être **publiée en production** sur le Play Store (le
+   robot lit le site du développeur sur la fiche **publique** ; une app en
+   test fermé n'en a pas) ;
+2. compter jusqu'à 24 h d'exploration, puis *Vérifier les modifications* dans
+   AdMob → *Applications → app-ads.txt*.
+
+Contenu exact, une seule ligne :
+
+```text
+google.com, pub-5316598937383510, DIRECT, f08c47fec0942fa0
+```
+
+#### Option A (recommandée) — déposer le fichier sur `elysium-esport.fr` (Vercel)
+
+Le site `elysium-esport.fr` est hébergé sur **Vercel**. Le fichier se dépose
+dans le dépôt de CE site (pas dans ce dépôt-ci), puis part au déploiement.
+
+**1. Où placer le fichier selon le framework**
+
+| Projet Vercel | Emplacement dans le dépôt | URL servie |
+| --- | --- | --- |
+| Next.js (App ou Pages Router) | `public/app-ads.txt` | `/app-ads.txt` |
+| Vite, React, Vue, Svelte | `public/app-ads.txt` | `/app-ads.txt` |
+| Astro | `public/app-ads.txt` | `/app-ads.txt` |
+| Nuxt 3 | `public/app-ads.txt` | `/app-ads.txt` |
+| Site statique sans framework | racine du dépôt | `/app-ads.txt` |
+
+Contenu : la ligne unique ci-dessus, en texte brut, sans BOM, sans `<html>`
+autour. Vercel sert les fichiers de `public/` en `text/plain` automatiquement
+pour une extension `.txt` ; aucun réglage supplémentaire n'est nécessaire.
+
+**2. Mettre le domaine nu en domaine principal**
+
+C'est le piège Vercel le plus fréquent. Si `elysium-esport.fr` redirige en 308
+vers `www.elysium-esport.fr`, le robot d'AdMob — qui explore l'apex déclaré sur
+Play — peut abandonner. Dans *Vercel → Project → Settings → Domains*, mettre
+**`elysium-esport.fr` en domaine principal** (`www` redirige alors vers l'apex,
+et non l'inverse). À défaut, déposer le fichier de sorte que les deux hôtes le
+servent en 200.
+
+**3. Vérifier la Deployment Protection**
+
+*Settings → Deployment Protection* : si *Vercel Authentication* ou *Password
+Protection* est actif sur la Production, toute requête anonyme reçoit un 401 —
+le robot d'AdMob aussi. Désactiver la protection pour la Production (ou au
+minimum exclure la racine du site).
+
+**4. Attention aux réécritures fourre-tout**
+
+Avec `rewrites` dans `vercel.json`, les fichiers statiques passent avant les
+réécritures : rien à faire. Avec l'ancienne clé `routes`, il faut un
+`{ "handle": "filesystem" }` **avant** la route fourre-tout, sinon
+`/app-ads.txt` renvoie le HTML de la SPA.
+
+Pour forcer explicitement le type MIME (facultatif) :
+
+```json
+{
+  "headers": [
+    {
+      "source": "/app-ads.txt",
+      "headers": [{ "key": "Content-Type", "value": "text/plain; charset=utf-8" }]
+    }
+  ]
+}
+```
+
+**Variante — proxy vers le miroir Firebase** (une seule source de vérité, le
+fichier reste versionné dans ce dépôt) :
+
+```json
+{
+  "rewrites": [
+    {
+      "source": "/app-ads.txt",
+      "destination": "https://elywalk-2f7ba.web.app/app-ads.txt"
+    }
+  ]
+}
+```
+
+Plus pratique à maintenir, mais ajoute une dépendance réseau au moment de
+l'exploration : le fichier statique reste le choix le plus sûr.
+
+**5. Vérifier**
+
+```bash
+./scripts/check-app-ads.sh      # teste apex + www + miroir Firebase
+```
+
+Le script signale les erreurs propres à Vercel (en-tête `x-vercel-error`, 401
+de la Deployment Protection, page d'authentification renvoyée à la place du
+fichier).
+
+#### Option B — pointer la fiche Play vers Firebase
+
+Si le dépôt Vercel d'`elysium-esport.fr` n'est pas accessible, changer le champ
+*Site Web* de la fiche Play en `https://elywalk-2f7ba.web.app` : le fichier y
+est déjà servi correctement. Google recommande explicitement Firebase Hosting
+pour `app-ads.txt`. Inconvénients : l'URL est visible par les utilisateurs sur
+la fiche Play, et toute modification de fiche demande une republication puis
+~24 h de propagation avant qu'AdMob la voie.
+
+#### Publication du miroir Firebase
+
+```bash
+cd app && npm run build      # Vite copie app/public/** dans app/dist
+cd .. && firebase deploy --only hosting
+```
+
+`firebase.json` ajoute un en-tête `Content-Type: text/plain; charset=utf-8`
+sur `/app-ads.txt` (la réécriture `** → /index.html` ne masque pas les
+fichiers statiques).
+
+Ensuite, dans AdMob → *Applications → app-ads.txt*, cliquer sur **Vérifier les
+modifications** (ou *Rechercher à nouveau*). L'exploration peut prendre jusqu'à
+24 h. Tant que le fichier n'est pas validé, une partie des acheteurs
+programmatiques refuse d'enchérir : moins d'annonces remplies et un revenu
+par mille plus faible.
+
+#### Les trois conditions, dans l'ordre où AdMob les vérifie
+
+1. **L'application doit être publiée sur le Play Store** (FAQ Google : « Do I
+   need to publish my app to verify the app-ads.txt file? → **Yes** ») : le
+   robot part de la **fiche publique** pour y lire le site du développeur.
+   ✅ ElyWalk est en production. Vérifier tout de même que le lien *Site Web*
+   apparaît bien sur la **fiche publique** (page Play → *Assistance de
+   l'appli*) : une modification de fiche non republiée reste invisible du
+   robot.
+2. **Le champ « Site Web » de la fiche détermine l'URL explorée.**
+   Play Console → *Croissance* → *Présence sur le Store* → *Paramètres du
+   Store* → *Coordonnées sur la fiche Play Store* → **Site Web**.
+   Valeur actuelle : `https://elysium-esport.fr` (apex, sans `www`, sans
+   chemin). Toute modification de ce champ demande une republication de la
+   fiche puis ~24 h avant d'être vue par AdMob.
+3. **Le fichier doit répondre 200 en texte brut à cette URL exacte.**
+
+#### Vérifier ce que voit le robot
+
+```bash
+./scripts/check-app-ads.sh                       # apex + www + miroir Firebase
+./scripts/check-app-ads.sh https://un-autre.fr   # un domaine precis
+```
+
+Le script affiche l'hébergeur de chaque domaine (en-tête `Server`), puis
+contrôle le code HTTP, les redirections, le type MIME, la présence de HTML
+(piège du *fallback* SPA), un éventuel BOM, l'enregistrement exact, les
+identifiants éditeur parasites et le `robots.txt` du domaine.
+
+#### Pièges connus (liste officielle + retours terrain)
+
+| Symptôme | Cause | Correctif |
+| --- | --- | --- |
+| « app-ads.txt introuvable » | champ *Site Web* absent de la fiche **publique** (modification non republiée) | republier la fiche, attendre 24 h |
+| Validation échoue alors que l'URL marche | le domaine déclaré sur Play n'est **pas** celui qui héberge le fichier | aligner les deux |
+| `www` contre domaine nu | AdMob n'unifie **pas** `example.com` et `www.example.com` | héberger le fichier sur l'hôte exact déclaré |
+| Redirection apex → www | le robot ne suit pas toujours les redirections | servir le fichier en 200 direct sur l'hôte déclaré |
+| Réponse en `text/html` | fichier absent, c'est la page 404 ou le *fallback* SPA qui répond | règle `headers` de `firebase.json` + fichier réellement déployé |
+| Fichier illisible | BOM UTF-8, CRLF, espaces insécables | fichier ASCII pur, LF (vérifié : `od -c app/public/app-ads.txt`) |
+| Robot bloqué | `robots.txt` restrictif | `app/public/robots.txt` autorise `Google-adstxt`, `Googlebot`, `Mediapartners-Google` |
+| Rien ne bouge après 24 h | cache CDN ou fiche non propagée | purger le cache, revérifier après 48–72 h |
+
+Google recommande explicitement **Firebase Hosting** pour héberger
+`app-ads.txt` (et refuse Google Sites) : le domaine `*.web.app` convient, c'est
+un suffixe public, donc `elywalk-2f7ba.web.app` est bien une racine de domaine.
+
+⚠️ Ne pas confondre avec la **validation du compte AdMob** (identité,
+paiements) : `app-ads.txt` ne valide que l'autorisation de vente de
+l'inventaire.
+
+## Publicités AdMob (F24 / F25)
+
+Compte AdMob ElyWalk — **ID d'application** :
+`ca-app-pub-5316598937383510~4963026878`
+
+| Format | Bloc d'annonces | Déclenchement |
+| --- | --- | --- |
+| Annonce à l'ouverture | `ca-app-pub-5316598937383510/6986554989` | Lancement + retour dans l'app (plafond 2/jour, cooldown 10 min, jamais pendant l'onboarding) |
+| Interstitiel | `ca-app-pub-5316598937383510/7972992736` | Validation des pas, fin d'une sortie, demande de retrait (60 s minimum entre deux) |
+| Vidéo avec récompense | `ca-app-pub-5316598937383510/9832210178` | « Regarder une pub pour gagner 0,1 ElyCoins » (1/h, SSV avec `userId`) |
+
+Ces valeurs sont déclarées à **deux endroits qui doivent rester synchronisés** :
+
+- `app/src/lib/constants.ts` (`ADMOB_APP_ID`, `AD_UNIT_*`) ;
+- `app/android/app/src/main/AndroidManifest.xml`
+  (`com.google.android.gms.ads.APPLICATION_ID`).
+
+Un ID d'application qui ne correspond pas au compte propriétaire des blocs =
+**zéro annonce** (c'était la panne de la 1.4.0). Le manifeste active aussi
+`OPTIMIZE_INITIALIZATION` / `OPTIMIZE_AD_LOADING` (moins d'ANR au démarrage).
+
+Checklist console AdMob avant publication :
+
+- [ ] L'application `com.elysium.elywalk` est **liée au Play Store** dans AdMob
+      (*Applications → Paramètres de l'application*).
+- [ ] `app-ads.txt` **validé** (voir la section dédiée plus haut) : le fichier
+      doit répondre en 200 à la racine du site déclaré sur la fiche Play.
+- [ ] Les trois blocs d'annonces sont **actifs** (un bloc tout juste créé peut
+      rester sans impression pendant quelques heures).
+- [ ] *Confidentialité et messages → Message RGPD* : message **publié** pour
+      l'EEE/UK, sinon `canRequestAds` reste `false` en Europe et aucune annonce
+      n'est diffusée (l'app l'indique dans Profil → *Confidentialité des
+      annonces*).
+- [ ] *Confidentialité et messages → Options de confidentialité* activées
+      (bouton de révision du consentement exigé par le RGPD).
+- [ ] Paiements et fiscalité validés : un compte non vérifié ne reçoit que des
+      annonces vides.
+- [ ] Pour tester sans risque d'« invalid traffic », utiliser un appareil de
+      test déclaré dans AdMob ou les blocs de test Google.
+
+### Pourquoi les annonces sortent sur Orbit Hop et pas sur ElyWalk
+
+Comparaison faite ligne à ligne avec `Elysiumweb/Orbit-Hop` :
+
+| | Orbit Hop | ElyWalk |
+| --- | --- | --- |
+| Compte AdMob | `pub-5316598937383510` | **le même** |
+| `app-ads.txt` | `google.com, pub-5316598937383510, DIRECT, f08c47fec0942fa0` | **identique** |
+| ID d'application | `~9596939280` | `~4963026878` |
+| SDK | Google Mobile Ads natif (Kotlin) | même SDK, via `@capacitor-community/admob` |
+| Consentement | UMP, `MobileAds.initialize()` inconditionnel, chargement conditionné à `canRequestAds` | **même logique** (`lib/ads.ts`) |
+| Identifiants en debug | **blocs de test Google** | production (jusqu'à la 1.6.0) |
+| Publication Play | production | production |
+
+Le compte, le fichier et le code ne sont donc pas en cause. Deux écarts
+expliquent la différence :
+
+1. **Orbit Hop est testé en `debug`, donc avec les blocs de test Google**, qui
+   sont *toujours* remplis quel que soit l'état du compte. Ce n'est pas une
+   preuve que la production fonctionne. ElyWalk utilisait les vrais blocs
+   partout : si la régie ne renvoie rien, l'écran reste vide.
+   → `VITE_TEST_ADS=1 npm run build && npx cap sync android` construit
+   maintenant ElyWalk avec les mêmes blocs de test. Si les annonces
+   apparaissent ainsi, **le câblage est bon** et le problème est côté console
+   AdMob. (Ne jamais publier un AAB construit ainsi.)
+2. **Les réglages AdMob qui bloquent la diffusion sont par application**, pas
+   par compte. À vérifier pour ElyWalk, en comparant avec la fiche Orbit Hop :
+   - *Applications → ElyWalk → Paramètres* : **associée au Play Store** ?
+   - *État de l'application* : « Prêt », « Examen requis » ou « Diffusion
+     limitée » ? Depuis janvier 2025, une nouvelle application doit passer la
+     vérification `app-ads.txt` **et** l'examen de préparation avant de
+     diffuser à plein régime.
+   - *Confidentialité et messages → Message RGPD* : le message publié
+     couvre-t-il **ElyWalk** ? La liste des applications est à cocher message
+     par message ; un message publié pour Orbit Hop seul laisse ElyWalk sans
+     formulaire, donc `canRequestAds = false` en France.
+   - *Blocs d'annonces* : créés il y a moins de quelques heures = inventaire
+     encore vide, normal.
+
+### Lire l'état réel depuis l'appareil
+
+Profil → *Confidentialité des annonces* affiche désormais une phrase
+d'interprétation et un bloc **Diagnostic technique** (copiable) :
+
+```text
+natif          : oui
+SDK initialisé : oui
+consentement   : REQUIRED | OBTAINED | NOT_REQUIRED | UNKNOWN
+formulaire     : oui/non
+canRequestAds  : oui/non
+interstitiel   : oui/non
+dernière erreur: …
+annonces test  : non
+```
+
+Lecture :
+
+- `consentement = REQUIRED` **et** `formulaire = non` → message RGPD non publié
+  pour ElyWalk dans AdMob ;
+- `canRequestAds = oui` mais `dernière erreur` contient *no fill* → la régie
+  est bien interrogée et ne renvoie rien : application pas encore validée /
+  associée, ou inventaire vide ;
+- `SDK initialisé = non` → problème d'initialisation (réseau, plugin).
+
+### ⚠️ Message RGPD manquant = zéro annonce en Europe
+
+**Cause confirmée de l'absence d'annonces en production.** Aucun message de
+consentement n'était créé dans la console AdMob. Depuis janvier 2024, Google
+impose une **CMP certifiée** pour tout trafic EEE/UK : sans message publié, les
+demandes d'annonces venant d'Europe ne sont pas remplies — l'application
+fonctionne, le SDK s'initialise, mais l'inventaire reste vide. Les annonces de
+test (`VITE_TEST_ADS=1`) continuent de s'afficher : c'est le signe que le
+câblage est bon et que le blocage est côté console.
+
+Procédure (console AdMob, ~5 minutes) :
+
+1. **Confidentialité et messages** → onglet **RGPD** → *Créer un message*.
+2. Sélectionner **ElyWalk** dans la liste des applications. ⚠️ La sélection se
+   fait application par application : un message publié pour Orbit Hop ne
+   couvre pas ElyWalk.
+3. Régions : **EEE et Royaume-Uni** (valeur par défaut).
+4. Choix de l'utilisateur : garder **Consentir / Gérer les options** et, si
+   vous voulez maximiser le remplissage, activer aussi *Refuser* (obligatoire
+   dans plusieurs pays, dont la France — la CNIL exige un refus aussi simple
+   que l'acceptation).
+5. Partenaires publicitaires : laisser la sélection Google par défaut
+   (sinon le remplissage chute).
+6. Langue, logo, lien vers la politique de confidentialité
+   (`https://elywalk-2f7ba.web.app/privacy.html`).
+7. **Publier** — un message enregistré mais non publié ne sert à rien.
+8. Onglet **Options de confidentialité** (IAB/CNIL) : créer et publier aussi
+   ce message. Il alimente le bouton *Confidentialité des annonces* du profil
+   et conditionne `privacyOptionsRequirementStatus`.
+9. Côté application : rien à redéployer. Forcer la relecture en vidant les
+   données de l'app, ou attendre : l'UMP réinterroge à chaque lancement.
+
+Contrôle : Profil → *Confidentialité des annonces* doit afficher
+`consentement : REQUIRED` puis, après le formulaire, `OBTAINED` et
+`canRequestAds : oui`. Tant qu'il affiche `NOT_REQUIRED` avec
+`formulaire : non`, aucun message n'est publié pour cette application.
 
 ## Consentement publicitaire RGPD (F03)
 
 AdMob est initialisé avec le module de consentement Google **UMP** (Funding
 Choices) : avant toute annonce, le formulaire de consentement est affiché pour
 les utilisateurs de l'EEE/UK. L'utilisateur peut le réviser à tout moment
-(Profil → *Confidentialité des annonces*). Créer le **message RGPD** dans la
-console AdMob → *Confidentialité et messages*.
+(Profil → *Confidentialité des annonces*), où s'affiche également l'état réel
+de la régie (annonces actives / indisponibles). Créer et **publier** le
+**message RGPD** dans la console AdMob → *Confidentialité et messages*.
 
 ## Notifications (F10)
 

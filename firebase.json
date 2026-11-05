@@ -4,6 +4,20 @@
   "hosting": {
     "public": "app/dist",
     "ignore": ["firebase.json", "**/node_modules/**", "**/.DS_Store"],
+    "headers": [
+      {
+        "source": "/app-ads.txt",
+        "headers": [
+          { "key": "Content-Type", "value": "text/plain; charset=utf-8" },
+          { "key": "Cache-Control", "value": "public, max-age=3600" },
+          { "key": "Access-Control-Allow-Origin", "value": "*" }
+        ]
+      },
+      {
+        "source": "/.well-known/**",
+        "headers": [{ "key": "Content-Type", "value": "application/json" }]
+      }
+    ],
     "rewrites": [{ "source": "**", "destination": "/index.html" }]
   }
 }

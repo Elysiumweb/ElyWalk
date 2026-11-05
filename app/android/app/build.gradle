@@ -1,5 +1,35 @@
 apply plugin: 'com.android.application'
 
+// ---------------------------------------------------------------------------
+// Signature de la version de production (facultative en local).
+//
+// Renseigner `android/keystore.properties` (jamais commité) :
+//   storeFile=/chemin/vers/elywalk-upload.jks
+//   storePassword=…
+//   keyAlias=upload
+//   keyPassword=…
+// ou les variables d'environnement ELYWALK_STORE_FILE / ELYWALK_STORE_PASSWORD
+// / ELYWALK_KEY_ALIAS / ELYWALK_KEY_PASSWORD (CI).
+// Sans l'un ni l'autre, `bundleRelease` produit un AAB non signé (à signer
+// ensuite dans Android Studio : Build > Generate Signed App Bundle).
+// ---------------------------------------------------------------------------
+def keystorePropertiesFile = rootProject.file("keystore.properties")
+def keystoreProperties = new Properties()
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
+def resolveSigning = { String propertyName, String envName ->
+    def value = keystoreProperties[propertyName] ?: System.getenv(envName)
+    return value?.toString()?.trim()
+}
+
+def releaseStoreFile = resolveSigning('storeFile', 'ELYWALK_STORE_FILE')
+def releaseStorePassword = resolveSigning('storePassword', 'ELYWALK_STORE_PASSWORD')
+def releaseKeyAlias = resolveSigning('keyAlias', 'ELYWALK_KEY_ALIAS')
+def releaseKeyPassword = resolveSigning('keyPassword', 'ELYWALK_KEY_PASSWORD')
+def hasReleaseSigning = releaseStoreFile && releaseStorePassword && releaseKeyAlias && releaseKeyPassword
+
 android {
     namespace = "com.elysium.elywalk"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,8 +37,8 @@ android {
         applicationId "com.elysium.elywalk"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 3
-        versionName "1.4.0"
+        versionCode 6
+        versionName "1.6.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,10 +46,27 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        if (hasReleaseSigning) {
+            release {
+                storeFile file(releaseStoreFile)
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
+    }
     buildTypes {
         release {
-            minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // Optimisation du code DEX exigée par Google Play (obscurcissement,
+            // réduction du code et des ressources). R8 renomme les classes de
+            // l'application : sans cela, Play signale « Obscurcissement 1 % ».
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 }
@@ -34,6 +81,7 @@ dependencies {
     implementation fileTree(include: ['*.jar'], dir: 'libs')
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core:$androidxCoreVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
     // Localisation fusionnée pour la sortie GPS en arrière-plan (service natif).

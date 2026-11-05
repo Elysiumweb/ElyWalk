@@ -11,6 +11,10 @@
 			"providers": [
 				"google.com"
 			]
+		},
+		"SystemBars": {
+			"style": "DARK",
+			"insetsHandling": "css"
 		}
 	}
 }

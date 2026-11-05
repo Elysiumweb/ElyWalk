@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Palette Elysium : Midnight Black / Heritage Gold -->
+    <color name="elywalkBackground">#0B0B0C</color>
+    <color name="elywalkBlack">#111111</color>
+    <color name="elywalkGold">#D8CA82</color>
+</resources>

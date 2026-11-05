@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import Sheet from '../components/Sheet';
 import { requestConversion, listMyWithdrawals, listMyTransactions } from '../lib/db';
+import { showInterstitial } from '../lib/ads';
 import { fmtCoins, fmtEuros, coinsToEuros } from '../lib/coins';
 import { MIN_PAYPAL_COINS, isPresidentUid } from '../lib/constants';
 import { updateUserFields } from '../lib/db';
@@ -51,6 +52,9 @@ export default function WalletPage() {
         await updateUserFields(profile.uid, { paypalEmail });
       }
       await requestConversion(profile, type, coins, paypalEmail);
+      // Annonce interstitielle après une demande de retrait (jamais avant :
+      // l'opération financière ne doit pas dépendre du chargement d'une pub).
+      if (type === 'paypal') await showInterstitial('withdrawal');
       toast(
         type === 'paypal'
           ? `Demande de retrait de ${fmtEuros(coins)} envoyée !`

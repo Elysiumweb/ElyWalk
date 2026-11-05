@@ -1,0 +1,16 @@
+# Robot d'exploration app-ads.txt d'AdMob : accès explicitement autorisé.
+# (Sans robots.txt, tout est autorisé par défaut ; ce fichier supprime
+# simplement une cause d'échec de validation côté AdMob.)
+User-agent: Google-adstxt
+Disallow:
+
+User-agent: Googlebot
+Allow: /app-ads.txt
+Allow: /
+
+User-agent: Mediapartners-Google
+Allow: /app-ads.txt
+Allow: /
+
+User-agent: *
+Allow: /

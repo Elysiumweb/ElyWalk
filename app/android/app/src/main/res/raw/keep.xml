@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Réduction des ressources (`shrinkResources true`) : ces ressources sont
+  référencées par nom (icônes de notification, splash, widget, icônes
+  launcher) et doivent survivre au shrink.
+-->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:shrinkMode="safe"
+    tools:keep="@drawable/ic_stat_steps,
+                @drawable/splash,
+                @drawable/ic_launcher_background,
+                @drawable/ic_launcher_foreground,
+                @layout/widget_steps,
+                @layout/activity_main,
+                @xml/widget_steps_info,
+                @xml/file_paths,
+                @xml/config,
+                @mipmap/ic_launcher,
+                @mipmap/ic_launcher_round,
+                @mipmap/ic_launcher_foreground,
+                @color/elywalkBackground,
+                @color/elywalkBlack,
+                @color/elywalkGold" />

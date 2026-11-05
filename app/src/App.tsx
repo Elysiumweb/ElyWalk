@@ -5,7 +5,7 @@ import { Capacitor } from '@capacitor/core';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './components/Toast';
 import TabBar from './components/TabBar';
-import { initAds, loadAppOpenAd, showAppOpenAdIfReady } from './lib/ads';
+import { initAds, loadAppOpenAd, prefetchAds, showAppOpenAdIfReady } from './lib/ads';
 import { pedometer } from './lib/pedometer';
 import AuthPage from './pages/AuthPage';
 import HomePage from './pages/HomePage';
@@ -48,36 +48,41 @@ function Shell() {
   useEffect(() => { if (user) setupNotifications(user.uid).catch(console.warn); }, [user?.uid]);
   useEffect(() => { const open=(raw:string)=>{const url=new URL(raw);const ref=url.searchParams.get('ref')||(url.protocol==='elywalk:'?url.searchParams.get('code'):null);if(ref)setPendingReferralCode(ref.toUpperCase())}; CapApp.getLaunchUrl().then(r=>r?.url&&open(r.url));const sub=CapApp.addListener('appUrlOpen',e=>open(e.url));return()=>{sub.then(h=>h.remove())}; }, [setPendingReferralCode]);
 
-  // Consentement RGPD (UMP) dès le lancement, AVANT toute publicité.
+  // Consentement RGPD (UMP) dès le lancement, AVANT toute publicité, puis
+  // préchargement de l'interstitiel (validation des pas, fin de sortie, retrait).
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
-    initAds().catch(console.warn);
+    initAds()
+      .then(() => prefetchAds())
+      .catch(console.warn);
   }, []);
 
   // Annonce à l'ouverture + au retour sur l'application (App Open Ad).
   // Garde-fous : exemptée tant que l'onboarding n'est pas terminé, plafonnée
-  // quotidiennement et espacée d'un cooldown (voir ads.ts).
+  // quotidiennement, espacée d'un cooldown et jamais enchaînée sur une autre
+  // annonce plein écran (voir ads.ts).
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
     if (!profile?.onboardingDone) return;
-    let firstLoad = true;
+    let cancelled = false;
+    let launchHandled = false;
     (async () => {
-      await initAds();
       await loadAppOpenAd();
+      if (cancelled) return;
       // Affiche l'annonce d'ouverture peu après le lancement.
       setTimeout(() => {
-        if (firstLoad) {
-          firstLoad = false;
-          showAppOpenAdIfReady();
-        }
+        if (cancelled || launchHandled) return;
+        launchHandled = true;
+        void showAppOpenAdIfReady();
       }, 3500);
     })();
     const sub = CapApp.addListener('appStateChange', ({ isActive }) => {
-      if (isActive && !firstLoad) {
-        showAppOpenAdIfReady();
-      }
+      if (!isActive) return;
+      launchHandled = true;
+      void showAppOpenAdIfReady();
     });
     return () => {
+      cancelled = true;
       sub.then((h) => h.remove());
     };
   }, [profile?.onboardingDone]);

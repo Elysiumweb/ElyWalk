@@ -1,10 +1,45 @@
 // ===== ElyWalk — Constantes globales =====
 
 // --- AdMob (production) ---
-export const ADMOB_APP_ID = 'ca-app-pub-6906841385343667~6481018527';
-export const AD_UNIT_REWARDED = 'ca-app-pub-6906841385343667/3683414466';
-export const AD_UNIT_APP_OPEN = 'ca-app-pub-6906841385343667/6616749893';
-export const AD_UNIT_INTERSTITIAL = 'ca-app-pub-6906841385343667/3494240028';
+// ⚠️ L'ID d'application doit être IDENTIQUE à celui déclaré dans
+// `android/app/src/main/AndroidManifest.xml`
+// (meta-data `com.google.android.gms.ads.APPLICATION_ID`). Si les deux
+// diffèrent — ou si les blocs d'annonces appartiennent à un autre compte —
+// le SDK Google Mobile Ads ne renvoie jamais d'annonce.
+export const ADMOB_APP_ID = 'ca-app-pub-5316598937383510~4963026878';
+/** Vidéo avec récompense : « Regarder une pub pour gagner 0,1 ElyCoins ». */
+export const AD_UNIT_REWARDED = 'ca-app-pub-5316598937383510/9832210178';
+/** Annonce à l'ouverture de l'application (App Open). */
+export const AD_UNIT_APP_OPEN = 'ca-app-pub-5316598937383510/6986554989';
+/** Interstitiel : validation des pas, fin de sortie, demande de retrait. */
+export const AD_UNIT_INTERSTITIAL = 'ca-app-pub-5316598937383510/7972992736';
+
+// --- AdMob (vérification du câblage) ---
+// Blocs d'annonces de **test** officiels Google : toujours remplis, quel que
+// soit l'état du compte. Ils permettent de distinguer « le code ne marche
+// pas » de « la régie ne renvoie rien » (application pas encore validée,
+// message RGPD absent, nouvelle unité sans inventaire).
+//
+//   VITE_TEST_ADS=1 npm run build && npx cap sync android
+//
+// ⚠️ Ne jamais publier un AAB construit avec cette variable : aucun revenu.
+// ⚠️ Ne jamais cliquer sur une vraie annonce depuis un build de test : le
+//    « trafic invalide » peut faire suspendre le compte AdMob.
+const TEST_AD_UNIT_APP_OPEN = 'ca-app-pub-3940256099942544/9257395921';
+const TEST_AD_UNIT_INTERSTITIAL = 'ca-app-pub-3940256099942544/1033173712';
+const TEST_AD_UNIT_REWARDED = 'ca-app-pub-3940256099942544/5224354917';
+
+// Écrit en dur par Vite au moment du build : la condition est évaluée à la
+// compilation, et les blocs de test disparaissent complètement du paquet de
+// production (vérifiable avec `grep 3940256099942544 dist/assets/*.js`).
+export const USE_TEST_ADS = import.meta.env.VITE_TEST_ADS === '1';
+
+/** Blocs réellement utilisés par `lib/ads.ts` (production sauf VITE_TEST_ADS=1). */
+export const AD_UNITS = {
+  appOpen: USE_TEST_ADS ? TEST_AD_UNIT_APP_OPEN : AD_UNIT_APP_OPEN,
+  interstitial: USE_TEST_ADS ? TEST_AD_UNIT_INTERSTITIAL : AD_UNIT_INTERSTITIAL,
+  rewarded: USE_TEST_ADS ? TEST_AD_UNIT_REWARDED : AD_UNIT_REWARDED,
+} as const;
 
 // --- Documents légaux en ligne (exigence Play Store : URL publique) ---
 // Page statique servie par Firebase Hosting (app/public/privacy.html).
