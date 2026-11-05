@@ -14,6 +14,7 @@ import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.os.Build;
 import android.os.IBinder;
+import android.util.Log;
 
 import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
@@ -36,6 +37,7 @@ public class StepCounterService extends Service implements SensorEventListener {
     private SensorManager sensorManager;
     private Sensor stepSensor;
     private int lastNotifiedSteps = -1;
+    private boolean ready;
 
     public static void start(Context ctx) {
         Intent i = new Intent(ctx.getApplicationContext(), StepCounterService.class);
@@ -46,31 +48,44 @@ public class StepCounterService extends Service implements SensorEventListener {
     public void onCreate() {
         super.onCreate();
         createChannel();
-        promoteToForeground();
+        if (!promoteToForeground()) return;
         sensorManager = (SensorManager) getSystemService(SENSOR_SERVICE);
         if (sensorManager != null) {
             stepSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER);
             if (stepSensor != null) {
                 // SENSOR_DELAY_NORMAL : basse consommation, suffisant pour des pas.
-                sensorManager.registerListener(this, stepSensor, SensorManager.SENSOR_DELAY_NORMAL);
+                try {
+                    sensorManager.registerListener(this, stepSensor, SensorManager.SENSOR_DELAY_NORMAL);
+                } catch (SecurityException e) {
+                    Log.w("ElyWalkSteps", "Activity recognition permission unavailable", e);
+                    stopSelf();
+                    return;
+                }
             }
         }
+        ready = true;
         updateNotification(StepStore.getTodaySteps(this));
     }
 
-    private void promoteToForeground() {
-        Notification n = buildNotification(StepStore.getTodaySteps(this));
-        if (Build.VERSION.SDK_INT >= 34) {
-            startForeground(NOTIF_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH);
-        } else {
-            startForeground(NOTIF_ID, n);
+    private boolean promoteToForeground() {
+        try {
+            Notification n = buildNotification(StepStore.getTodaySteps(this));
+            if (Build.VERSION.SDK_INT >= 34) {
+                startForeground(NOTIF_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH);
+            } else {
+                startForeground(NOTIF_ID, n);
+            }
+            return true;
+        } catch (RuntimeException e) {
+            Log.e("ElyWalkSteps", "Foreground service unavailable", e);
+            stopSelf();
+            return false;
         }
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        promoteToForeground();
-        return START_STICKY;
+        return ready && promoteToForeground() ? START_STICKY : START_NOT_STICKY;
     }
 
     @Override
