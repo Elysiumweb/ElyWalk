@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState, type ReactElement } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { App as CapApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
@@ -6,7 +6,18 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './components/Toast';
 import TabBar from './components/TabBar';
 import AppErrorBoundary from './components/AppErrorBoundary';
-import { initAds, loadAppOpenAd, prefetchAds, showAppOpenAdIfReady } from './lib/ads';
+import AdBanner from './components/AdBanner';
+import ConsentGate from './components/ConsentGate';
+import {
+  CONSENT_RESET_EVENT,
+  hasConsentDecision,
+  initAds,
+  loadAppOpenAd,
+  needsConsentPrompt,
+  prefetchAds,
+  setAdsUser,
+  showAppOpenAdIfReady,
+} from './lib/ads';
 import { pedometer } from './lib/pedometer';
 import AuthPage from './pages/AuthPage';
 import HomePage from './pages/HomePage';
@@ -29,6 +40,9 @@ import ProductStatus from './components/ProductStatus';
 import { setupNotifications } from './lib/notifications';
 
 function Shell() {
+  // Écran de consentement publicitaire : affiché une fois, avant la première
+  // requête d'annonce, et seulement dans les zones qui l'exigent.
+  const [consentPrompt, setConsentPrompt] = useState(false);
   const { user, profile, loading, setPendingReferralCode } = useAuth();
   const location = useLocation();
 
@@ -54,6 +68,10 @@ function Shell() {
 
   useEffect(() => { if (user) setupNotifications(user.uid).catch(console.warn); }, [user?.uid]);
 
+  // La validation serveur des récompenses (Meta S2S) a besoin de savoir à qui
+  // créditer la vidéo : l'identifiant est transmis à chaque chargement.
+  useEffect(() => { setAdsUser(user?.uid ?? null); }, [user?.uid]);
+
   // Liens entrants (parrainage) : `new URL()` reçoit parfois une chaîne vide ou
   // malformée, d'où une exception non capturée qui interrompt le démarrage.
   useEffect(() => {
@@ -71,14 +89,39 @@ function Shell() {
     return () => { sub.then((h) => h.remove()).catch(() => undefined); };
   }, [setPendingReferralCode]);
 
-  // Consentement RGPD (UMP) dès le lancement, AVANT toute publicité, puis
-  // préchargement de l'interstitiel (validation des pas, fin de sortie, retrait).
+  // Régie publicitaire : choix de consentement une seule fois, puis
+  // préchargement des annonces (validation des pas, fin de sortie, retrait).
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
+    (async () => {
+      const [needs, decided] = await Promise.all([needsConsentPrompt(), hasConsentDecision()]);
+      if (needs && !decided) {
+        setConsentPrompt(true);
+        return; // pas d'annonce tant que l'utilisateur n'a pas tranché
+      }
+      await initAds();
+      await prefetchAds();
+    })().catch(console.warn);
+  }, []);
+
+  // « Modifier mes choix publicitaires » (Profil) : le choix est effacé, on
+  // réaffiche l'écran de consentement plutôt que de laisser l'utilisateur sans
+  // publicité ni moyen d'en redonner.
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    const onReset = () => setConsentPrompt(true);
+    window.addEventListener(CONSENT_RESET_EVENT, onReset);
+    return () => window.removeEventListener(CONSENT_RESET_EVENT, onReset);
+  }, []);
+
+  // L'utilisateur vient de trancher : on démarre la régie (refus compris, il
+  // n'y aura alors simplement aucune annonce).
+  const onConsentDone = () => {
+    setConsentPrompt(false);
     initAds()
       .then(() => prefetchAds())
       .catch(console.warn);
-  }, []);
+  };
 
   // Annonce à l'ouverture + au retour sur l'application (App Open Ad).
   // Garde-fous : exemptée tant que l'onboarding n'est pas terminé, plafonnée
@@ -147,6 +190,9 @@ function Shell() {
       </Routes>
       <ProductStatus />
       <TabBar />
+      {/* Bannière Meta sur chaque écran de l'application (vue native). */}
+      <AdBanner />
+      {consentPrompt && <ConsentGate onDone={onConsentDone} />}
     </div>
   );
 }

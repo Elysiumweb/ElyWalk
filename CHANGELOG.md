@@ -1,5 +1,47 @@
 # Changelog
 
+## 1.8.0 — 2026-11-08
+
+Changement de **régie publicitaire** : ElyWalk quitte AdMob (compte refusé par
+Google) pour **Meta Audience Network**, intégré en direct, sans aucune
+plateforme de médiation. Les six moments publicitaires sont conservés.
+
+- **Régie Meta Audience Network.** Nouveau pont natif `MetaAds`
+  (`android/.../MetaAdsPlugin.java`, SDK `com.facebook.android:audience-network-sdk`
+  6.22.0) exposant bannière, interstitiel et interstitiel récompensé. Le plugin
+  AdMob (`@capacitor-community/admob`) et toute la machinerie UMP sont
+  supprimés : plus une seule référence à `ca-app-pub` dans le bundle.
+- **Sans médiation.** Meta est branché en direct (pas de TCF, Meta n'étant pas
+  au registre IAB). `lib/ads.ts` reste volontairement agnostique du SDK : brancher
+  une médiation plus tard ne demandera que de remplacer le pont `NativeAds`.
+- **Les six moments conservés**, chacun sur un placement distinct du
+  Monetization Manager :
+  | Moment | Format | Placement |
+  |---|---|---|
+  | Ouverture de l'application | interstitiel #2 | `…_1712220353757912` |
+  | Validation des pas | interstitiel #2 | `…_1712220353757912` |
+  | Vidéo contre des ElyCoins | interstitiel récompensé #6 | `…_1712220367091244` |
+  | Retrait d'ElyCoins | interstitiel #2 | `…_1712220353757912` |
+  | Chaque page | bannière #1 | `…_1712220347091246` |
+  | Fin de sortie GPS | interstitiel #2 | `…_1712220353757912` |
+- **Bannière sur toute l'application.** Vue native ancrée en bas de la WebView ;
+  sa hauteur est publiée dans `--ad-banner-height`, que la barre d'onglets, les
+  écrans et la carte réservent pour ne jamais passer sous l'annonce.
+- **Consentement (CMP maison).** Écran affiché une seule fois, avant la première
+  requête d'annonce, uniquement dans les zones qui l'exigent (EEE, Royaume-Uni,
+  Suisse ; pays indéterminé traité comme « consentement requis »). Refus =
+  aucune publicité, et le choix est modifiable dans Profil → *Modifier mes choix
+  publicitaires*. Aux États-Unis, Limited Data Use est activé automatiquement
+  (`AdSettings.setDataProcessingOptions`).
+- **Validation serveur des récompenses (S2S).** Nouvelle route Worker
+  `GET /meta-reward` (`token`, `puid`, `pc`, `ptid`) : Meta n'émet
+  `onRewardServerSuccess` qu'après un 200, et c'est le Worker qui crédite
+  (idempotent sur `ptid`, montant plafonné). Tant que `ADS_S2S_REWARD_URL` est
+  vide, repli sur le crédit client borné existant.
+- **`app-ads.txt`.** Enregistrement Meta publié :
+  `facebook.com, 1598870752271390, DIRECT, c3e20eee3f780d68` (vérifié par
+  `scripts/check-app-ads.sh`).
+
 ## 1.7.1 — 2026-11-08
 
 Version de **correctifs** : elle traite le plantage au lancement et les deux

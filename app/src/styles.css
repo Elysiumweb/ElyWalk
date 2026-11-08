@@ -18,6 +18,9 @@
   --radius: 16px;
   --radius-sm: 12px;
   --tabbar-h: 64px;
+  /* Hauteur de la bannière publicitaire, publiée par lib/ads.ts.
+     La barre d'onglets remonte au-dessus de la bannière. */
+  --ad-banner-height: 0px;
   --font-display: 'Orbitron', sans-serif;
   --font-body: 'Space Grotesk', sans-serif;
 }
@@ -57,7 +60,8 @@ h1, h2, h3, .display { font-family: var(--font-display); letter-spacing: 0.04em;
 
 .screen {
   flex: 1;
-  padding: calc(env(safe-area-inset-top, 0px) + 16px) 16px calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px) + 24px);
+  padding: calc(env(safe-area-inset-top, 0px) + 16px) 16px
+           calc(var(--tabbar-h) + var(--ad-banner-height) + env(safe-area-inset-bottom, 0px) + 24px);
   max-width: 520px;
   width: 100%;
   margin: 0 auto;
@@ -72,8 +76,11 @@ h1, h2, h3, .display { font-family: var(--font-display); letter-spacing: 0.04em;
 
 /* ---- Tab bar ---- */
 .tabbar {
-  position: fixed; bottom: 0; left: 0; right: 0;
+  position: fixed; left: 0; right: 0;
+  /* La bannière occupe le bas de l'écran : les onglets passent au-dessus. */
+  bottom: var(--ad-banner-height);
   height: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px));
+  /* L'encart du bas est déjà couvert par la bannière ou par le bord de l'écran. */
   padding-bottom: env(safe-area-inset-bottom, 0px);
   background: rgba(17, 17, 17, 0.97);
   border-top: 1px solid var(--gold-border);
@@ -278,6 +285,29 @@ img.avatar {
 .startup-fallback-logo { width: 96px; height: auto; }
 .startup-fallback-title { font-size: 18px; color: var(--gold); }
 .startup-fallback-body { color: var(--muted); font-size: 14px; max-width: 320px; line-height: 1.6; }
+/* Écran de consentement publicitaire (components/ConsentGate.tsx). */
+.consent-overlay {
+  position: fixed; inset: 0; z-index: 200;
+  display: flex; align-items: flex-end; justify-content: center;
+  background: rgba(0, 0, 0, 0.72);
+  padding: 16px;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+}
+.consent-card {
+  width: 100%; max-width: 520px;
+  background: var(--surface);
+  border: 1px solid var(--gold-border);
+  border-radius: var(--radius);
+  padding: 20px;
+  display: flex; flex-direction: column; gap: 12px;
+  animation: slideUp 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.consent-title { font-family: var(--font-display); font-size: 16px; color: var(--gold); }
+.consent-text { font-size: 13.5px; line-height: 1.65; color: var(--white); }
+.consent-muted { color: var(--muted); font-size: 12.5px; }
+.consent-muted a { color: var(--gold); text-decoration: underline; }
+.consent-actions { display: flex; gap: 10px; margin-top: 4px; }
+.consent-actions .btn { flex: 1; }
 .spinner {
   width: 34px; height: 34px; border-radius: 50%;
   border: 3px solid var(--gold-dim); border-top-color: var(--gold);
@@ -620,7 +650,7 @@ img.podium-avatar {
 /* ---- Écran carte (Leaflet) ---- */
 .map-screen {
   position: relative; flex: 1;
-  height: calc(100vh - var(--tabbar-h) - env(safe-area-inset-bottom, 0px));
+  height: calc(100vh - var(--tabbar-h) - var(--ad-banner-height) - env(safe-area-inset-bottom, 0px));
   overflow: hidden;
 }
 .map-header {

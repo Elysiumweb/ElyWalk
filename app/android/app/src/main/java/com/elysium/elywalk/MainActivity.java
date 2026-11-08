@@ -35,6 +35,9 @@ public class MainActivity extends BridgeActivity {
         // Plugins natifs ElyWalk (podomètre + sortie GPS en arrière-plan).
         registerPlugin(StepCounterPlugin.class);
         registerPlugin(TrackingPlugin.class);
+        // Régie publicitaire Meta Audience Network (bannière, interstitiel,
+        // interstitiel récompensé).
+        registerPlugin(MetaAdsPlugin.class);
 
         // Repli si le moteur de rendu de la WebView meurt (mémoire insuffisante,
         // pilote graphique instable…). Sans ce rappel, Android termine le

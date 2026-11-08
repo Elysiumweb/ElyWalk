@@ -10,8 +10,9 @@ L'`applicationId` / `appId` est désormais **`com.elysium.elywalk`** (fini
    empreinte SHA-1 (le keystore n'a pas changé), puis **retélécharger
    `google-services.json`** et remplacer `app/google-services.json` **et**
    `app/android/app/google-services.json`.
-2. **AdMob** : enregistrer (ou renommer) l'application `com.elysium.elywalk`
-   pour que les IDs de blocs restent valides.
+2. **Meta Audience Network** : aucun renommage à faire (le Monetization Manager
+   ne connaît pas l'`applicationId` Android, seulement l'app liée au Play
+   Store). Vérifier en revanche que l'app reste **liée** au Play Store.
 3. **Play Console** : créer la fiche de l'app avec `com.elysium.elywalk`.
 
 Les réglages suivants ont déjà été propagés dans le code :
@@ -161,7 +162,8 @@ Les Cloud Functions Firebase exigent le plan payant **Blaze**. ElyWalk utilise
 donc un **Cloudflare Worker** gratuit (voir `worker/README.md`) qui fournit :
 
 - l'attestation **Play Integrity** (`/verify-integrity`) ;
-- la vérification **AdMob SSV** (`/ssv`) ;
+- la validation serveur des récompenses **Meta S2S** (`/meta-reward`, et
+  `/ssv` pour l'historique AdMob) ;
 - l'envoi de **push FCM** (`/fcm/send`) ;
 - la consommation des jetons FCM via **cron** (`/cron/process-notifications`) ;
 - la file de retraits (`/cron/process-payouts`).
@@ -198,9 +200,9 @@ npx cap sync android
 npx cap open android
 ```
 
-La version Android est `8 / 1.7.1` (chaque envoi doit porter un `versionCode`
+La version Android est `9 / 1.8.0` (chaque envoi doit porter un `versionCode`
 strictement supérieur au précédent : 4 = 1.4.0, 5 = 1.5.0, 6 = 1.6.0,
-7 = 1.7.0 publiée, 8 = 1.7.1).
+7 = 1.7.0 publiée, 8 = 1.7.1, 9 = 1.8.0).
 
 > ⚠️ **Toujours construire depuis `main`.** La version 7 publiée sur Play a été
 > produite depuis une branche de travail créée avant la 1.6.0 : elle ne
@@ -373,11 +375,11 @@ bundletool build-apks --bundle=app/build/outputs/bundle/release/app-release.aab 
 Les avertissements disparaissent sur la version **suivante** : Play ne réévalue
 pas un build déjà publié.
 
-### `app-ads.txt` (validation AdMob)
+### `app-ads.txt` (validation Meta Audience Network)
 
 **État : fichier en ligne, validation en attente de la mise en production.**
 
-Le robot d'AdMob explore une seule URL : la racine du champ *Site Web* de la
+Le robot de Meta explore une seule URL : la racine du champ *Site Web* de la
 fiche Play. Cette fiche déclare `https://elysium-esport.fr` (Play Console →
 *Paramètres du Store* → *Coordonnées sur la fiche Play Store*), site hébergé
 sur **Vercel**. L'URL explorée est donc :
@@ -389,20 +391,22 @@ https://elysium-esport.fr/app-ads.txt     ← en ligne (2026-11-02)
 ⚠️ **Le déploiement Firebase n'est pas exploré** tant que la fiche Play
 déclare ce domaine. Le fichier versionné ici (`app/public/app-ads.txt`,
 publié sur `elywalk-2f7ba.web.app`) n'est qu'un **miroir** : la source de
-vérité pour AdMob est le dépôt Vercel du site.
+vérité est le dépôt Vercel du site.
 
 Il reste deux conditions, hors de ce dépôt :
 
 1. l'application doit être **publiée en production** sur le Play Store (le
    robot lit le site du développeur sur la fiche **publique** ; une app en
    test fermé n'en a pas) ;
-2. compter jusqu'à 24 h d'exploration, puis *Vérifier les modifications* dans
-   AdMob → *Applications → app-ads.txt*.
+2. compter jusqu'à 24 h d'exploration, puis *Vérifier* dans le Monetization
+   Manager → *App Settings → app-ads.txt*.
 
-Contenu exact, une seule ligne :
+Contenu exact (l'enregistrement Meta est celui qui compte depuis la 1.8.0 ;
+la ligne `google.com` est conservée pour l'historique et ne gêne pas) :
 
 ```text
 google.com, pub-5316598937383510, DIRECT, f08c47fec0942fa0
+facebook.com, 1598870752271390, DIRECT, c3e20eee3f780d68
 ```
 
 #### Option A (recommandée) — déposer le fichier sur `elysium-esport.fr` (Vercel)
@@ -507,8 +511,8 @@ cd .. && firebase deploy --only hosting
 sur `/app-ads.txt` (la réécriture `** → /index.html` ne masque pas les
 fichiers statiques).
 
-Ensuite, dans AdMob → *Applications → app-ads.txt*, cliquer sur **Vérifier les
-modifications** (ou *Rechercher à nouveau*). L'exploration peut prendre jusqu'à
+Ensuite, dans le Monetization Manager → *App Settings → app-ads.txt*, cliquer
+sur **Vérifier** (ou *Rechercher à nouveau*). L'exploration peut prendre jusqu'à
 24 h. Tant que le fichier n'est pas validé, une partie des acheteurs
 programmatiques refuse d'enchérir : moins d'annonces remplies et un revenu
 par mille plus faible.
@@ -563,155 +567,162 @@ un suffixe public, donc `elywalk-2f7ba.web.app` est bien une racine de domaine.
 paiements) : `app-ads.txt` ne valide que l'autorisation de vente de
 l'inventaire.
 
-## Publicités AdMob (F24 / F25)
+## Publicités Meta Audience Network (F24 / F25)
 
-Compte AdMob ElyWalk — **ID d'application** :
-`ca-app-pub-5316598937383510~4963026878`
+Depuis la **1.8.0**, ElyWalk n'utilise plus AdMob (compte refusé par Google) ni
+aucune plateforme de médiation : la régie est **Meta Audience Network**,
+intégrée en direct.
 
-| Format | Bloc d'annonces | Déclenchement |
+| Élément | Valeur |
+| --- | --- |
+| Application (propriété) | `1712220190424595` |
+| Bannière #1 | `1712220190424595_1712220347091246` |
+| Interstitiel #2 | `1712220190424595_1712220353757912` |
+| Rectangle moyen #3 | `1712220190424595_1712220350424579` |
+| Natif #4 | `1712220190424595_1712220357091245` |
+| Bannière native #5 | `1712220190424595_1712220360424578` |
+| Interstitiel récompensé #6 | `1712220190424595_1712220367091244` |
+| SDK Android | `com.facebook.android:audience-network-sdk:6.22.0` |
+
+Ces identifiants sont déclarés à **un seul endroit** : `app/src/lib/constants.ts`
+(`META_APP_ID`, `META_PLACEMENT_*`, `AD_PLACEMENTS`). L'`APP_ID` est répété dans
+`android/app/src/main/AndroidManifest.xml`
+(`com.facebook.sdk.ApplicationId`) : les deux doivent rester identiques.
+
+### Les six moments publicitaires
+
+| Moment | Format | Placement |
 | --- | --- | --- |
-| Annonce à l'ouverture | `ca-app-pub-5316598937383510/6986554989` | Lancement + retour dans l'app (plafond 2/jour, cooldown 10 min, jamais pendant l'onboarding) |
-| Interstitiel | `ca-app-pub-5316598937383510/7972992736` | Validation des pas, fin d'une sortie, demande de retrait (60 s minimum entre deux) |
-| Vidéo avec récompense | `ca-app-pub-5316598937383510/9832210178` | « Regarder une pub pour gagner 0,1 ElyCoins » (1/h, SSV avec `userId`) |
+| Ouverture de l'application | interstitiel | #2 |
+| Validation des pas | interstitiel | #2 |
+| Vidéo contre 0,1 ElyCoin | interstitiel récompensé | #6 |
+| Demande de retrait | interstitiel | #2 |
+| Chaque page | bannière | #1 |
+| Fin d'une sortie GPS | interstitiel | #2 |
 
-Ces valeurs sont déclarées à **deux endroits qui doivent rester synchronisés** :
+Meta ne propose **ni** format « App Open » **ni** vidéo récompensée séparée :
+l'ouverture passe par l'interstitiel (plafond 2/jour, cooldown 10 min, jamais
+pendant l'onboarding) et la récompense par l'interstitiel récompensé.
 
-- `app/src/lib/constants.ts` (`ADMOB_APP_ID`, `AD_UNIT_*`) ;
-- `app/android/app/src/main/AndroidManifest.xml`
-  (`com.google.android.gms.ads.APPLICATION_ID`).
+Les placements #3, #4 et #5 sont déclarés mais pas encore utilisés : ils sont
+prêts pour de futurs encarts (rectangle en fin d'article, natif dans le fil).
 
-Un ID d'application qui ne correspond pas au compte propriétaire des blocs =
-**zéro annonce** (c'était la panne de la 1.4.0). Le manifeste active aussi
-`OPTIMIZE_INITIALIZATION` / `OPTIMIZE_AD_LOADING` (moins d'ANR au démarrage).
+### Checklist Meta avant publication
 
-Checklist console AdMob avant publication :
+- [ ] **`app-ads.txt`** publié à la racine du site déclaré sur la fiche Play :
+      `facebook.com, 1598870752271390, DIRECT, c3e20eee3f780d68`
+      (vérifiable avec `npm run check:app-ads`).
+- [ ] **Client Token** renseigné dans
+      `android/app/src/main/res/values/strings.xml`
+      (`facebook_client_token`, actuellement `VOTRE_CLIENT_TOKEN_META`).
+      Il se lit dans le Monetization Manager → *Paramètres → Avancé*. Un jeton
+      absent ou erroné ⇒ **aucun remplissage**.
+- [ ] L'application est **liée au Play Store** dans le Monetization Manager : une
+      app non liée ne reçoit que des annonces de test.
+- [ ] Les six placements sont **actifs** (un placement neuf peut rester sans
+      impression quelques heures).
+- [ ] Paiements et fiscalité validés.
+- [ ] Pour tester, utiliser les identifiants de test
+      (`IMG_16_9_APP_INSTALL#<placement>`) ou déclarer l'appareil via
+      `AdSettings.addTestDevice(...)`. Ne jamais cliquer sur ses propres
+      annonces de production (trafic invalide = suspension).
 
-- [ ] L'application `com.elysium.elywalk` est **liée au Play Store** dans AdMob
-      (*Applications → Paramètres de l'application*).
-- [ ] `app-ads.txt` **validé** (voir la section dédiée plus haut) : le fichier
-      doit répondre en 200 à la racine du site déclaré sur la fiche Play.
-- [ ] Les trois blocs d'annonces sont **actifs** (un bloc tout juste créé peut
-      rester sans impression pendant quelques heures).
-- [ ] *Confidentialité et messages → Message RGPD* : message **publié** pour
-      l'EEE/UK, sinon `canRequestAds` reste `false` en Europe et aucune annonce
-      n'est diffusée (l'app l'indique dans Profil → *Confidentialité des
-      annonces*).
-- [ ] *Confidentialité et messages → Options de confidentialité* activées
-      (bouton de révision du consentement exigé par le RGPD).
-- [ ] Paiements et fiscalité validés : un compte non vérifié ne reçoit que des
-      annonces vides.
-- [ ] Pour tester sans risque d'« invalid traffic », utiliser un appareil de
-      test déclaré dans AdMob ou les blocs de test Google.
+### Consentement (CMP maison)
 
-### Pourquoi les annonces sortent sur Orbit Hop et pas sur ElyWalk
+Meta **n'est pas** signataire du TCF : il n'y a ni formulaire IAB ni chaîne de
+consentement (`IABTCF_*`). ElyWalk affiche donc son **propre écran de
+consentement** (`src/components/ConsentGate.tsx`), avec deux boutons de poids
+égal (Accepter / Refuser), une seule fois par installation :
 
-Comparaison faite ligne à ligne avec `Elysiumweb/Orbit-Hop` :
+- zones concernées : **EEE, Royaume-Uni, Suisse** — et **pays indéterminé**
+  (traité par prudence comme « consentement requis ») ;
+- refus ⇒ `canShowAds()` reste `false`, aucune requête d'annonce n'est émise ;
+- choix modifiable à tout moment : **Profil → Modifier mes choix publicitaires** ;
+- **États-Unis** : Limited Data Use activé automatiquement
+  (`AdSettings.setDataProcessingOptions(new String[]{"LDU"})`).
 
-| | Orbit Hop | ElyWalk |
-| --- | --- | --- |
-| Compte AdMob | `pub-5316598937383510` | **le même** |
-| `app-ads.txt` | `google.com, pub-5316598937383510, DIRECT, f08c47fec0942fa0` | **identique** |
-| ID d'application | `~9596939280` | `~4963026878` |
-| SDK | Google Mobile Ads natif (Kotlin) | même SDK, via `@capacitor-community/admob` |
-| Consentement | UMP, `MobileAds.initialize()` inconditionnel, chargement conditionné à `canRequestAds` | **même logique** (`lib/ads.ts`) |
-| Identifiants en debug | **blocs de test Google** | production (jusqu'à la 1.6.0) |
-| Publication Play | production | production |
+La région est déduite de la locale système (`fr-FR` → FR). Ce n'est pas une
+géolocalisation : un appareil configuré en anglais américain mais physiquement
+en France verra donc la règle américaine. Pour fermer cet écart, remplacer
+`detectRegion()` dans `src/lib/ads.ts` par un appel à
+`Device.getInfo()` complété d'une API de pays (ou d'un en-tête `CF-IPCountry`
+renvoyé par le Worker).
 
-Le compte, le fichier et le code ne sont donc pas en cause. Deux écarts
-expliquent la différence :
+### Validation serveur des récompenses (S2S)
 
-1. **Orbit Hop est testé en `debug`, donc avec les blocs de test Google**, qui
-   sont *toujours* remplis quel que soit l'état du compte. Ce n'est pas une
-   preuve que la production fonctionne. ElyWalk utilisait les vrais blocs
-   partout : si la régie ne renvoie rien, l'écran reste vide.
-   → `VITE_TEST_ADS=1 npm run build && npx cap sync android` construit
-   maintenant ElyWalk avec les mêmes blocs de test. Si les annonces
-   apparaissent ainsi, **le câblage est bon** et le problème est côté console
-   AdMob. (Ne jamais publier un AAB construit ainsi.)
-2. **Les réglages AdMob qui bloquent la diffusion sont par application**, pas
-   par compte. À vérifier pour ElyWalk, en comparant avec la fiche Orbit Hop :
-   - *Applications → ElyWalk → Paramètres* : **associée au Play Store** ?
-   - *État de l'application* : « Prêt », « Examen requis » ou « Diffusion
-     limitée » ? Depuis janvier 2025, une nouvelle application doit passer la
-     vérification `app-ads.txt` **et** l'examen de préparation avant de
-     diffuser à plein régime.
-   - *Confidentialité et messages → Message RGPD* : le message publié
-     couvre-t-il **ElyWalk** ? La liste des applications est à cocher message
-     par message ; un message publié pour Orbit Hop seul laisse ElyWalk sans
-     formulaire, donc `canRequestAds = false` en France.
-   - *Blocs d'annonces* : créés il y a moins de quelques heures = inventaire
-     encore vide, normal.
+Sans validation, un utilisateur pourrait forger l'appel `showRewardedAd()` et
+s'attribuer des ElyCoins. Meta propose une validation **S2S** :
+
+1. Déployer le Worker (`/worker/README.md`) et créer le secret :
+
+   ```bash
+   cd worker && npx wrangler deploy
+   npx wrangler secret put META_CLIENT_TOKEN   # = Client Token de l'app
+   ```
+
+2. Dans le Monetization Manager, sur le placement #6 →
+   *Server Side Reward Validation* → URL
+   `https://<worker>/meta-reward`.
+3. Renseigner la même URL dans `app/src/lib/constants.ts`
+   (`ADS_S2S_REWARD_URL`), puis reconstruire l'application.
+
+Fonctionnement : Meta appelle
+`/meta-reward?token=…&puid=…&pc=Coins1&ptid=…` ; le Worker vérifie le jeton
+(comparaison à temps constant), plafonne le montant et crédite de façon
+idempotente (`ptid`). Réponse **200** ⇒ `onRewardServerSuccess` ⇒ l'app affiche
+la récompense. Toute autre réponse ⇒ pas de crédit.
+
+Tant que `ADS_S2S_REWARD_URL` est vide, l'app retombe sur le **crédit client**
+existant (`creditAdReward`, borné à 1 récompense/heure par les règles
+Firestore). C'est le mode par défaut de la 1.8.0 : il fonctionne, mais reste
+plus fragile qu'une validation serveur.
 
 ### Lire l'état réel depuis l'appareil
 
-Profil → *Confidentialité des annonces* affiche désormais une phrase
-d'interprétation et un bloc **Diagnostic technique** (copiable) :
+Profil → *Confidentialité des annonces* affiche une phrase d'interprétation et
+un bloc **Diagnostic technique** (copiable) :
 
 ```text
-natif          : oui
-SDK initialisé : oui
-consentement   : REQUIRED | OBTAINED | NOT_REQUIRED | UNKNOWN
-formulaire     : oui/non
-canRequestAds  : oui/non
-interstitiel   : oui/non
-dernière erreur: …
-annonces test  : non
+natif            : oui
+SDK initialisé   : oui
+consentement     : granted | denied | pending
+région           : FR
+consentement req.: oui
+limited data use : non
+interstitiel     : oui/non
+récompensé       : oui/non
+bannière         : oui/non
+dernière erreur  : …
 ```
 
 Lecture :
 
-- `consentement = REQUIRED` **et** `formulaire = non` → message RGPD non publié
-  pour ElyWalk dans AdMob ;
-- `canRequestAds = oui` mais `dernière erreur` contient *no fill* → la régie
-  est bien interrogée et ne renvoie rien : application pas encore validée /
-  associée, ou inventaire vide ;
-- `SDK initialisé = non` → problème d'initialisation (réseau, plugin).
+- `consentement = pending` ⇒ l'écran de consentement n'a pas encore été
+  présenté (ou a été réinitialisé depuis le profil) ;
+- `consentement = denied` ⇒ aucune annonce, c'est le comportement attendu ;
+- `dernière erreur` contient *no fill* ⇒ la régie répond mais ne remplit pas :
+  app non liée au Play Store, placements inactifs, `app-ads.txt` non vu, ou
+  Client Token invalide ;
+- `SDK initialisé = non` ⇒ problème d'initialisation (réseau, Play Services).
 
-### ⚠️ Message RGPD manquant = zéro annonce en Europe
+### Brancher une médiation plus tard
 
-**Cause confirmée de l'absence d'annonces en production.** Aucun message de
-consentement n'était créé dans la console AdMob. Depuis janvier 2024, Google
-impose une **CMP certifiée** pour tout trafic EEE/UK : sans message publié, les
-demandes d'annonces venant d'Europe ne sont pas remplies — l'application
-fonctionne, le SDK s'initialise, mais l'inventaire reste vide. Les annonces de
-test (`VITE_TEST_ADS=1`) continuent de s'afficher : c'est le signe que le
-câblage est bon et que le blocage est côté console.
-
-Procédure (console AdMob, ~5 minutes) :
-
-1. **Confidentialité et messages** → onglet **RGPD** → *Créer un message*.
-2. Sélectionner **ElyWalk** dans la liste des applications. ⚠️ La sélection se
-   fait application par application : un message publié pour Orbit Hop ne
-   couvre pas ElyWalk.
-3. Régions : **EEE et Royaume-Uni** (valeur par défaut).
-4. Choix de l'utilisateur : garder **Consentir / Gérer les options** et, si
-   vous voulez maximiser le remplissage, activer aussi *Refuser* (obligatoire
-   dans plusieurs pays, dont la France — la CNIL exige un refus aussi simple
-   que l'acceptation).
-5. Partenaires publicitaires : laisser la sélection Google par défaut
-   (sinon le remplissage chute).
-6. Langue, logo, lien vers la politique de confidentialité
-   (`https://elywalk-2f7ba.web.app/privacy.html`).
-7. **Publier** — un message enregistré mais non publié ne sert à rien.
-8. Onglet **Options de confidentialité** (IAB/CNIL) : créer et publier aussi
-   ce message. Il alimente le bouton *Confidentialité des annonces* du profil
-   et conditionne `privacyOptionsRequirementStatus`.
-9. Côté application : rien à redéployer. Forcer la relecture en vidant les
-   données de l'app, ou attendre : l'UMP réinterroge à chaque lancement.
-
-Contrôle : Profil → *Confidentialité des annonces* doit afficher
-`consentement : REQUIRED` puis, après le formulaire, `OBTAINED` et
-`canRequestAds : oui`. Tant qu'il affiche `NOT_REQUIRED` avec
-`formulaire : non`, aucun message n'est publié pour cette application.
+Tout le cadencement (délais, plafonds, consentement, diagnostic) vit dans
+`src/lib/ads.ts` et ne dépend d'aucun SDK : seule l'implémentation de l'objet
+`NativeAds` (le pont `registerPlugin('MetaAds')`) est propre à Meta. Le jour où
+une médiation (AppLovin MAX, Unity LevelPlay…) est ajoutée, il suffira de faire
+pointer ce pont vers le SDK de médiation et d'y déclarer les placements Meta
+comme source — le reste de l'application, y compris les six moments, ne bouge
+pas.
 
 ## Consentement publicitaire RGPD (F03)
 
-AdMob est initialisé avec le module de consentement Google **UMP** (Funding
-Choices) : avant toute annonce, le formulaire de consentement est affiché pour
-les utilisateurs de l'EEE/UK. L'utilisateur peut le réviser à tout moment
-(Profil → *Confidentialité des annonces*), où s'affiche également l'état réel
-de la régie (annonces actives / indisponibles). Créer et **publier** le
-**message RGPD** dans la console AdMob → *Confidentialité et messages*.
+Le consentement est recueilli par l'**écran maison** décrit ci-dessus
+(`ConsentGate`), affiché avant la première requête d'annonce pour l'EEE, le
+Royaume-Uni, la Suisse et les pays non identifiés. Le choix est stocké dans
+`Preferences` (`ads.consent.v1`) et peut être révisé depuis
+**Profil → Modifier mes choix publicitaires**. Aucune annonce n'est chargée
+tant que l'utilisateur n'a pas accepté.
 
 ## Notifications (F10)
 
@@ -723,8 +734,8 @@ Aucune permission n'est demandée de façon inconditionnelle.
 
 - Les mentions légales (`LegalPage.tsx`) sont complètes (CGU, confidentialité,
   mentions légales). Mettre à jour la **fiche Play « Sécurité des données »** en
-  cohérence : publicité (AdMob), géolocalisation, activité physique/santé, âge
-  minimum 15 ans.
+  cohérence : publicité (**Meta Audience Network**, plus AdMob), géolocalisation,
+  activité physique/santé, âge minimum 15 ans.
 - Configurer `contact@elysium-esport.fr` comme adresse d'assistance Play Store.
 - Vérifier les modèles d'e-mails Firebase Authentication (vérification,
   changement d'e-mail) et les domaines autorisés.
@@ -735,6 +746,9 @@ Aucune permission n'est demandée de façon inconditionnelle.
 
 Firestore borne toujours les montants (validation quotidienne ≤ 60 000 pas,
 récompense publicitaire ≤ 1/h, débits atomiques). Le Worker apporte l'attestation
-forte manquante (Play Integrity + AdMob SSV) : sans jeton vérifié côté serveur,
-le client ne peut pas créditer son solde sur une preuve externe. Reste à brancher
+forte manquante (Play Integrity, et validation Meta S2S dès que
+`ADS_S2S_REWARD_URL` est renseignée) : sans jeton vérifié côté serveur, le client
+ne peut pas créditer son solde sur une preuve externe. **Tant que le S2S Meta
+n'est pas activé**, la récompense reste créditée côté client : le plafond
+d'1 récompense/heure (règles Firestore) limite l'abus mais ne l'empêche pas. Reste à brancher
 un prestataire de paiement réel (PayPal Payouts) pour l'exécution des retraits.

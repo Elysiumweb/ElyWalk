@@ -66,6 +66,7 @@
 # vitesse) tout en conservant la classe et ses noms, indispensables au pont.
 -keep,allowoptimization class com.elysium.elywalk.StepCounterPlugin { *; }
 -keep,allowoptimization class com.elysium.elywalk.TrackingPlugin { *; }
+-keep,allowoptimization class com.elysium.elywalk.MetaAdsPlugin { *; }
 # Widget, services de premier plan, receiver et activité : instanciés par le
 # système à partir du manifeste (R8 les conserve déjà, on le rend explicite).
 -keep class com.elysium.elywalk.ElyWalkWidget { *; }
@@ -74,11 +75,21 @@
 -keep class com.elysium.elywalk.BootReceiver { *; }
 -keep class com.elysium.elywalk.MainActivity { *; }
 
-# --- Facebook (dépendance optionnelle du plugin Firebase Authentication) ---
-# Le plugin compile contre Facebook Login mais ne l'embarque pas : sans ces
-# règles, R8 signale des classes manquantes et peut faire échouer son passage.
--dontwarn com.facebook.**
--keep class com.facebook.** { *; }
+# --- Meta Audience Network (régie publicitaire) et Facebook Login ---------
+# Le SDK Audience Network est désormais embarqué (publicité principale de
+# l'application) : ses classes sont résolues par réflexion interne et par le
+# manifeste fusionné (com.facebook.ads.AudienceNetworkActivity). On les
+# conserve telles quelles.
+#
+# `com.facebook.login.**` reste une dépendance optionnelle du plugin Firebase
+# Authentication (compilée mais non embarquée) : -dontwarn évite un échec R8.
+-keep class com.facebook.ads.** { *; }
+-keep class com.facebook.ads.internal.** { *; }
+# Note : `-keep class … { *; }` préserve déjà ces classes ET leurs noms
+# (l'obfuscation est écartée par `-keep`), inutile d'ajouter un `-dontobfuscate`
+# global qui désactiverait l'obfuscation de toute l'application.
+-dontwarn com.facebook.login.**
+-dontwarn com.facebook.appevents.**
 
 # --- Avertissements des SDK tiers -----------------------------------------
 # Classes optionnelles référencées mais absentes du classpath : elles ne
