@@ -1,6 +1,7 @@
 package com.elysium.elywalk;
 
 import android.Manifest;
+import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
@@ -46,8 +47,7 @@ public class StepCounterPlugin extends Plugin {
             requestNeededPermissions(call, "onStartPerms");
             return;
         }
-        launchService();
-        resolveToday(call);
+        if (launchService(call)) resolveToday(call);
     }
 
     @PermissionCallback
@@ -56,8 +56,7 @@ public class StepCounterPlugin extends Plugin {
             call.reject("Permission ACTIVITY_RECOGNITION refusée");
             return;
         }
-        launchService();
-        resolveToday(call);
+        if (launchService(call)) resolveToday(call);
     }
 
     @PluginMethod
@@ -129,11 +128,13 @@ public class StepCounterPlugin extends Plugin {
         }
     }
 
-    private void launchService() {
+    private boolean launchService(PluginCall call) {
         try {
             StepCounterService.start(getContext());
-        } catch (Exception ignored) {
-            // Relancé au prochain onStart / boot.
+            return true;
+        } catch (RuntimeException e) {
+            call.reject("Impossible de démarrer le compteur de pas", e);
+            return false;
         }
     }
 
