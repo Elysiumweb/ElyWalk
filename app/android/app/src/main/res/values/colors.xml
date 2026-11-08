@@ -4,4 +4,9 @@
     <color name="elywalkBackground">#0B0B0C</color>
     <color name="elywalkBlack">#111111</color>
     <color name="elywalkGold">#D8CA82</color>
+
+    <!-- Couleurs de thème AppCompat (barre d'action héritée, sélecteurs). -->
+    <color name="colorPrimary">#D8CA82</color>
+    <color name="colorPrimaryDark">#0B0B0C</color>
+    <color name="colorAccent">#D8CA82</color>
 </resources>

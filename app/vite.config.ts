@@ -17,4 +17,9 @@ export default defineConfig({
     outDir: 'dist',
     sourcemap: false,
   },
+  // Les tests du filet de sécurité du démarrage ont besoin d'un DOM (jsdom) ;
+  // les autres suites restent pures et s'exécutent aussi sous jsdom sans effet.
+  test: {
+    environment: 'jsdom',
+  },
 });

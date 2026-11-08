@@ -44,10 +44,27 @@ public class StepCounterService extends Service implements SensorEventListener {
         ContextCompat.startForegroundService(ctx.getApplicationContext(), i);
     }
 
+    /**
+     * Variante silencieuse : utilisée au démarrage de l'application et après un
+     * redémarrage. Sur certaines ROM (MIUI, ColorOS…) le système refuse de
+     * lancer un service de premier plan en arrière-plan ; l'exception
+     * {@code ForegroundServiceStartNotAllowedException} ne doit pas remonter
+     * jusqu'à l'interface.
+     */
+    public static boolean startQuietly(Context ctx) {
+        try {
+            start(ctx);
+            return true;
+        } catch (RuntimeException e) {
+            Log.w("ElyWalkSteps", "Démarrage du service de pas différé", e);
+            return false;
+        }
+    }
+
     @Override
     public void onCreate() {
         super.onCreate();
-        createChannel();
+        // Promotion en premier plan immédiate (délai système de 5 s).
         if (!promoteToForeground()) return;
         sensorManager = (SensorManager) getSystemService(SENSOR_SERVICE);
         if (sensorManager != null) {
@@ -56,10 +73,10 @@ public class StepCounterService extends Service implements SensorEventListener {
                 // SENSOR_DELAY_NORMAL : basse consommation, suffisant pour des pas.
                 try {
                     sensorManager.registerListener(this, stepSensor, SensorManager.SENSOR_DELAY_NORMAL);
-                } catch (SecurityException e) {
-                    Log.w("ElyWalkSteps", "Activity recognition permission unavailable", e);
-                    stopSelf();
-                    return;
+                } catch (RuntimeException e) {
+                    // SecurityException (permission) ou capteur indisponible :
+                    // le service reste vivant mais ne compte plus, sans tuer l'appli.
+                    Log.w("ElyWalkSteps", "Step counter sensor unavailable", e);
                 }
             }
         }
@@ -106,12 +123,28 @@ public class StepCounterService extends Service implements SensorEventListener {
         if (event == null || event.sensor == null) return;
         if (event.sensor.getType() != Sensor.TYPE_STEP_COUNTER) return;
         long value = (long) event.values[0];
-        int today = StepStore.applySensorValue(this, value);
+        // Un capteur défaillant ne doit jamais faire planter le service (ni,
+        // via le pont Capacitor, remonter jusqu'à l'interface).
+        int today;
+        try {
+            today = StepStore.applySensorValue(this, value);
+        } catch (RuntimeException e) {
+            Log.e("ElyWalkSteps", "Lecture des pas impossible", e);
+            return;
+        }
         StepsListener l = listener;
         if (l != null) {
-            l.onSteps(today);
+            try {
+                l.onSteps(today);
+            } catch (RuntimeException e) {
+                Log.w("ElyWalkSteps", "Notification du pont JS en échec", e);
+            }
         }
-        ElyWalkWidget.updateAll(this);
+        try {
+            ElyWalkWidget.updateAll(this);
+        } catch (RuntimeException e) {
+            Log.w("ElyWalkSteps", "Mise à jour du widget impossible", e);
+        }
         if (lastNotifiedSteps < 0 || Math.abs(today - lastNotifiedSteps) >= 10) {
             lastNotifiedSteps = today;
             updateNotification(today);
@@ -136,6 +169,9 @@ public class StepCounterService extends Service implements SensorEventListener {
     }
 
     private Notification buildNotification(int steps) {
+        // Le canal doit exister avant la notification : sur Android 8+, poster
+        // sur un canal absent fait échouer startForeground().
+        createChannel();
         Intent launch = new Intent(this, MainActivity.class);
         launch.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         PendingIntent pi = PendingIntent.getActivity(

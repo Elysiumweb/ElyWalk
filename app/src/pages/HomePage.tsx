@@ -73,17 +73,24 @@ export default function HomePage() {
   useEffect(() => {
     let unsub: (() => void) | undefined;
     (async () => {
-      const persisted = await pedometer.loadPersisted();
-      setSteps(persisted);
-      unsub = pedometer.subscribe(setSteps);
-      if (!isNative) {
+      // Toute erreur native (plugin absent, service de premier plan refusé)
+      // doit dégrader l'écran sans le faire planter.
+      try {
+        const persisted = await pedometer.loadPersisted();
+        setSteps(persisted);
+        unsub = pedometer.subscribe(setSteps);
+        if (!isNative) {
+          setPerm('unavailable');
+          return;
+        }
+        const p = await pedometer.checkPermission();
+        setPerm(p);
+        if (p === 'granted') {
+          await pedometer.start();
+        }
+      } catch (e) {
+        console.warn('[Pedometer] initialisation impossible', e);
         setPerm('unavailable');
-        return;
-      }
-      const p = await pedometer.checkPermission();
-      setPerm(p);
-      if (p === 'granted') {
-        await pedometer.start();
       }
     })();
     return () => {

@@ -198,8 +198,21 @@ npx cap sync android
 npx cap open android
 ```
 
-La version Android est `6 / 1.6.0` (chaque envoi doit porter un `versionCode`
-strictement supérieur au précédent : 4 = 1.4.0, 5 = 1.5.0, 6 = 1.6.0).
+La version Android est `8 / 1.7.1` (chaque envoi doit porter un `versionCode`
+strictement supérieur au précédent : 4 = 1.4.0, 5 = 1.5.0, 6 = 1.6.0,
+7 = 1.7.0 publiée, 8 = 1.7.1).
+
+> ⚠️ **Toujours construire depuis `main`.** La version 7 publiée sur Play a été
+> produite depuis une branche de travail créée avant la 1.6.0 : elle ne
+> contenait ni le bord à bord, ni R8, ni les correctifs de stabilité — d'où les
+> deux avertissements de la console **et** le plantage au lancement. Avant
+> chaque `bundleRelease`, vérifier les deux marqueurs :
+>
+> ```bash
+> grep -m1 versionName android/app/build.gradle   # doit être la version attendue
+> grep -m1 minifyEnabled android/app/build.gradle # doit être « true »
+> git log --oneline -1                             # doit être le commit de main voulu
+> ```
 
 ### Build de production (AAB signé)
 
@@ -241,10 +254,11 @@ Réglages actuels (`app/android/app/build.gradle`, `gradle.properties`,
 - `minifyEnabled true` + `shrinkResources true` ;
 - `android.enableR8.fullMode=true` (optimisations inter-classes, fusion de
   classes, analyse de nullité) ;
-- `-allowaccessmodification` + `-repackageclasses ''` : R8 peut élargir la
-  visibilité des membres et regrouper tout le code non conservé dans un paquet
-  racine — ce sont les deux réglages qui font monter les pourcentages
-  d'obscurcissement et d'optimisation mesurés par Play ;
+- pas de `-repackageclasses ''` ni de `-allowaccessmodification` : Play évalue
+  la réduction et l'optimisation (`minifyEnabled`, `shrinkResources`, mode
+  complet), pas ces deux drapeaux. Ils déplacent des classes que certains SDK
+  retrouvent par leur nom complet — gain marginal, risque de plantage réel, et
+  impossible à tester sans APK release ;
 - `org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=512m` : le mode complet de
   R8 dépasse les 1,5 Go d'origine sur ce projet (Firebase + Google Mobile Ads)
   et échouerait en `OutOfMemoryError` ;
@@ -253,7 +267,14 @@ Réglages actuels (`app/android/app/build.gradle`, `gradle.properties`,
   `assets/capacitor.plugins.json`, plugins natifs `StepCounterPlugin` /
   `TrackingPlugin`, widget, services de premier plan, interfaces JavaScript) ;
 - `app/android/app/src/main/res/raw/keep.xml` protège les ressources
-  référencées par nom (icône de notification, splash, widget, launcher).
+  référencées par nom (icône de notification, splash, widget, launcher) ;
+- `android.enableR8.keepLineNumbers=true` : numéros de ligne conservés dans les
+  traces de pile (diagnostic Play Console) sans désactiver l'obscurcissement ;
+- règles ajoutées en 1.7.1 : `app.capgo.pedometer.**` (plugin podomètre tiers,
+  **sans** règles « consumer »), `MainActivity`, et `-dontwarn` sur la
+  dépendance optionnelle Facebook du plugin Firebase Authentication. Une règle
+  manquante transforme l'optimisation en plantage : après toute modification,
+  vérifier un APK release réel.
 
 Le fichier de correspondance R8 (`mapping.txt`) est inclus automatiquement dans
 l'AAB : les rapports de plantage Play restent lisibles.
@@ -264,39 +285,93 @@ GPS, partage et widget.
 
 ### Affichage de bord à bord (Android 15 / SDK 35+)
 
-- `MainActivity.enableEdgeToEdgeCompat()` active le bord à bord **sans API
-  obsolète** : `WindowCompat.setDecorFitsSystemWindows(false)` et
-  `LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS` (API 30+) à la place de
-  `LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES`, déprécié dans Android 15.
-- Les couleurs transparentes des barres viennent du thème
-  (`res/values/styles.xml`), jamais de `Window#setStatusBarColor`.
+Deux avertissements Play sont visés : « il se peut que l'affichage de bord à
+bord ne soit pas disponible pour tous les utilisateurs » et « votre appli
+utilise des API ou des paramètres obsolètes pour l'affichage de bord à bord ».
+
+- `MainActivity.enableEdgeToEdgeCompat()` appelle
+  **`WindowCompat.enableEdgeToEdge(getWindow())`** (androidx.core **1.17.0**,
+  déjà amené par Capacitor). C'est l'API recommandée par Google : elle applique
+  le bord à bord de façon **rétrocompatible** (toutes les versions d'Android),
+  rend les barres transparentes et gère les contrastes, sans que le code de
+  l'application n'appelle directement les API dépréciées.
+- Un `catch (Throwable)` entoure l'appel : un échec du bord à bord ne doit
+  **jamais** empêcher l'interface de s'afficher (l'application reste alors en
+  affichage encarté, ce qui est parfaitement utilisable). Aucune autre API de
+  fenêtre dépréciée n'est appelée en repli, pour ne pas réintroduire
+  l'avertissement Play.
+- Les icônes des barres système sont forcées en clair
+  (`WindowInsetsControllerCompat.setAppearanceLightStatusBars/NavigationBars`),
+  l'application ayant un thème sombre.
+- **Aucune couleur de barre dans le thème** : `android:statusBarColor`,
+  `android:navigationBarColor`, `android:enforceStatusBarContrast` et
+  `android:enforceNavigationBarContrast` ont été retirés de
+  `res/values/styles.xml`. Ils sont dépréciés et sans effet depuis Android 15 et
+  étaient signalés par Play. Les barres sont transparentes par défaut.
+- Le mode encoche reste `always` (`res/values-v30/styles.xml`, fenêtre de
+  l'application **et** écran de lancement) : remplaçant non déprécié de
+  `shortEdges`.
 - Les encarts sont consommés côté web : `viewport-fit=cover` (index.html) et
   `env(safe-area-inset-*)` dans les feuilles de style ; Capacitor injecte aussi
   `--safe-area-inset-*` (`SystemBars.insetsHandling: 'css'`).
-- Le bord à bord est activé **sans condition**, sur toutes les versions
-  d'Android. Il l'était auparavant seulement quand la WebView installée savait
-  exposer les safe-area (Chromium 140+) : c'est ce test à l'exécution qui
-  valait l'avertissement Play « l'affichage de bord à bord peut ne pas être
-  disponible pour tous les utilisateurs ».
 - Repli natif (`MainActivity.applyInsetsFallback()`) : sur les appareils
   **antérieurs à Android 15 dont la WebView est ancienne**, les marges système
   (barres + encoche + clavier) sont appliquées sur `android.R.id.content`.
   À partir d'Android 15, c'est Capacitor qui s'en charge : pas de double marge.
-- Le mode encoche `always` est aussi déclaré dans le thème
-  (`res/values-v30/styles.xml`) pour la fenêtre de l'application **et** pour
-  l'écran de lancement : plus aucune ressource de l'app ne demande
-  `shortEdges`.
-- Les occurrences restantes de `LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES`
-  signalées par Play proviennent des bibliothèques Google elles-mêmes
-  (`com.google.android.gms.ads.internal.overlay`,
-  `com.google.android.play.core.hsdp.service.HsdpShimActivity`,
-  `androidx.activity.EdgeToEdgeApi28`), **pas du code ElyWalk**. Le SDK
-  d'annonces suit la dernière version de la branche recommandée
-  (`playServicesAdsVersion = '25.5.+'` dans `app/android/variables.gradle`) ;
-  le module `play.core.hsdp` arrive en dépendance transitive de ce SDK et ne
-  peut pas être exclu sans risque de plantage. Cet avertissement est une
-  **recommandation, pas un blocage de publication** : il se résorbera avec les
-  prochaines versions des SDK Google.
+- Les occurrences restantes signalées par Play peuvent provenir des
+  bibliothèques Google elles-mêmes (`com.google.android.gms.ads.internal.overlay`,
+  `com.google.android.play.core.hsdp`, `androidx.core`/`androidx.activity`) :
+  elles ne sont pas dans le code ElyWalk. Cet avertissement est une
+  **recommandation, pas un blocage de publication**.
+
+### Stabilité au lancement
+
+Trois causes de fermeture immédiate sont traitées depuis la 1.7.1 :
+
+1. **Délai de premier plan (5 s).** `TrackingService.onCreate()` restaure la
+   trace GPS depuis le disque ; ce travail est désormais fait **après**
+   `startForeground()`. La notification est disponible dès la promotion : le
+   canal est créé dans `buildNotification()`.
+2. **Exceptions remontées par le pont JavaScript.** Capacitor relance sur le
+   thread principal toute exception d'une méthode `@PluginMethod`
+   (`throw new RuntimeException(ex)`), ce qui tue l'application. Les appels du
+   `StepCounterService` (capteur, `StepStore`, listener JS, widget) sont
+   encapsulés ; `BootReceiver` utilise `StepCounterService.startQuietly()`.
+3. **Moteur de rendu WebView.** `MainActivity` installe un `WebViewListener`
+   dont `onRenderProcessGone()` recrée l'activité et renvoie `true` : sans cela
+   Android termine le processus.
+
+Côté web, `AppErrorBoundary` + `src/lib/startup-guard.ts` affichent un écran de
+secours (« ElyWalk n'a pas pu démarrer » + bouton Réessayer) au lieu d'une page
+blanche si une exception de rendu ou un bundle illisible survient.
+
+Vérification après un envoi : Play Console → *Android vitals* → aucun
+`ForegroundServiceDidNotStartInTimeException`, et l'onglet *Qualité* ne
+mentionne plus de plantage au démarrage.
+
+### Contrôle des avertissements Play avant envoi
+
+Les avertissements « bord à bord » et « optimisation R8 » sont calculés par
+Play **sur l'AAB envoyé**. Pour les vérifier avant de livrer :
+
+```bash
+cd app/android
+./gradlew clean bundleRelease
+# 1. Le bundle est-il bien optimisé ? (R8 : mapping.txt présent, taille réduite)
+ls -la app/build/outputs/mapping/release/mapping.txt
+# 2. Aucune API de barre dépréciée ne doit rester dans le code de l'application
+grep -c "setStatusBarColor\|setNavigationBarColor" app/build/outputs/mapping/release/mapping.txt || true
+# 3. Le bord à bord est activé par WindowCompat.enableEdgeToEdge : vérifier que
+#    la classe est bien référencée depuis MainActivity dans le mapping
+grep -n "com.elysium.elywalk.MainActivity" app/build/outputs/mapping/release/mapping.txt
+
+# Contrôle du bundle lui-même (aapt2 / bundletool)
+bundletool build-apks --bundle=app/build/outputs/bundle/release/app-release.aab \
+  --output=/tmp/elywalk.apks --mode=universal
+```
+
+Les avertissements disparaissent sur la version **suivante** : Play ne réévalue
+pas un build déjà publié.
 
 ### `app-ads.txt` (validation AdMob)
 
