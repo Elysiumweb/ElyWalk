@@ -227,11 +227,28 @@ public class TrackingService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
+        // 1. Notification de premier plan EN PREMIER : Android exige que le
+        //    service soit promu dans les 5 s suivant startForegroundService(),
+        //    sinon il termine le processus (« ForegroundServiceDidNotStartInTimeException »).
+        //    createChannel() peut lire les préférences et restaurer la trace
+        //    depuis le disque : le faire *après* évite de dépasser ce délai.
+        Notification notification = buildNotification(0d, 0d, false);
+        if (!promoteToForeground(notification)) return;
+
+        // 2. Puis seulement le reste de l'initialisation.
         createChannel();
         // Reprise après un éventuel kill du process (START_STICKY).
         restoreIfNeeded();
-        if (!promoteToForeground(currentDistanceKm(), currentDurationMin(), isPaused())) return;
-        fusedClient = LocationServices.getFusedLocationProviderClient(this);
+        // La notification affiche la distance et la durée connues à ce stade.
+        updateNotification(currentDistanceKm(), currentDurationMin(), isPaused());
+        try {
+            fusedClient = LocationServices.getFusedLocationProviderClient(this);
+        } catch (RuntimeException e) {
+            Log.e("ElyWalkTracking", "Google Play services indisponible", e);
+            stopSession(this);
+            stopSelf();
+            return;
+        }
         locationCallback = new LocationCallback() {
             @Override
             public void onLocationResult(@NonNull LocationResult locationResult) {
@@ -306,13 +323,12 @@ public class TrackingService extends Service {
 
     private boolean foregroundReady;
 
-    private boolean promoteToForeground(double km, double min, boolean isPaused) {
+    private boolean promoteToForeground(Notification notification) {
         try {
-            Notification n = buildNotification(km, min, isPaused);
             if (buildForegroundType() > 0) {
-                startForeground(NOTIF_ID, n, buildForegroundType());
+                startForeground(NOTIF_ID, notification, buildForegroundType());
             } else {
-                startForeground(NOTIF_ID, n);
+                startForeground(NOTIF_ID, notification);
             }
             foregroundReady = true;
             return true;
@@ -328,6 +344,10 @@ public class TrackingService extends Service {
             stopSelf();
             return false;
         }
+    }
+
+    private boolean promoteToForeground(double km, double min, boolean isPaused) {
+        return promoteToForeground(buildNotification(km, min, isPaused));
     }
 
     private int buildForegroundType() {
@@ -428,6 +448,12 @@ public class TrackingService extends Service {
     }
 
     private Notification buildNotification(double km, double min, boolean isPaused) {
+        // Sur Android 8+, une notification postée sur un canal inexistant est
+        // silencieusement ignorée (et startForeground() échoue avec
+        // « Bad notification for startForeground »). On s'assure donc que le
+        // canal existe *avant* de construire la notification : elle est ainsi
+        // disponible dès la promotion en premier plan.
+        createChannel();
         Intent launch = new Intent(this, MainActivity.class);
         launch.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         PendingIntent pi = PendingIntent.getActivity(

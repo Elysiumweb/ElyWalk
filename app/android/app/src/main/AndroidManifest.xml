@@ -1,7 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- `hardwareAccelerated` est requis par Meta Audience Network pour les
+         créas vidéo (interstitiel et interstitiel récompensé) : sans lui, le
+         rendu vidéo peut échouer silencieusement. -->
     <application
+        android:hardwareAccelerated="true"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
@@ -9,21 +13,24 @@
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
 
-        <!-- Google Mobile Ads (AdMob) — ID d'application ElyWalk.
-             ⚠️ Doit rester identique à ADMOB_APP_ID (src/lib/constants.ts) et
-             correspondre au compte AdMob qui héberge les blocs d'annonces,
-             sinon le SDK ne renvoie aucune annonce. -->
+        <!-- Régie publicitaire : Meta Audience Network (intégration directe).
+             ⚠️ L'identifiant d'application doit rester identique à
+             META_APP_ID (src/lib/constants.ts) et à celui du Monetization
+             Manager, sinon le SDK ne renvoie aucune annonce. -->
         <meta-data
-            android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="ca-app-pub-5316598937383510~4963026878" />
-        <!-- Initialisation et chargement des annonces hors thread principal :
-             évite les ANR au démarrage (recommandation Google Mobile Ads). -->
+            android:name="com.facebook.sdk.ApplicationId"
+            android:value="1712220190424595" />
         <meta-data
-            android:name="com.google.android.gms.ads.flag.OPTIMIZE_INITIALIZATION"
-            android:value="true" />
+            android:name="com.facebook.sdk.ClientToken"
+            android:value="@string/facebook_client_token" />
+        <!-- Évite que le SDK Facebook (embarqué par Audience Network) tente de
+             suivre automatiquement les installations sans consentement. -->
         <meta-data
-            android:name="com.google.android.gms.ads.flag.OPTIMIZE_AD_LOADING"
-            android:value="true" />
+            android:name="com.facebook.sdk.AutoLogAppEventsEnabled"
+            android:value="false" />
+        <meta-data
+            android:name="com.facebook.sdk.AdvertiserIDCollectionEnabled"
+            android:value="false" />
 
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
@@ -105,12 +112,11 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- Identifiant publicitaire (AAID) : requis par le SDK Google Mobile Ads
-         (AdMob) sur Android 13+. Déclaré explicitement ici plutôt que de
-         dépendre du seul manifeste fusionné de play-services-ads : la
-         déclaration Play « utilisation de l'identifiant publicitaire » en
-         dépend, et une version ciblant Android 13+ sans cette autorisation
-         serait bloquée. L'identifiant n'est lu qu'après consentement (UMP). -->
+    <!-- Identifiant publicitaire (AAID) : le SDK Meta Audience Network le lit
+         pour cibler les annonces. Déclaré explicitement (Google Play exige
+         cette autorisation pour toute app ciblant Android 13+ qui utilise
+         l'identifiant publicitaire ; sans elle la version est refusée).
+         Lecture subordonnée au consentement (cf. `lib/ads.ts`). -->
     <uses-permission android:name="com.google.android.gms.permission.AD_ID" />
     <!-- Comptage de pas : capteur système (Activité physique) -->
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />

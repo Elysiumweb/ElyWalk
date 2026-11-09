@@ -2,7 +2,7 @@
   "name": "elywalk-backend",
   "version": "1.0.0",
   "private": true,
-  "description": "Backend de confiance ElyWalk (attestation Play Integrity, AdMob SSV, push FCM) sur Cloudflare Workers — gratuit, sans dépendance runtime.",
+  "description": "Backend de confiance ElyWalk (attestation Play Integrity, validation serveur des récompenses Meta, push FCM) sur Cloudflare Workers — gratuit, sans dépendance runtime.",
   "main": "src/index.ts",
   "scripts": {
     "dev": "wrangler dev",

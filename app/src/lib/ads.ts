@@ -1,51 +1,97 @@
-import { Capacitor } from '@capacitor/core';
-import type { PluginListenerHandle } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { Preferences } from '@capacitor/preferences';
-import {
-  AdMob,
-  AdmobConsentStatus,
-  InterstitialAdPluginEvents,
-  RewardAdPluginEvents,
-  AppOpenAdPluginEvents,
-} from '@capacitor-community/admob';
-import type { AdmobConsentInfo } from '@capacitor-community/admob';
-import {
-  AD_UNITS,
-  USE_TEST_ADS,
-} from './constants';
+import { Device } from '@capacitor/device';
+import { ADS_S2S_REWARD_URL, AD_PLACEMENTS, META_REWARD_CURRENCY } from './constants';
+
+/**
+ * Couche publicitaire d'ElyWalk.
+ *
+ * <p>Régie actuelle : **Meta Audience Network**, branchée en direct via le
+ * plugin natif `MetaAds` (`android/.../MetaAdsPlugin.java`). Aucune plateforme
+ * de médiation n'est utilisée pour l'instant. Toute la logique de cadencement
+ * (délais, plafonds, remise à zéro) est ici, indépendante du SDK : brancher une
+ * médiation plus tard ne demandera que de remplacer l'implémentation du pont
+ * `NativeAds` ci-dessous.</p>
+ *
+ * <p>Formats réellement proposés par Meta : bannière, rectangle moyen,
+ * interstitiel et interstitiel récompensé. Il n'existe <b>ni</b> format
+ * « ouverture d'application » <b>ni</b> « vidéo récompensée » séparée : l'ouverture
+ * passe donc par l'interstitiel et le gain d'ElyCoins par l'interstitiel
+ * récompensé.</p>
+ */
 
 const isNative = () => Capacitor.isNativePlatform();
 
 /** Emplacements publicitaires de l'application (journalisation + cadencement). */
 export type AdPlacement =
+  | 'app-open' // lancement de l'application (interstitiel)
   | 'steps-validation' // validation des pas du jour
   | 'activity-finished' // fin d'une sortie GPS
   | 'withdrawal' // demande de retrait / don
   | 'other';
 
 // ---------------------------------------------------------------------------
+// Pont vers le plugin natif
+// ---------------------------------------------------------------------------
+
+interface NativeAdsPlugin {
+  getStatus(): Promise<{
+    initialized: boolean;
+    bannerReady: boolean;
+    interstitialReady: boolean;
+    rewardedReady: boolean;
+  }>;
+  setDataProcessingOptions(options: { ldu?: boolean }): Promise<void>;
+  prepareInterstitial(options: { placementId: string }): Promise<void>;
+  showInterstitial(options: {
+    placementId: string;
+    reload?: boolean;
+  }): Promise<{ shown: boolean }>;
+  prepareRewardedInterstitial(options: {
+    placementId: string;
+    userId?: string;
+    rewardId?: string;
+    serverValidation?: boolean;
+  }): Promise<void>;
+  showRewardedInterstitial(options: {
+    placementId: string;
+    userId?: string;
+    rewardId?: string;
+    serverValidation?: boolean;
+  }): Promise<{ rewarded: boolean }>;
+  showBanner(options: { placementId: string; tablet?: boolean }): Promise<void>;
+  hideBanner(): Promise<void>;
+  getBannerHeight(options: {
+    placementId: string;
+    tablet?: boolean;
+  }): Promise<{ height: number }>;
+  addListener(
+    eventName: string,
+    listenerFunc: (data: unknown) => void
+  ): Promise<{ remove: () => void }>;
+}
+
+const NativeAds = registerPlugin<NativeAdsPlugin>('MetaAds');
+
+// ---------------------------------------------------------------------------
 // État interne
 // ---------------------------------------------------------------------------
 
 let initialized = false;
-/** `true` uniquement si l'utilisateur peut recevoir de la publicité
- *  (consentement UMP RGPD obtenu, ou non requis hors EEE/UK). */
+/** `true` si l'utilisateur peut recevoir de la publicité (consentement RGPD). */
 let adsAllowed = false;
-/** Promesse d'initialisation en cours : évite les doubles `initialize()`
- *  (plusieurs écrans demandent des annonces en même temps au démarrage). */
 let initPromise: Promise<boolean> | null = null;
-/** Dernière tentative d'initialisation (ms) : permet de réessayer plus tard
- *  quand le consentement ou le réseau a échoué au lancement. */
 let lastInitAttempt = 0;
-let consentInfo: AdmobConsentInfo | null = null;
 let lastError: string | null = null;
+
+/** Identifiant ElyWalk transmis à Meta pour la validation serveur (S2S). */
+let adsUserId: string | null = null;
 
 /** Une annonce plein écran est en cours d'affichage. */
 let fullScreenAdVisible = false;
-/** Horodatage de la dernière annonce plein écran affichée. */
 let lastFullScreenAdAt = 0;
 
-/** Délai minimal entre deux interstitiels (politique AdMob : ne pas saturer). */
+/** Délai minimal entre deux annonces plein écran (hors ouverture). */
 const INTERSTITIAL_MIN_INTERVAL_MS = 60 * 1000;
 /** Nouvelle tentative d'initialisation après un échec (réseau, consentement). */
 const INIT_RETRY_MS = 60 * 1000;
@@ -54,9 +100,12 @@ const LOAD_TIMEOUT_MS = 10 * 1000;
 /** Sécurité : si aucun événement de fermeture n'arrive, on débloque l'UI. */
 const SHOW_TIMEOUT_MS = 90 * 1000;
 
+/** Événement émis quand le choix de consentement est effacé. */
+export const CONSENT_RESET_EVENT = 'elywalk:ads-consent-reset';
+
 const warn = (scope: string, e: unknown) => {
   lastError = e instanceof Error ? e.message : String(e);
-  console.warn(`[AdMob] ${scope}:`, lastError);
+  console.warn(`[Ads] ${scope}:`, lastError);
 };
 
 /** Résout `fallback` si la promesse n'a pas abouti dans le délai imparti. */
@@ -83,89 +132,180 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
 }
 
 // ---------------------------------------------------------------------------
-// Consentement RGPD (Google UMP / Funding Choices)
+// Consentement (RGPD / CCPA)
 // ---------------------------------------------------------------------------
 
+const CONSENT_PREFS = 'ads.consent.v1';
+
+/** Choix conservé localement : `true` = publicité personnalisée. */
+let consentGranted: boolean | null = null;
+/** Le choix a déjà été demandé à l'utilisateur. */
+let consentDecided = false;
+
 /**
- * Demande l'état du consentement et affiche le formulaire UMP si nécessaire.
- * Résout `true` si les annonces peuvent être chargées (`canRequestAds`).
+ * Zone réglementaire de l'appareil.
  *
- * ⚠️ Pré-requis console AdMob : un message RGPD doit être **publié**
- * (Confidentialité et messages → Message RGPD) pour les utilisateurs de
- * l'EEE/UK. Sans message publié, `canRequestAds` reste `false` en Europe et
- * aucune annonce n'est diffusée.
+ * <p>Meta n'est pas membre de l'IAB Europe : il n'existe pas de signal TCF à
+ * transmettre. On applique donc la règle classique : consentement explicite
+ * pour l'EEE, le Royaume-Uni et la Suisse ; traitement complet ailleurs, avec
+ * « Limited Data Use » pour les États-Unis.</p>
  */
-async function requestAndShowConsent(): Promise<boolean> {
+export interface ConsentRegion {
+  /** Pays ISO-3166 alpha-2, ou `null` si indéterminé. */
+  country: string | null;
+  /** Un consentement explicite est requis avant de charger une annonce. */
+  requiresConsent: boolean;
+  /** Limited Data Use (lois des États américains). */
+  ldu: boolean;
+}
+
+const EEA_COUNTRIES = new Set([
+  'AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR', 'DE', 'GR',
+  'HU', 'IE', 'IT', 'LV', 'LT', 'LU', 'MT', 'NL', 'PL', 'PT', 'RO', 'SK',
+  'SI', 'ES', 'SE', // Union européenne
+  'IS', 'LI', 'NO', // Espace économique européen
+  'GB', 'CH', // Royaume-Uni, Suisse
+]);
+
+const US_COUNTRIES = new Set(['US']);
+
+let cachedRegion: ConsentRegion | null = null;
+
+/** Détermine la zone réglementaire à partir du pays de l'appareil. */
+async function detectRegion(): Promise<ConsentRegion> {
+  if (cachedRegion) return cachedRegion;
+  let country: string | null = null;
   try {
-    // Le SDK détecte la géolocalisation de l'utilisateur (EEE/UK) par lui-même.
-    // `tagForUnderAgeOfConsent` reste à false : ElyWalk n'est pas une app
-    // destinée aux enfants, et l'âge minimum (15 ans) est vérifié côté CGU.
-    const info = await AdMob.requestConsentInfo();
-    consentInfo = info;
-
-    const needsForm =
-      info.status === AdmobConsentStatus.REQUIRED || info.status === AdmobConsentStatus.UNKNOWN;
-
-    if (needsForm) {
-      try {
-        // `showConsentForm` appelle `loadAndShowConsentFormIfRequired` :
-        // sans effet si le formulaire n'est pas requis.
-        const after = await AdMob.showConsentForm();
-        consentInfo = { ...info, ...after };
-        return after.canRequestAds !== false;
-      } catch (e) {
-        // Formulaire indisponible (message RGPD non publié) ou réseau coupé :
-        // on ne bloque pas définitivement, on se fie à l'état connu de l'UMP
-        // et une nouvelle tentative aura lieu plus tard (INIT_RETRY_MS).
-        warn('consent form', e);
-        return info.canRequestAds === true;
+    // La locale système porte la région : `fr-FR` -> FR, `en-US` -> US.
+    // (Le plugin Device n'expose pas le pays, et une API de géolocalisation
+    // serait disproportionnée : la langue/région suffit à choisir la règle.)
+    const locales =
+      typeof navigator !== 'undefined'
+        ? [...(navigator.languages ?? []), navigator.language]
+        : [];
+    for (const locale of locales) {
+      const region = String(locale || '').split('-')[1];
+      if (region && region.length === 2) {
+        country = region.toUpperCase();
+        break;
       }
     }
-
-    // NOT_REQUIRED (hors EEE/UK) ou OBTAINED (déjà consenti) : on peut diffuser.
-    return info.canRequestAds !== false;
   } catch (e) {
-    // Principe de prudence RGPD : en cas d'erreur, on ne diffuse aucune annonce.
-    warn('consent', e);
-    return false;
+    warn('region', e);
   }
+  /**
+   * Pays inconnu = prudence maximale : on demande le consentement. Aucune
+   * annonce n'est chargée tant qu'il n'a pas été donné, ce qui évite de
+   * diffuser une publicité non consentie à un utilisateur européen dont
+   * l'appareil n'a pas exposé le pays.
+   */
+  const requiresConsent = country === null || EEA_COUNTRIES.has(country);
+  cachedRegion = {
+    country,
+    requiresConsent,
+    ldu: country !== null && US_COUNTRIES.has(country),
+  };
+  return cachedRegion;
 }
 
-/** Ouvre le formulaire « Options de confidentialité » (révision du consentement). */
-export async function showPrivacyOptionsForm(): Promise<void> {
-  if (!isNative()) return;
+/** Applique les options de traitement Meta (LDU) — à faire avant tout chargement. */
+async function applyDataProcessingOptions(region: ConsentRegion): Promise<void> {
   try {
-    await AdMob.showPrivacyOptionsForm();
-    // Le choix a pu changer : on réévalue le droit de diffuser.
-    adsAllowed = await requestAndShowConsent();
-    if (adsAllowed) void preloadInterstitial();
+    await NativeAds.setDataProcessingOptions({ ldu: region.ldu });
   } catch (e) {
-    warn('privacy options', e);
+    warn('data processing options', e);
   }
 }
 
-/** Réinitialise le consentement (permet de re-choisir). Utile pour les tests. */
+async function readStoredConsent(): Promise<boolean | null> {
+  try {
+    const { value } = await Preferences.get({ key: CONSENT_PREFS });
+    if (value === 'granted') return true;
+    if (value === 'denied') return false;
+  } catch (e) {
+    warn('consent read', e);
+  }
+  return null;
+}
+
+async function storeConsent(granted: boolean): Promise<void> {
+  try {
+    await Preferences.set({ key: CONSENT_PREFS, value: granted ? 'granted' : 'denied' });
+  } catch (e) {
+    warn('consent write', e);
+  }
+}
+
+/** Le formulaire de consentement a-t-il déjà été présenté à l'utilisateur ? */
+export async function hasConsentDecision(): Promise<boolean> {
+  await ensureConsentLoaded();
+  return consentDecided;
+}
+
+/** Le consentement a-t-il été accordé ? `null` tant qu'aucun choix n'est fait. */
+export async function getConsentChoice(): Promise<boolean | null> {
+  await ensureConsentLoaded();
+  return consentGranted;
+}
+
+let consentLoaded = false;
+async function ensureConsentLoaded(): Promise<void> {
+  if (consentLoaded) return;
+  const stored = await readStoredConsent();
+  consentGranted = stored;
+  consentDecided = stored !== null;
+  consentLoaded = true;
+}
+
+/**
+ * Enregistre le choix de l'utilisateur et réévalue le droit de diffuser.
+ * Appelé par l'écran de consentement affiché au lancement.
+ */
+export async function setConsent(granted: boolean): Promise<void> {
+  consentGranted = granted;
+  consentDecided = true;
+  consentLoaded = true;
+  await storeConsent(granted);
+  adsAllowed = granted && initialized;
+  if (adsAllowed) {
+    void preloadInterstitial();
+    void preloadRewarded();
+  }
+}
+
+/**
+ * Efface le choix de consentement. Émet `CONSENT_RESET_EVENT` pour que
+ * l'application réaffiche l'écran de choix : sans cela, l'utilisateur qui
+ * révoque son consentement depuis le profil se retrouverait sans publicité et
+ * sans moyen d'en redonner.
+ */
 export async function resetConsent(): Promise<void> {
-  if (!isNative()) return;
   try {
-    await AdMob.resetConsentInfo();
-    initialized = false;
-    initPromise = null;
-    adsAllowed = false;
-    lastInitAttempt = 0;
+    await Preferences.remove({ key: CONSENT_PREFS });
   } catch (e) {
     warn('resetConsent', e);
   }
+  consentGranted = null;
+  consentDecided = false;
+  consentLoaded = true;
+  adsAllowed = false;
+  initialized = false;
+  initPromise = null;
+  lastInitAttempt = 0;
+  try {
+    window.dispatchEvent(new Event(CONSENT_RESET_EVENT));
+  } catch {
+    /* pas de DOM (tests) : sans effet */
+  }
 }
 
 // ---------------------------------------------------------------------------
-// Initialisation du SDK Google Mobile Ads
+// Initialisation
 // ---------------------------------------------------------------------------
 
 /**
- * Initialise le SDK puis recueille le consentement. Idempotent et « mono-vol » :
- * les appels concurrents partagent la même promesse. Si le consentement a
- * échoué, une nouvelle tentative est faite au bout d'une minute.
+ * Initialise le SDK puis vérifie le droit de diffuser. Idempotent et
+ * « mono-vol » : les appels concurrents partagent la même promesse.
  */
 async function ensureAds(): Promise<boolean> {
   if (!isNative()) return false;
@@ -176,16 +316,28 @@ async function ensureAds(): Promise<boolean> {
   lastInitAttempt = Date.now();
   initPromise = (async () => {
     try {
-      if (!initialized) {
-        await AdMob.initialize({});
-        registerAdListeners();
-        initialized = true;
+      await ensureConsentLoaded();
+      initialized = true;
+      // Sans cet abonnement, la fermeture d'un interstitiel ne serait jamais
+      // connue et les pages resteraient bloquées jusqu'au délai de sécurité.
+      registerAdListeners();
+      const region = await detectRegion();
+      await applyDataProcessingOptions(region);
+
+      if (region.requiresConsent) {
+        // Aucun choix enregistré : on ne diffuse rien et l'écran de
+        // consentement prend le relais (voir `maybeShowConsent`).
+        adsAllowed = consentGranted === true;
+      } else {
+        // Hors zone à consentement : le choix explicite l'emporte s'il existe,
+        // sinon on applique la règle locale (publicité autorisée).
+        adsAllowed = consentGranted !== false;
       }
-      adsAllowed = await requestAndShowConsent();
+
       if (adsAllowed) {
         lastError = null;
-        // Précharge dès maintenant : l'interstitiel doit être instantané.
         void preloadInterstitial();
+        void preloadRewarded();
       }
       return adsAllowed;
     } catch (e) {
@@ -199,9 +351,21 @@ async function ensureAds(): Promise<boolean> {
   return initPromise;
 }
 
-/** Initialise le SDK publicitaire (à appeler au lancement de l'application). */
+/** Initialise la régie publicitaire (à appeler au lancement). */
 export async function initAds(): Promise<void> {
   await ensureAds();
+}
+
+/**
+ * Faut-il afficher l'écran de consentement ? Vrai une seule fois par
+ * installation, et seulement si la zone l'exige.
+ */
+export async function needsConsentPrompt(): Promise<boolean> {
+  if (!isNative()) return false;
+  await ensureConsentLoaded();
+  if (consentDecided) return false;
+  const region = await detectRegion();
+  return region.requiresConsent;
 }
 
 /** `true` si le consentement a été obtenu et que la pub est autorisée. */
@@ -209,89 +373,62 @@ export function canShowAds(): boolean {
   return initialized && adsAllowed;
 }
 
+// ---------------------------------------------------------------------------
+// Diagnostic (Profil → Confidentialité des annonces)
+// ---------------------------------------------------------------------------
+
 export interface AdsDiagnostics {
   native: boolean;
   initialized: boolean;
   adsAllowed: boolean;
-  consentStatus: string | null;
-  canRequestAds: boolean | null;
-  consentFormAvailable: boolean | null;
-  privacyOptionsRequired: boolean;
+  consentStatus: 'granted' | 'denied' | 'pending' | null;
+  region: string | null;
+  requiresConsent: boolean;
+  limitedDataUse: boolean;
   interstitialReady: boolean;
+  rewardedReady: boolean;
+  bannerShown: boolean;
   lastError: string | null;
 }
 
-/** État détaillé de la régie — affiché dans Profil → Confidentialité des annonces. */
 export function getAdsDiagnostics(): AdsDiagnostics {
   return {
     native: isNative(),
     initialized,
     adsAllowed,
-    consentStatus: consentInfo?.status ?? null,
-    canRequestAds: consentInfo ? consentInfo.canRequestAds !== false : null,
-    consentFormAvailable: consentInfo?.isConsentFormAvailable ?? null,
-    privacyOptionsRequired: consentInfo?.privacyOptionsRequirementStatus === 'REQUIRED',
+    consentStatus: !consentDecided ? 'pending' : consentGranted ? 'granted' : 'denied',
+    region: cachedRegion?.country ?? null,
+    requiresConsent: cachedRegion?.requiresConsent ?? true,
+    limitedDataUse: cachedRegion?.ldu ?? false,
     interstitialReady,
+    rewardedReady,
+    bannerShown: bannerVisible,
     lastError,
   };
 }
 
-/**
- * Traduit l'état de la régie en une phrase actionnable.
- *
- * Sert à distinguer, depuis l'appareil et sans console AdMob, les trois causes
- * possibles d'une absence d'annonces :
- *
- * 1. **consentement** : message RGPD non publié pour cette application ;
- * 2. **diffusion** : la régie répond « aucune annonce » (`no fill`), ce qui
- *    arrive tant que l'application n'est pas validée / associée au Play Store
- *    dans AdMob ;
- * 3. **technique** : SDK non initialisé, réseau, erreur de la régie.
- */
+/** Traduit l'état de la régie en une phrase actionnable. */
 export function explainAdsState(d: AdsDiagnostics = getAdsDiagnostics()): string {
   if (!d.native) {
     return 'Les publicités ne sont diffusées que dans l’application Android.';
   }
   if (!d.initialized) {
-    return 'SDK AdMob pas encore initialisé — relancez l’application.';
+    return 'Régie publicitaire pas encore initialisée — relancez l’application.';
   }
-  if (d.consentStatus === 'REQUIRED' && d.consentFormAvailable === false) {
+  if (d.consentStatus === 'pending' && d.requiresConsent) {
     return (
-      'Consentement requis, mais aucun formulaire n’est disponible : le message ' +
-      'RGPD n’est pas publié pour cette application dans la console AdMob ' +
-      '(Confidentialité et messages → Message RGPD → cocher ElyWalk).'
+      'En attente de votre choix dans l’écran de consentement : aucune annonce ' +
+      'n’est demandée tant que la publicité personnalisée n’est pas acceptée.'
     );
   }
-  if (d.canRequestAds === false) {
-    return 'Consentement non accordé : aucune annonce ne peut être demandée.';
+  if (d.consentStatus === 'denied') {
+    return 'Publicité refusée : aucune annonce ne sera diffusée. Vous pouvez changer d’avis à tout moment.';
   }
-
-  // Signature d'un compte sans message de consentement publié : l'UMP ne
-  // réclame rien et n'expose ni formulaire ni options de confidentialité.
-  // Hors EEE/UK ce n'est pas bloquant ; en Europe, Google exige une CMP
-  // certifiée depuis janvier 2024 et les demandes sans signal TCF ne sont
-  // quasiment jamais remplies.
-  const noCmpConfigured =
-    d.consentFormAvailable === false &&
-    !d.privacyOptionsRequired &&
-    (d.consentStatus === 'NOT_REQUIRED' || d.consentStatus === 'UNKNOWN');
-
-  if (d.lastError && /no.?fill|code\s*[:=]?\s*3\b/i.test(d.lastError)) {
-    return noCmpConfigured
-      ? 'Aucune annonce renvoyée (« no fill ») alors qu’aucun message de ' +
-        'consentement n’est configuré dans AdMob : en EEE/UK, les demandes ' +
-        'sans CMP certifiée ne sont pas remplies. Publiez un message RGPD ' +
-        'couvrant cette application.'
-      : 'La régie est interrogée mais ne renvoie aucune annonce (« no fill ») : ' +
-        'typique d’une application AdMob pas encore validée ou pas encore ' +
-        'associée à une fiche Play publique.';
-  }
-  if (noCmpConfigured && !d.interstitialReady) {
+  if (d.lastError && /no.?fill/i.test(d.lastError)) {
     return (
-      'Aucun message de consentement n’est configuré dans AdMob pour cette ' +
-      'application (ni formulaire RGPD, ni options de confidentialité). En ' +
-      'EEE/UK, les annonces ne sont alors pas diffusées : publiez un message ' +
-      'RGPD dans Confidentialité et messages.'
+      'Meta Audience Network ne renvoie aucune annonce (« no fill ») : cela arrive ' +
+      'tant que l’application n’est pas validée côté Meta, ou si aucune campagne ' +
+      'n’enchère pour ce profil.'
     );
   }
   if (d.lastError) {
@@ -300,40 +437,38 @@ export function explainAdsState(d: AdsDiagnostics = getAdsDiagnostics()): string
   if (!d.adsAllowed) {
     return 'Annonces indisponibles pour l’instant (consentement ou réseau).';
   }
-  if (!d.interstitialReady) {
-    return 'Annonces autorisées — interstitiel en cours de préchargement.';
+  if (!d.interstitialReady && !d.rewardedReady) {
+    return 'Annonces autorisées — chargement en cours.';
   }
-  return 'Annonces opérationnelles.';
+  return 'Annonces opérationnelles (Meta Audience Network).';
 }
 
 /** Diagnostic brut, copiable tel quel dans un message d'assistance. */
 export function formatAdsDiagnostics(d: AdsDiagnostics = getAdsDiagnostics()): string {
   const yn = (v: boolean | null) => (v === null ? 'inconnu' : v ? 'oui' : 'non');
   return [
+    `régie          : Meta Audience Network`,
     `natif          : ${yn(d.native)}`,
-    `SDK initialisé : ${yn(d.initialized)}`,
+    `initialisé     : ${yn(d.initialized)}`,
+    `pays           : ${d.region ?? 'inconnu'}`,
     `consentement   : ${d.consentStatus ?? 'inconnu'}`,
-    `formulaire     : ${yn(d.consentFormAvailable)}`,
-    `canRequestAds  : ${yn(d.canRequestAds)}`,
-    `options confid.: ${yn(d.privacyOptionsRequired)}`,
+    `LDU (US)       : ${yn(d.limitedDataUse)}`,
     `interstitiel   : ${yn(d.interstitialReady)}`,
+    `récompense     : ${yn(d.rewardedReady)}`,
+    `bannière       : ${yn(d.bannerShown)}`,
     `dernière erreur: ${d.lastError ?? 'aucune'}`,
-    `annonces test  : ${USE_TEST_ADS ? 'OUI (VITE_TEST_ADS=1)' : 'non'}`,
   ].join('\n');
 }
 
 // ---------------------------------------------------------------------------
-// Écouteurs globaux (enregistrés une seule fois)
+// Écouteurs natifs
 // ---------------------------------------------------------------------------
 
 let listenersRegistered = false;
 let interstitialReady = false;
-let interstitialLoading: Promise<boolean> | null = null;
-let appOpenReady = false;
+let rewardedReady = false;
+let bannerVisible = false;
 let resolveInterstitialShown: (() => void) | null = null;
-let rewardEarned = false;
-let resolveRewardShown: ((earned: boolean) => void) | null = null;
-
 let previousFullScreenAdAt = 0;
 
 function beginFullScreenAd() {
@@ -357,226 +492,263 @@ function registerAdListeners() {
   if (listenersRegistered) return;
   listenersRegistered = true;
 
-  const track = (handle: Promise<PluginListenerHandle>) => {
-    handle.catch((e) => warn('addListener', e));
+  const track = (event: string, handler: () => void) => {
+    NativeAds.addListener(event, handler).catch((e) => warn('addListener', e));
   };
 
-  // --- Interstitiel ---
-  track(
-    AdMob.addListener(InterstitialAdPluginEvents.Loaded, () => {
-      interstitialReady = true;
-    })
-  );
-  track(
-    AdMob.addListener(InterstitialAdPluginEvents.FailedToLoad, () => {
-      interstitialReady = false;
-    })
-  );
-  track(AdMob.addListener(InterstitialAdPluginEvents.Showed, () => beginFullScreenAd()));
-  track(
-    AdMob.addListener(InterstitialAdPluginEvents.Dismissed, () => {
-      interstitialReady = false;
-      endFullScreenAd();
-      resolveInterstitialShown?.();
-      resolveInterstitialShown = null;
-      // Prépare la suivante pour que l'affichage reste instantané.
-      void preloadInterstitial();
-    })
-  );
-  track(
-    AdMob.addListener(InterstitialAdPluginEvents.FailedToShow, () => {
-      interstitialReady = false;
-      endFullScreenAd();
-      resolveInterstitialShown?.();
-      resolveInterstitialShown = null;
-      void preloadInterstitial();
-    })
-  );
+  // La fermeture de l'interstitiel est le seul signal fiable de fin
+  // d'affichage : `showInterstitial()` résout dès que l'annonce est *affichée*,
+  // pas quand elle est fermée. Sans cet événement, la promesse rendue aux pages
+  // (validation des pas, fin de sortie, retrait) bloquerait l'interface jusqu'au
+  // délai de sécurité de 90 s.
+  track('interstitialDismissed', () => {
+    if (resolveInterstitialShown) resolveInterstitialShown();
+  });
 
-  // --- Vidéo avec récompense ---
-  track(AdMob.addListener(RewardAdPluginEvents.Showed, () => beginFullScreenAd()));
-  track(
-    AdMob.addListener(RewardAdPluginEvents.Rewarded, () => {
-      rewardEarned = true;
-    })
-  );
-  track(
-    AdMob.addListener(RewardAdPluginEvents.Dismissed, () => {
-      endFullScreenAd();
-      resolveRewardShown?.(rewardEarned);
-      resolveRewardShown = null;
-    })
-  );
-  track(
-    AdMob.addListener(RewardAdPluginEvents.FailedToShow, () => {
-      endFullScreenAd();
-      resolveRewardShown?.(false);
-      resolveRewardShown = null;
-    })
-  );
-
-  // --- Annonce à l'ouverture ---
-  track(
-    AdMob.addListener(AppOpenAdPluginEvents.Loaded, () => {
-      appOpenReady = true;
-    })
-  );
-  track(
-    AdMob.addListener(AppOpenAdPluginEvents.FailedToLoad, () => {
-      appOpenReady = false;
-    })
-  );
-  track(AdMob.addListener(AppOpenAdPluginEvents.Opened, () => beginFullScreenAd()));
-  track(
-    AdMob.addListener(AppOpenAdPluginEvents.Closed, () => {
-      appOpenReady = false;
-      endFullScreenAd();
-      // Précharge la prochaine annonce d'ouverture.
-      void AdMob.loadAppOpen({ adId: AD_UNITS.appOpen }).catch(() => undefined);
-    })
-  );
-  track(
-    AdMob.addListener(AppOpenAdPluginEvents.FailedToShow, () => {
-      appOpenReady = false;
-      endFullScreenAd();
-    })
+  // Événements informatifs : on s'y abonne pour ne pas les laisser sans
+  // écouteur côté pont, sans autre effet.
+  ['interstitialLoaded', 'interstitialShown', 'interstitialImpression', 'rewardedLoaded', 'rewardedEarned', 'adError'].forEach(
+    (event) => track(event, () => undefined)
   );
 }
 
 // ---------------------------------------------------------------------------
-// Interstitiel — validation des pas, fin de sortie, retrait
+// Interstitiel — lancement, validation des pas, fin de sortie, retrait
 // ---------------------------------------------------------------------------
 
 /** Charge (ou recharge) un interstitiel en tâche de fond. */
-async function preloadInterstitial(): Promise<boolean> {
-  if (!isNative() || !adsAllowed) return false;
-  if (interstitialReady) return true;
-  if (interstitialLoading) return interstitialLoading;
-
-  interstitialLoading = (async () => {
-    try {
-      await AdMob.prepareInterstitial({ adId: AD_UNITS.interstitial });
-      interstitialReady = true;
-      return true;
-    } catch (e) {
-      warn('interstitial load', e);
-      interstitialReady = false;
-      return false;
-    } finally {
-      interstitialLoading = null;
-    }
-  })();
-
-  return interstitialLoading;
+async function preloadInterstitial(): Promise<void> {
+  if (!isNative() || !adsAllowed) return;
+  try {
+    await NativeAds.prepareInterstitial({ placementId: AD_PLACEMENTS.interstitial });
+    interstitialReady = true;
+  } catch (e) {
+    warn('interstitial load', e);
+    interstitialReady = false;
+  }
 }
 
 /** Précharge les annonces en tâche de fond (appelé après le démarrage). */
 export async function prefetchAds(): Promise<void> {
   if (!(await ensureAds())) return;
-  await preloadInterstitial();
+  await Promise.all([preloadInterstitial(), preloadRewarded()]);
 }
 
 /**
  * Affiche une annonce interstitielle.
+ *
  * Résout quand la pub est fermée. Ne bloque jamais l'utilisateur : en cas
- * d'échec de chargement ou de cadencement trop rapproché, on résout tout de
+ * d'absence d'annonce ou de cadencement trop rapproché, on résout tout de
  * suite sans rien afficher.
  */
 export async function showInterstitial(placement: AdPlacement = 'other'): Promise<void> {
   if (!isNative()) return;
   if (!(await ensureAds())) return;
-  // Jamais deux annonces plein écran l'une sur l'autre.
   if (fullScreenAdVisible) return;
-  if (Date.now() - lastFullScreenAdAt < INTERSTITIAL_MIN_INTERVAL_MS) {
+
+  // L'annonce d'ouverture n'est pas soumise au délai anti-spam : c'est le
+  // premier écran publicitaire de la session.
+  if (placement !== 'app-open' && Date.now() - lastFullScreenAdAt < INTERSTITIAL_MIN_INTERVAL_MS) {
     void preloadInterstitial();
     return;
   }
 
-  const ready = interstitialReady || (await withTimeout(preloadInterstitial(), LOAD_TIMEOUT_MS, false));
-  if (!ready) return;
-
   return new Promise<void>((resolve) => {
     let done = false;
+    /** Attente de fermeture : garde-fou si l'événement n'arrive jamais. */
+    let dismissGuard: ReturnType<typeof setTimeout> | undefined;
+
     const finish = () => {
       if (done) return;
       done = true;
+      if (dismissGuard) clearTimeout(dismissGuard);
       if (resolveInterstitialShown === finish) resolveInterstitialShown = null;
       resolve();
     };
-    resolveInterstitialShown = finish;
-    // Filet de sécurité : l'UI ne doit jamais rester bloquée.
-    setTimeout(finish, SHOW_TIMEOUT_MS);
+    /** Appelé par `interstitialDismissed` (voir `registerAdListeners`). */
+    const onDismissed = () => {
+      endFullScreenAd();
+      interstitialReady = false;
+      finish();
+      void preloadInterstitial();
+    };
+    resolveInterstitialShown = onDismissed;
 
     beginFullScreenAd();
-    AdMob.showInterstitial().catch((e) => {
-      warn(`interstitial show (${placement})`, e);
-      interstitialReady = false;
-      cancelFullScreenAd();
-      void preloadInterstitial();
-      finish();
-    });
+    withTimeout(
+      NativeAds.showInterstitial({ placementId: AD_PLACEMENTS.interstitial }),
+      LOAD_TIMEOUT_MS,
+      { shown: false }
+    )
+      .then((result) => {
+        if (!result.shown) {
+          // Aucune annonce valide : l'utilisateur n'a rien vu, on ne consomme
+          // donc pas le délai anti-spam.
+          cancelFullScreenAd();
+          finish();
+          void preloadInterstitial();
+          return;
+        }
+        // L'annonce est à l'écran. La promesse ne doit être tenue qu'à sa
+        // fermeture : sinon la page reprendrait la main derrière l'overlay
+        // (double navigation, double crédit). Sécurité : sans événement de
+        // fermeture, l'interface est rendue au bout de SHOW_TIMEOUT_MS.
+        dismissGuard = setTimeout(onDismissed, SHOW_TIMEOUT_MS);
+      })
+      .catch((e) => {
+        warn(`interstitial show (${placement})`, e);
+        cancelFullScreenAd();
+        interstitialReady = false;
+        finish();
+        void preloadInterstitial();
+      });
   });
 }
 
 // ---------------------------------------------------------------------------
-// Vidéo avec récompense — « Regarder une pub pour gagner 0,1 ElyCoins »
+// Interstitiel récompensé — « Regarder une pub pour gagner des ElyCoins »
 // ---------------------------------------------------------------------------
 
 /**
- * Affiche une annonce vidéo avec récompense.
- * Transmet l'identifiant utilisateur via `ssv.userId` afin que le callback
- * AdMob SSV (vérifié côté serveur) puisse créditer le bon compte.
- * Résout `true` uniquement si l'utilisateur a gagné la récompense.
+ * Déclare l'utilisateur courant. Son identifiant accompagne la demande de
+ * récompense : Meta le renvoie à notre Worker (paramètre `puid`), qui crédite
+ * alors le bon compte après un 200.
  */
-export async function showRewardedAd(uid: string): Promise<boolean> {
+export function setAdsUser(uid: string | null): void {
+  adsUserId = uid || null;
+}
+
+/** La validation serveur n'a de sens que si le Worker et l'utilisateur existent. */
+function useServerReward(): boolean {
+  return Boolean(ADS_S2S_REWARD_URL && adsUserId);
+}
+
+/** Paramètres Meta communs aux deux appels récompensés. */
+function rewardOptions() {
+  const serverValidation = useServerReward();
+  return {
+    placementId: AD_PLACEMENTS.rewarded,
+    userId: adsUserId ?? '',
+    rewardId: META_REWARD_CURRENCY,
+    serverValidation,
+  };
+}
+
+async function preloadRewarded(): Promise<void> {
+  if (!isNative() || !adsAllowed) return;
+  try {
+    await NativeAds.prepareRewardedInterstitial(rewardOptions());
+    rewardedReady = true;
+  } catch (e) {
+    warn('rewarded load', e);
+    rewardedReady = false;
+  }
+}
+
+/**
+ * Affiche un interstitiel récompensé.
+ * Résout `true` uniquement si Meta a confirmé la fin de la vidéo.
+ */
+export async function showRewardedAd(): Promise<boolean> {
   if (!isNative()) return false;
   if (!(await ensureAds())) return false;
   if (fullScreenAdVisible) return false;
 
-  try {
-    // La récompense est nominative (SSV) : on prépare juste avant l'affichage.
-    await AdMob.prepareRewardVideoAd({
-      adId: AD_UNITS.rewarded,
-      ssv: { userId: uid },
-    });
-  } catch (e) {
-    warn('rewarded load', e);
-    return false;
-  }
+  // Charge l'annonce juste avant : Meta ne paie pas une annonce périmée
+  // (validité de 60 minutes).
+  await withTimeout(preloadRewarded(), LOAD_TIMEOUT_MS, undefined);
 
   return new Promise<boolean>((resolve) => {
     let done = false;
-    rewardEarned = false;
     const finish = (earned: boolean) => {
       if (done) return;
       done = true;
-      if (resolveRewardShown === finish) resolveRewardShown = null;
       resolve(earned);
     };
-    resolveRewardShown = finish;
-    setTimeout(() => finish(rewardEarned), SHOW_TIMEOUT_MS);
+    setTimeout(() => finish(false), SHOW_TIMEOUT_MS);
 
     beginFullScreenAd();
-    AdMob.showRewardVideoAd().catch((e) => {
-      warn('rewarded show', e);
-      cancelFullScreenAd();
-      finish(false);
-    });
+    withTimeout(
+      NativeAds.showRewardedInterstitial(rewardOptions()),
+      LOAD_TIMEOUT_MS,
+      { rewarded: false }
+    )
+      .then((result) => {
+        endFullScreenAd();
+        rewardedReady = false;
+        finish(result.rewarded === true);
+        void preloadRewarded();
+      })
+      .catch((e) => {
+        warn('rewarded show', e);
+        cancelFullScreenAd();
+        rewardedReady = false;
+        finish(false);
+        void preloadRewarded();
+      });
   });
 }
 
 // ---------------------------------------------------------------------------
-// App Open Ad (ouverture / retour sur l'application)
+// Bannière — affichée sur chaque écran de l'application
 // ---------------------------------------------------------------------------
 
-// Garde-fous : plafond journalier + cooldown, pour éviter une UX punitive
-// et un rejet Play Store (l'App Open Ad ne doit pas être intrusive).
+/** Affiche la bannière ancrée en bas de l'écran (une seule fois par session). */
+export async function showBanner(): Promise<void> {
+  if (!isNative()) return;
+  if (!(await ensureAds())) return;
+  if (bannerVisible) return;
+  try {
+    const info = await Device.getInfo();
+    const tablet = info.platform === 'android' && /tablet/i.test(info.model ?? '');
+    await NativeAds.showBanner({ placementId: AD_PLACEMENTS.banner, tablet });
+    bannerVisible = true;
+    // Réserve la place occupée par la bannière côté CSS.
+    const { height } = await NativeAds.getBannerHeight({
+      placementId: AD_PLACEMENTS.banner,
+      tablet,
+    });
+    applyBannerInset(height);
+  } catch (e) {
+    warn('banner show', e);
+    bannerVisible = false;
+  }
+}
+
+/** Retire la bannière et libère la place réservée. */
+export async function hideBanner(): Promise<void> {
+  if (!isNative()) return;
+  try {
+    await NativeAds.hideBanner();
+  } catch (e) {
+    warn('banner hide', e);
+  }
+  bannerVisible = false;
+  applyBannerInset(0);
+}
+
+/**
+ * Publie la hauteur de la bannière dans une variable CSS. Les écrans réservent
+ * cette place (`--ad-banner-height`) pour ne jamais passer sous l'annonce.
+ */
+function applyBannerInset(height: number) {
+  try {
+    document.documentElement.style.setProperty('--ad-banner-height', `${height}px`);
+  } catch {
+    /* pas de DOM (tests) : sans effet */
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Annonce d'ouverture
+// ---------------------------------------------------------------------------
+
+// Garde-fous : plafond journalier + cooldown, pour éviter une UX punitive.
 const APP_OPEN_DAILY_CAP = 2; // maximum d'annonces d'ouverture par jour
 const APP_OPEN_COOLDOWN_MS = 10 * 60 * 1000; // au moins 10 min entre deux
-/** Après une autre annonce plein écran, pas d'annonce d'ouverture : le retour
- *  dans l'app après un interstitiel ne doit pas déclencher une 2ᵉ annonce. */
+/** Après une autre annonce plein écran, pas d'annonce d'ouverture. */
 const APP_OPEN_AFTER_AD_MS = 60 * 1000;
-const APP_OPEN_PREFS = 'appOpenAd.v1';
+const APP_OPEN_PREFS = 'appOpenAd.v2';
 
 function todayKey(): string {
   return new Date().toISOString().slice(0, 10); // YYYY-MM-DD
@@ -600,7 +772,7 @@ async function readAppOpenState(): Promise<AppOpenState> {
   return { date: todayKey(), count: 0, lastShownAt: 0 };
 }
 
-/** Décide si l'App Open Ad peut être affichée (plafond + cooldown). */
+/** Décide si l'annonce d'ouverture peut être affichée (plafond + cooldown). */
 export async function shouldShowAppOpenAd(): Promise<boolean> {
   if (!isNative() || !canShowAds()) return false;
   if (fullScreenAdVisible) return false;
@@ -616,7 +788,7 @@ export async function shouldShowAppOpenAd(): Promise<boolean> {
   }
 }
 
-/** Mémorise l'affichage d'une App Open Ad (plafond journalier). */
+/** Mémorise l'affichage d'une annonce d'ouverture (plafond journalier). */
 export async function recordAppOpenAdShown(): Promise<void> {
   try {
     const s = await readAppOpenState();
@@ -634,39 +806,22 @@ export async function recordAppOpenAdShown(): Promise<void> {
   }
 }
 
-/** Précharge l'annonce d'ouverture (à appeler au démarrage). */
-export async function loadAppOpenAd(): Promise<void> {
-  if (!(await ensureAds())) return;
-  if (appOpenReady) return;
-  try {
-    await AdMob.loadAppOpen({ adId: AD_UNITS.appOpen });
-    appOpenReady = true;
-  } catch (e) {
-    warn('appOpen load', e);
-  }
-}
-
-/** Affiche l'annonce d'ouverture si elle est prête et autorisée. */
+/**
+ * Affiche l'annonce d'ouverture si elle est autorisée.
+ *
+ * Meta n'ayant pas de format « app open », c'est l'interstitiel qui est utilisé
+ * au lancement : il est préchargé pendant l'écran de connexion pour être prêt
+ * au premier affichage.
+ */
 export async function showAppOpenAdIfReady(): Promise<void> {
   if (!(await ensureAds())) return;
   if (!(await shouldShowAppOpenAd())) return;
-  try {
-    let loaded = appOpenReady;
-    if (!loaded) {
-      const { value } = await AdMob.isAppOpenLoaded();
-      loaded = value === true;
-    }
-    if (!loaded) {
-      // Pas encore prête : on la charge pour la prochaine ouverture.
-      await loadAppOpenAd();
-      return;
-    }
-    beginFullScreenAd();
-    await AdMob.showAppOpen();
-    await recordAppOpenAdShown();
-  } catch (e) {
-    cancelFullScreenAd();
-    appOpenReady = false;
-    warn('appOpen show', e);
-  }
+  await showInterstitial('app-open');
+  await recordAppOpenAdShown();
+}
+
+/** Charge l'annonce d'ouverture en avance (même slot que l'interstitiel). */
+export async function loadAppOpenAd(): Promise<void> {
+  if (!(await ensureAds())) return;
+  await preloadInterstitial();
 }

@@ -20,6 +20,8 @@ export interface Env {
   GOOGLE_APPLICATION_CREDENTIALS: string; // JSON du compte de service (secret)
   API_SECRET: string; // secret partagé pour /fcm/send
   PACKAGE_NAME: string; // com.elysium.elywalk
+  /** Client Token Meta Audience Network (secret) : authentifie /meta-reward. */
+  META_CLIENT_TOKEN?: string;
 }
 
 interface ServiceAccount {
@@ -345,6 +347,27 @@ async function verifySsv(url: URL): Promise<{ ok: boolean; reason?: string }> {
   }
 }
 
+/** Comparaison de chaînes à temps constant (évite les fuites par durée). */
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+/**
+ * Décode le montant d'une récompense Meta (`Coins0.1`) en ElyCoins.
+ * Renvoie `null` si le format est inattendu ou le montant hors bornes.
+ */
+function parseRewardAmount(pc: string): number | null {
+  const match = /^[A-Za-z]*([0-9]+(?:[.,][0-9]+)?)$/.exec(pc.trim());
+  if (!match) return null;
+  const value = Number(match[1].replace(',', '.'));
+  if (!Number.isFinite(value) || value <= 0) return null;
+  // Plafond de sécurité : 1 ElyCoin par vidéo, quel que soit le réglage Meta.
+  return Math.min(value, 1);
+}
+
 /** Crédite (atomique + idempotent) un gain de pub récompensée via commit. */
 async function creditAdReward(
   sa: ServiceAccount,
@@ -571,6 +594,45 @@ export default {
         const tx = url.searchParams.get('transaction_id') || '';
         if (!uid || !tx) return json({ ok: false, reason: 'missing user_id/transaction_id' }, 400);
         const credited = await creditAdReward(sa, uid, AD_REWARD_COINS, tx);
+        return json({ ok: true, credited });
+      }
+
+      // Meta Audience Network — validation serveur des récompenses (S2S).
+      //
+      // Meta appelle cette URL APRÈS la fermeture de l'écran de fin, avec :
+      //   token : Client Token de l'application (secret partagé)
+      //   puid  : identifiant ElyWalk de l'utilisateur (transmis par le SDK)
+      //   pc    : montant de la récompense, au format `Coins0.1`
+      //   ptid  : identifiant unique de la transaction (idempotence)
+      //
+      // Répondre 200 => Meta émet `onRewardServerSuccess` et l'application
+      // crédite ; toute autre réponse => pas de récompense.
+      if (request.method === 'GET' && path === '/meta-reward') {
+        const token = url.searchParams.get('token') || '';
+        const expected = env.META_CLIENT_TOKEN || '';
+        if (!expected) {
+          return json({ ok: false, reason: 'META_CLIENT_TOKEN non configuré' }, 500);
+        }
+        // Comparaison à temps constant : évite une fuite par mesure de durée.
+        if (!timingSafeEqual(token, expected)) {
+          return json({ ok: false, reason: 'invalid token' }, 401);
+        }
+
+        const uid = url.searchParams.get('puid') || '';
+        const tx = url.searchParams.get('ptid') || '';
+        if (!uid || !tx) {
+          return json({ ok: false, reason: 'missing puid/ptid' }, 400);
+        }
+
+        // Le montant vient de Meta (`pc`), pas du client : on le plafonne
+        // quand même pour qu'une campagne mal configurée ne crédite pas une
+        // fortune.
+        const coins = parseRewardAmount(url.searchParams.get('pc') || '');
+        if (coins === null) {
+          return json({ ok: false, reason: 'invalid reward amount' }, 400);
+        }
+
+        const credited = await creditAdReward(sa, uid, coins, `meta_${tx}`);
         return json({ ok: true, credited });
       }
 

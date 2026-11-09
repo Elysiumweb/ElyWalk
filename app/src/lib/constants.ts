@@ -1,45 +1,70 @@
 // ===== ElyWalk — Constantes globales =====
 
-// --- AdMob (production) ---
-// ⚠️ L'ID d'application doit être IDENTIQUE à celui déclaré dans
-// `android/app/src/main/AndroidManifest.xml`
-// (meta-data `com.google.android.gms.ads.APPLICATION_ID`). Si les deux
-// diffèrent — ou si les blocs d'annonces appartiennent à un autre compte —
-// le SDK Google Mobile Ads ne renvoie jamais d'annonce.
-export const ADMOB_APP_ID = 'ca-app-pub-5316598937383510~4963026878';
-/** Vidéo avec récompense : « Regarder une pub pour gagner 0,1 ElyCoins ». */
-export const AD_UNIT_REWARDED = 'ca-app-pub-5316598937383510/9832210178';
-/** Annonce à l'ouverture de l'application (App Open). */
-export const AD_UNIT_APP_OPEN = 'ca-app-pub-5316598937383510/6986554989';
-/** Interstitiel : validation des pas, fin de sortie, demande de retrait. */
-export const AD_UNIT_INTERSTITIAL = 'ca-app-pub-5316598937383510/7972992736';
-
-// --- AdMob (vérification du câblage) ---
-// Blocs d'annonces de **test** officiels Google : toujours remplis, quel que
-// soit l'état du compte. Ils permettent de distinguer « le code ne marche
-// pas » de « la régie ne renvoie rien » (application pas encore validée,
-// message RGPD absent, nouvelle unité sans inventaire).
+// --- Meta Audience Network (régie publicitaire) ---
 //
-//   VITE_TEST_ADS=1 npm run build && npx cap sync android
+// ElyWalk n'utilise pas Google AdMob (compte refusé par Google) ni aucune
+// plateforme de médiation : le SDK Meta Audience Network est intégré en direct
+// et sert l'inventaire des annonceurs Meta.
 //
-// ⚠️ Ne jamais publier un AAB construit avec cette variable : aucun revenu.
-// ⚠️ Ne jamais cliquer sur une vraie annonce depuis un build de test : le
-//    « trafic invalide » peut faire suspendre le compte AdMob.
-const TEST_AD_UNIT_APP_OPEN = 'ca-app-pub-3940256099942544/9257395921';
-const TEST_AD_UNIT_INTERSTITIAL = 'ca-app-pub-3940256099942544/1033173712';
-const TEST_AD_UNIT_REWARDED = 'ca-app-pub-3940256099942544/5224354917';
+// Les identifiants ci-dessous sont des **identifiants de placement** relevés
+// dans le Monetization Manager de Meta. Format : `<APP_ID>_<PLACEMENT_ID>`.
+// ⚠️ Ils doivent rester identiques à ceux du Monetization Manager : un
+// placement inconnu renvoie « no fill », donc aucune annonce.
+//
+// Meta étant « bidding only », ces placements ne diffusent que si
+// l'application est validée côté Meta (fiche Play + app-ads.txt, voir
+// DEPLOYMENT.md). Le prix plancher d'un placement n'est pas géré par le code.
 
-// Écrit en dur par Vite au moment du build : la condition est évaluée à la
-// compilation, et les blocs de test disparaissent complètement du paquet de
-// production (vérifiable avec `grep 3940256099942544 dist/assets/*.js`).
-export const USE_TEST_ADS = import.meta.env.VITE_TEST_ADS === '1';
+/** Identifiant de l'application ElyWalk chez Meta (partie avant `_`). */
+export const META_APP_ID = '1712220190424595';
 
-/** Blocs réellement utilisés par `lib/ads.ts` (production sauf VITE_TEST_ADS=1). */
-export const AD_UNITS = {
-  appOpen: USE_TEST_ADS ? TEST_AD_UNIT_APP_OPEN : AD_UNIT_APP_OPEN,
-  interstitial: USE_TEST_ADS ? TEST_AD_UNIT_INTERSTITIAL : AD_UNIT_INTERSTITIAL,
-  rewarded: USE_TEST_ADS ? TEST_AD_UNIT_REWARDED : AD_UNIT_REWARDED,
+/** Bannière 320×50 — affichée sur chaque écran de l'application. */
+export const META_PLACEMENT_BANNER = '1712220190424595_1712220347091246';
+/** Interstitiel plein écran — lancement, validation des pas, fin de sortie, retrait. */
+export const META_PLACEMENT_INTERSTITIAL = '1712220190424595_1712220353757912';
+/** Rectangle moyen 300×250 — emplacement disponible, non utilisé par défaut. */
+export const META_PLACEMENT_MEDIUM_RECTANGLE = '1712220190424595_1712220350424579';
+/** Natif — emplacement disponible, non utilisé par défaut. */
+export const META_PLACEMENT_NATIVE = '1712220190424595_1712220357091245';
+/** Bannière native — emplacement disponible, non utilisé par défaut. */
+export const META_PLACEMENT_NATIVE_BANNER = '1712220190424595_1712220360424578';
+/** Interstitiel récompensé — « regarder une pub pour gagner des ElyCoins ». */
+export const META_PLACEMENT_REWARDED = '1712220190424595_1712220367091244';
+
+/**
+ * Placements réellement utilisés par `lib/ads.ts`.
+ *
+ * Le rectangle moyen, le natif et la bannière native restent déclarés : ils
+ * sont prêts pour un usage ultérieur (encarts dans les listes, page Partenaires)
+ * mais ne sont pas demandés, car Meta exige un rendu natif spécifique côté
+ * Android pour valider une impression.
+ */
+export const AD_PLACEMENTS = {
+  banner: META_PLACEMENT_BANNER,
+  interstitial: META_PLACEMENT_INTERSTITIAL,
+  rewarded: META_PLACEMENT_REWARDED,
+  mediumRectangle: META_PLACEMENT_MEDIUM_RECTANGLE,
+  native: META_PLACEMENT_NATIVE,
+  nativeBanner: META_PLACEMENT_NATIVE_BANNER,
 } as const;
+
+/**
+ * Devise envoyée à Meta pour la validation serveur (S2S) des récompenses.
+ * Meta la renvoie dans le paramètre `pc` du callback (`Coins1`).
+ */
+export const META_REWARD_CURRENCY = 'Coins';
+
+/**
+ * URL de validation serveur des récompenses (Meta S2S), servie par le Worker
+ * Cloudflare (`GET /meta-reward`, voir /worker/README.md).
+ *
+ * - vide  : pas de validation serveur, la récompense est créditée côté client
+ *   (`creditAdReward`, borné par les règles Firestore) ;
+ * - renseignée : Meta n'émet `onRewardServerSuccess` qu'après un 200 de cette
+ *   URL, et c'est le Worker qui crédite. La même URL doit être déclarée dans le
+ *   Monetization Manager (placement récompensé → Server Side Reward Validation).
+ */
+export const ADS_S2S_REWARD_URL = ''; // ex. 'https://elywalk-backend.<compte>.workers.dev/meta-reward'
 
 // --- Documents légaux en ligne (exigence Play Store : URL publique) ---
 // Page statique servie par Firebase Hosting (app/public/privacy.html).

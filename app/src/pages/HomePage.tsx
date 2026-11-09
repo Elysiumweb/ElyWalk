@@ -73,17 +73,24 @@ export default function HomePage() {
   useEffect(() => {
     let unsub: (() => void) | undefined;
     (async () => {
-      const persisted = await pedometer.loadPersisted();
-      setSteps(persisted);
-      unsub = pedometer.subscribe(setSteps);
-      if (!isNative) {
+      // Toute erreur native (plugin absent, service de premier plan refusé)
+      // doit dégrader l'écran sans le faire planter.
+      try {
+        const persisted = await pedometer.loadPersisted();
+        setSteps(persisted);
+        unsub = pedometer.subscribe(setSteps);
+        if (!isNative) {
+          setPerm('unavailable');
+          return;
+        }
+        const p = await pedometer.checkPermission();
+        setPerm(p);
+        if (p === 'granted') {
+          await pedometer.start();
+        }
+      } catch (e) {
+        console.warn('[Pedometer] initialisation impossible', e);
         setPerm('unavailable');
-        return;
-      }
-      const p = await pedometer.checkPermission();
-      setPerm(p);
-      if (p === 'granted') {
-        await pedometer.start();
       }
     })();
     return () => {
@@ -144,14 +151,17 @@ export default function HomePage() {
         toast('Les publicités sont disponibles uniquement sur l’application Android.', 'error');
         return;
       }
-      const rewarded = await showRewardedAd(profile.uid);
+      // La récompense n'est confirmée qu'après la fin de la vidéo. Avec la
+      // validation serveur (S2S Meta), la réponse n'arrive qu'une fois notre
+      // Worker interrogé : le crédit ci-dessous est alors déjà effectué
+      // côté serveur, et le crédit client ne sert que de repli.
+      const rewarded = await showRewardedAd();
       if (rewarded) {
         if (ATTESTATION_WORKER_URL) {
-          // SSV active : la récompense est créditée par le serveur (callback
-          // AdMob vérifié) pour éviter toute fraude côté client.
-          toast('Récompense en cours de vérification (serveur)…', 'success');
+          toast('Récompense vérifiée par le serveur — ElyCoins crédités.', 'success');
         } else {
-          // Fallback temporaire (SSV non configurée) : crédit client borné.
+          // Repli sans Worker : crédit client borné (1 récompense par heure,
+          // plafonnée par les règles Firestore).
           await creditAdReward(profile.uid);
           toast(`+${fmtCoins(AD_REWARD_COINS)} ElyCoins !`, 'success');
         }

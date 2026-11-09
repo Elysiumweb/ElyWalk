@@ -16,15 +16,42 @@ offertes, tâches planifiées incluses).
 |---|---|---|
 | `GET` | `/` | État de santé |
 | `POST` | `/verify-integrity` | Vérifie un jeton **Play Integrity** (F05) |
-| `GET` | `/ssv` | Callback **AdMob Server-Side Verification** (F05) |
+| `GET` | `/ssv` | Callback **AdMob Server-Side Verification** (F05, historique — AdMob n'est plus utilisé) |
+| `GET` | `/meta-reward` | Validation serveur des récompenses **Meta Audience Network** (`token`, `puid`, `pc`, `ptid`) |
 | `POST` | `/fcm/send` | Envoi d'un **push FCM** (protégé par `API_SECRET`) |
 | `GET` | `/cron/process-notifications` | Consomme `friendRequests` + `withdrawals` → push (F11) |
 | `GET` | `/cron/process-payouts` | File de retraits (F06) |
 
 Le Worker possède les droits d'un **compte de service Firebase** (contournement des
 règles Firestore) : c'est le seul composant de confiance qui peut créditer un solde
-sur une preuve externe (intégrité Play ou callback SSV signé). Le client ne peut pas
-forger ces écritures.
+sur une preuve externe (intégrité Play ou callback de récompense signé). Le client ne
+peut pas forger ces écritures.
+
+## Récompenses publicitaires (Meta Audience Network)
+
+`/meta-reward` est appelé par les serveurs de Meta après la fermeture de
+l'écran de fin d'une vidéo récompensée. Meta y ajoute :
+
+| Paramètre | Contenu |
+|---|---|
+| `token` | **Client Token** de l'application (secret partagé avec Meta) |
+| `puid` | identifiant ElyWalk de l'utilisateur (transmis par `RewardData`) |
+| `pc` | montant de la récompense, format `Coins0.1` |
+| `ptid` | identifiant unique de transaction (idempotence du crédit) |
+
+Réponse attendue : **HTTP 200**. Toute autre réponse annule la récompense côté
+application (`onRewardServerFailed`).
+
+```bash
+wrangler secret put META_CLIENT_TOKEN   # Monetization Manager → Paramètres → Avancé
+```
+
+Configurer ensuite l'URL dans le Monetization Manager (placement récompensé →
+*Server Side Reward Validation*) :
+
+```
+https://<worker>/meta-reward
+```
 
 ## Déploiement
 
@@ -69,18 +96,13 @@ pour tester (ex. `curl https://<votre-worker>.workers.dev/cron/process-notificat
 Le client (voir `app/src/lib/attestation.ts`) demande un jeton, l'envoie à
 `/verify-integrity`, et le Worker confirme (ou non) l'intégrité de l'appareil.
 
-### AdMob SSV (F05)
-1. Console AdMob → bloc **Récompensées** → *Vérification côté serveur* : renseigner
-   l'URL `https://<votre-worker>.workers.dev/ssv`.
-2. Les **clés publiques** sont récupérées automatiquement par le Worker depuis le
-   serveur de clés Google (aucun secret à configurer).
-3. Côté app, `showRewardedAd(uid)` transmet l'uid via `ssv.userId` → paramètre
-   `user_id` du callback. Le Worker crédite le bon compte après vérification.
+### Récompenses Meta S2S (régie actuelle)
 
-> ⚠️ Les callbacks SSV ne partent que sur les annonces de **production** (pas en
-> mode test). Utiliser l'outil de validation de la console AdMob pour tester
-> l'endpoint. Tant que `ATTESTATION_WORKER_URL` est vide côté app, le crédit reste
-> client (fallback) ; une fois l'URL renseignée, le crédit passe côté serveur.
+La route à utiliser depuis la 1.8.0 est **`/meta-reward`** (voir la section
+« Récompenses publicitaires » ci-dessus) : elle remplace l'ancien `/ssv` d'AdMob,
+conservé uniquement pour l'historique. Côté app, l'URL se renseigne dans
+`app/src/lib/constants.ts` (`ADS_S2S_REWARD_URL`) — c'est ce qui bascule le
+crédit côté serveur.
 
 ## Sécurité
 

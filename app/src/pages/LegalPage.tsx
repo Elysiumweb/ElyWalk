@@ -118,23 +118,27 @@ const content: Record<string, LegalDoc> = {
           <li>Fourniture et fonctionnement du service (exécution du contrat).</li>
           <li>Sécurité et lutte contre la fraude (intérêt légitime).</li>
           <li>Récompenses et programme de fidélité (exécution du contrat).</li>
-          <li>Publicité personnalisée ou non personnalisée (consentement, via le module de
-            consentement Google).</li>
+          <li>Publicité personnalisée ou non personnalisée (consentement recueilli par
+            notre propre écran publicitaire).</li>
         </ul>
 
-        <h2>4. Publicité (AdMob) et consentement</h2>
+        <h2>4. Publicité (Meta Audience Network) et consentement</h2>
         <p>
-          Les annonces sont servies par Google AdMob. Dans l’Espace économique européen
-          et au Royaume-Uni, un formulaire de consentement (Google UMP / Funding Choices)
-          est affiché avant toute publicité ; vous pouvez le modifier à tout moment depuis
-          Profil → « Confidentialité des annonces ». Sans consentement, aucune annonce
-          personnalisée n’est diffusée.
+          Les annonces sont servies par Meta Audience Network (Meta Platforms Ireland
+          Limited), intégré directement à l’application. Dans l’Espace économique européen,
+          au Royaume-Uni et en Suisse, un écran de consentement est affiché avant toute
+          publicité, avec un choix d’accepter ou de refuser d’un accès équivalent ; vous
+          pouvez modifier ce choix à tout moment depuis Profil → « Modifier mes choix
+          publicitaires ». Sans consentement, <strong>aucune</strong> requête publicitaire
+          n’est envoyée : les annonces ne sont ni personnalisées ni non personnalisées,
+          elles ne sont tout simplement pas demandées. Aux États-Unis, la limitation du
+          traitement des données (Limited Data Use) est appliquée automatiquement.
         </p>
 
         <h2>5. Destinataires</h2>
         <p>
           Google Firebase (hébergement, base de données, authentification, notifications),
-          Google AdMob (publicité), Cloudflare (backend de confiance : attestation d’intégrité,
+          Meta Audience Network (publicité), Cloudflare (backend de confiance : attestation d’intégrité,
           vérification serveur des récompenses, envoi des notifications, file de retraits),
           PayPal (exécution des retraits) et les services publics d’affichage d’adresse IP
           (anti-fraude au parrainage) agissent en qualité de sous-traitants. Aucune donnée

@@ -12,14 +12,19 @@
     <!--
       Thème appliqué par Capacitor à la WebView.
 
-      Affichage de bord à bord : les barres système sont transparentes via le
-      thème (ressources, pas d'appel aux API dépréciées
-      Window#setStatusBarColor / setNavigationBarColor dans Android 15). Le
-      fond de fenêtre reprend le noir de l'application pour éviter tout flash
-      blanc au lancement.
+      Affichage de bord à bord : il est activé par
+      MainActivity.enableEdgeToEdgeCompat() via WindowCompat.enableEdgeToEdge()
+      (androidx.core 1.17.0), l'API recommandée par Google.
 
-      Le mode d'affichage dans les encoches est défini dans values-v30
-      (`always`, remplaçant non déprécié de `shortEdges`).
+      ⚠️ Aucune couleur de barre système n'est déclarée ici : depuis Android 15,
+      `android:statusBarColor`, `android:navigationBarColor` (et
+      `android:enforceStatusBarContrast` / `android:enforceNavigationBarContrast`)
+      sont dépréciés et sans effet — Google Play les signale comme
+      « API ou paramètres obsolètes pour l'affichage de bord à bord ».
+      Les barres sont désormais transparentes par défaut.
+
+      Le fond de fenêtre reprend le noir de l'application pour éviter tout
+      flash blanc au lancement.
     -->
     <style name="AppTheme.NoActionBarBase" parent="Theme.AppCompat.DayNight.NoActionBar">
         <item name="windowActionBar">false</item>
@@ -27,14 +32,9 @@
         <item name="android:background">@null</item>
         <item name="android:windowBackground">@color/elywalkBackground</item>
         <item name="android:windowDrawsSystemBarBackgrounds">true</item>
-        <item name="android:statusBarColor">@android:color/transparent</item>
-        <item name="android:navigationBarColor">@android:color/transparent</item>
         <!-- Interface sombre : icônes claires dans les barres système. -->
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowLightNavigationBar" tools:targetApi="o_mr1">false</item>
-        <!-- Pas de voile automatique derrière les barres transparentes. -->
-        <item name="android:enforceStatusBarContrast" tools:targetApi="q">false</item>
-        <item name="android:enforceNavigationBarContrast" tools:targetApi="q">false</item>
     </style>
 
     <style name="AppTheme.NoActionBar" parent="AppTheme.NoActionBarBase" />

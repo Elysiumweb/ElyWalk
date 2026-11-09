@@ -1,5 +1,121 @@
 # Changelog
 
+## 1.8.0 — 2026-11-08
+
+Changement de **régie publicitaire** : ElyWalk quitte AdMob (compte refusé par
+Google) pour **Meta Audience Network**, intégré en direct, sans aucune
+plateforme de médiation. Les six moments publicitaires sont conservés.
+
+- **Régie Meta Audience Network.** Nouveau pont natif `MetaAds`
+  (`android/.../MetaAdsPlugin.java`, SDK `com.facebook.android:audience-network-sdk`
+  6.22.0) exposant bannière, interstitiel et interstitiel récompensé. Le plugin
+  AdMob (`@capacitor-community/admob`) et toute la machinerie UMP sont
+  supprimés : plus une seule référence à `ca-app-pub` dans le bundle.
+- **Sans médiation.** Meta est branché en direct (pas de TCF, Meta n'étant pas
+  au registre IAB). `lib/ads.ts` reste volontairement agnostique du SDK : brancher
+  une médiation plus tard ne demandera que de remplacer le pont `NativeAds`.
+- **Les six moments conservés**, chacun sur un placement distinct du
+  Monetization Manager :
+  | Moment | Format | Placement |
+  |---|---|---|
+  | Ouverture de l'application | interstitiel #2 | `…_1712220353757912` |
+  | Validation des pas | interstitiel #2 | `…_1712220353757912` |
+  | Vidéo contre des ElyCoins | interstitiel récompensé #6 | `…_1712220367091244` |
+  | Retrait d'ElyCoins | interstitiel #2 | `…_1712220353757912` |
+  | Chaque page | bannière #1 | `…_1712220347091246` |
+  | Fin de sortie GPS | interstitiel #2 | `…_1712220353757912` |
+- **Bannière sur toute l'application.** Vue native ancrée en bas de la WebView ;
+  sa hauteur est publiée dans `--ad-banner-height`, que la barre d'onglets, les
+  écrans et la carte réservent pour ne jamais passer sous l'annonce.
+- **Consentement (CMP maison).** Écran affiché une seule fois, avant la première
+  requête d'annonce, uniquement dans les zones qui l'exigent (EEE, Royaume-Uni,
+  Suisse ; pays indéterminé traité comme « consentement requis »). Refus =
+  aucune publicité, et le choix est modifiable dans Profil → *Modifier mes choix
+  publicitaires*. Aux États-Unis, Limited Data Use est activé automatiquement
+  (`AdSettings.setDataProcessingOptions`).
+- **Validation serveur des récompenses (S2S).** Nouvelle route Worker
+  `GET /meta-reward` (`token`, `puid`, `pc`, `ptid`) : Meta n'émet
+  `onRewardServerSuccess` qu'après un 200, et c'est le Worker qui crédite
+  (idempotent sur `ptid`, montant plafonné). Tant que `ADS_S2S_REWARD_URL` est
+  vide, repli sur le crédit client borné existant.
+- **`app-ads.txt`.** Enregistrement Meta publié :
+  `facebook.com, 1598870752271390, DIRECT, c3e20eee3f780d68` (vérifié par
+  `scripts/check-app-ads.sh`).
+
+## 1.7.1 — 2026-11-08
+
+Version de **correctifs** : elle traite le plantage au lancement et les deux
+avertissements restants de Google Play sur la version 7 (1.7.0).
+
+- **F35 Plantage au lancement — services de premier plan.**
+  `TrackingService.onCreate()` restaurait la trace GPS (lecture disque,
+  `SharedPreferences`, parsing JSON) **avant** d'appeler `startForeground()`.
+  Sur un appareil lent ou une trace volumineuse, ce travail dépassait le délai
+  de 5 s imposé par Android après `startForegroundService()` : le système
+  terminait le processus (`ForegroundServiceDidNotStartInTimeException`), ce
+  que l'utilisateur voit comme une fermeture immédiate de l'application. La
+  promotion en premier plan est désormais **la première instruction**, la
+  restauration ensuite ; la notification est disponible dès le départ (le canal
+  est créé dans `buildNotification()`).
+- **F36 Plantage au lancement — pont JavaScript.** `StepCounterService`
+  remontait les exceptions du capteur et de sa notification au pont Capacitor,
+  qui les relance sur le thread principal (`Bridge.callPluginMethod` →
+  `throw new RuntimeException(ex)`), donc en plantage applicatif. Les appels
+  sensibles (`StepStore`, listener JS, widget, enregistrement du capteur) sont
+  encapsulés. `BootReceiver` passe par `StepCounterService.startQuietly()`, qui
+  absorbe `ForegroundServiceStartNotAllowedException` (ROM restrictives).
+- **F37 Plantage au lancement — WebView.** Si le moteur de rendu de la WebView
+  meurt (mémoire insuffisante, pilote graphique), Android termine le processus
+  par défaut : nouvelle implémentation de `WebViewListener.onRenderProcessGone`
+  dans `MainActivity`, qui recrée l'activité (`return true`).
+- **F38 Écran blanc.** Filet de sécurité côté web : `AppErrorBoundary` +
+  `lib/startup-guard.ts`. Une exception de rendu, un bundle illisible ou un
+  échec d'initialisation affichent un écran explicite avec un bouton
+  « Réessayer » au lieu d'une page blanche. Effets de démarrage (`pedometer`,
+  liens entrants, partage système) protégés contre les rejets non capturés.
+- **F39 Bord à bord — avertissement « peut ne pas être disponible pour tous les
+  utilisateurs ».** `MainActivity` appelle désormais
+  `WindowCompat.enableEdgeToEdge(getWindow())` (androidx.core 1.17.0, déjà
+  présent), l'API recommandée par Google pour activer le bord à bord de façon
+  rétrocompatible sur toutes les versions d'Android. Repli interne si l'appel
+  échoue (l'interface ne doit jamais être bloquée par le bord à bord), et icônes
+  claires forcées dans les barres système.
+- **F40 Bord à bord — avertissement « API ou paramètres obsolètes ».**
+  Suppression de `android:statusBarColor`, `android:navigationBarColor`,
+  `android:enforceStatusBarContrast` et `android:enforceNavigationBarContrast`
+  du thème : dépréciés et sans effet depuis Android 15, ils étaient signalés par
+  Play. Les barres sont transparentes par défaut. Le mode encoche reste
+  `always` (`values-v30`), remplaçant non déprécié de `shortEdges`.
+- **F41 R8 — avertissement « Améliorez la mémoire et les performances avec
+  l'optimisation R8 ».** Règles de conservation complétées pour que R8 puisse
+  optimiser sans casser l'application : plugin podomètre tiers
+  (`app.capgo.pedometer.**`, sans règles « consumer »), `MainActivity`,
+  dépendance optionnelle Facebook du plugin Firebase Authentication.
+  `android.enableR8.keepLineNumbers=true` conserve des traces de pile lisibles
+  sans désactiver l'obscurcissement. `mapping.txt` reste joint à l'AAB.
+- Version `8 / 1.7.1` (le `versionCode` doit progresser à chaque envoi).
+- Tests : 46 (dont 7 nouveaux sur le filet de sécurité du démarrage).
+
+### ⚠️ Origine de la version 7 (1.7.0) — cause commune des trois symptômes
+
+Vérification faite sur le dépôt : le commit qui a produit la version 7
+(`2f24263`, branche `arena795`) descend de la **1.4.0** (`26c48c8`) et **ne
+contient pas** les correctifs de la 1.6.0 (PR #13). Son `build.gradle` porte
+encore `minifyEnabled false` et son thème n'a ni bord à bord ni mode encoche :
+
+- les deux avertissements Play de la version 7 (« bord à bord » et
+  « optimisation R8 ») portent donc sur du code **antérieur** à la 1.6.0 : ces
+  correctifs existaient déjà sur `main` mais n'ont jamais été publiés ;
+- le plantage au lancement est celui du code natif de la 1.4.0 : promotion en
+  premier plan trop tardive, exceptions du pont non capturées, aucun filet de
+  sécurité si le moteur de rendu WebView meurt (F35 à F38) ;
+- seul changement fonctionnel de la version 7 : la migration des identifiants
+  AdMob (`d097b14`), déjà présente sur `main`.
+
+**Conséquence opérationnelle :** la version 8 doit être construite depuis
+`main` (cette branche), jamais depuis une branche de travail oubliée ni depuis
+un AAB archivé.
+
 ## 1.6.0 — 2026-11-02
 
 - **F28** `app-ads.txt` publié. La validation échouait dans la console AdMob
@@ -26,10 +142,11 @@
   pour la fenêtre de l'application **et** pour l'écran de lancement : plus
   aucune ressource de l'application ne demande `shortEdges`, déprécié depuis
   Android 15.
-- **F31** Optimisation R8 poussée (recommandation « mémoire et performances »
-  de Google Play) : `android.enableR8.fullMode=true`,
-  `-allowaccessmodification` et `-repackageclasses ''`, mémoire du démon Gradle
-  portée à 4 Go pour absorber la passe d'optimisation complète.
+- **F31** Optimisation R8 (recommandation « mémoire et performances » de Google
+  Play) : `android.enableR8.fullMode=true` et mémoire du démon Gradle portée à
+  4 Go pour absorber la passe d'optimisation complète. Pas de
+  `-repackageclasses ''` / `-allowaccessmodification` : sans effet sur le
+  verdict de Play, mais déplacement de classes repérées par leur nom complet.
 - **F33** Diagnostic publicitaire lisible. Détecte notamment l'absence de
   message de consentement dans AdMob (`NOT_REQUIRED` + aucun formulaire +
   aucune option de confidentialité), cause d'un remplissage nul en EEE/UK

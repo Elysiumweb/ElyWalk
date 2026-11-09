@@ -16,6 +16,9 @@ set -u
 
 PUB_ID="pub-5316598937383510"
 EXPECTED="google.com, ${PUB_ID}, DIRECT, f08c47fec0942fa0"
+# Meta Audience Network (régie principale d'ElyWalk depuis la 1.8.0).
+META_ID="1598870752271390"
+META_EXPECTED="facebook.com, ${META_ID}, DIRECT, c3e20eee3f780d68"
 
 # 1er = domaine declare sur Play (le seul qui compte), 2e = variante www,
 # 3e = miroir Firebase (utile seulement si la fiche Play est modifiee).
@@ -123,6 +126,14 @@ for base in "${HOSTS[@]}"; do
     green "enregistrement trouve : ${EXPECTED}"
   else
     red "enregistrement AdMob introuvable (attendu : ${EXPECTED})"
+    overall=1
+  fi
+
+  # 6 bis. Enregistrement Meta Audience Network (requis pour monetiser)
+  if printf '%s' "$body" | tr -d '\r' | grep -Eiq "^[[:space:]]*facebook\.com[[:space:]]*,[[:space:]]*${META_ID}[[:space:]]*,[[:space:]]*(DIRECT|RESELLER)[[:space:]]*,[[:space:]]*c3e20eee3f780d68"; then
+    green "enregistrement Meta trouve : ${META_EXPECTED}"
+  else
+    red "enregistrement Meta introuvable (attendu : ${META_EXPECTED})"
     overall=1
   fi
 
