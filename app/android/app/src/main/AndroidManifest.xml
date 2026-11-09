@@ -14,12 +14,11 @@
         android:theme="@style/AppTheme">
 
         <!-- Régie publicitaire : Meta Audience Network (intégration directe).
-             ⚠️ L'identifiant d'application doit rester identique à
-             META_APP_ID (src/lib/constants.ts) et à celui du Monetization
-             Manager, sinon le SDK ne renvoie aucune annonce. -->
+             ⚠️ L'identifiant d'application doit pointer vers une ressource chaîne
+             (@string/facebook_app_id) pour éviter sa conversion en entier par AAPT. -->
         <meta-data
             android:name="com.facebook.sdk.ApplicationId"
-            android:value="1712220190424595" />
+            android:value="@string/facebook_app_id" />
         <meta-data
             android:name="com.facebook.sdk.ClientToken"
             android:value="@string/facebook_client_token" />
@@ -120,6 +119,7 @@
     <uses-permission android:name="com.google.android.gms.permission.AD_ID" />
     <!-- Comptage de pas : capteur système (Activité physique) -->
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+    <uses-permission android:name="android.permission.HIGH_SAMPLING_RATE_SENSORS" />
     <uses-feature android:name="android.hardware.sensor.stepcounter" android:required="false" />
     <!-- Service de premier plan pour compter les pas app fermée -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />

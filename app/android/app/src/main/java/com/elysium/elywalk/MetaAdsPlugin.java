@@ -90,7 +90,10 @@ public class MetaAdsPlugin extends Plugin {
         // (réseau, Play Services, pays non éligible) ne doit jamais faire
         // planter l'application : on continue sans annonces.
         try {
-            AudienceNetworkAds.initialize(getContext().getApplicationContext());
+            Context ctx = getActivity() != null ? getActivity() : getContext();
+            if (ctx != null && !AudienceNetworkAds.isInitialized(ctx)) {
+                AudienceNetworkAds.initialize(ctx);
+            }
             initialized = true;
         } catch (Throwable t) {
             Log.w(TAG, "Initialisation Meta Audience Network impossible", t);
@@ -168,8 +171,17 @@ public class MetaAdsPlugin extends Plugin {
         }
         final boolean tablet = call.getBoolean("tablet", false);
 
+        if (getActivity() == null || getActivity().isFinishing()) {
+            call.reject("Activité indisponible");
+            return;
+        }
+
         getActivity().runOnUiThread(() -> {
             try {
+                if (getActivity() == null || getActivity().isFinishing()) {
+                    call.reject("Activité détruite");
+                    return;
+                }
                 if (bannerView != null && placementId.equals(bannerPlacementId)) {
                     call.resolve(); // déjà affichée : rien à faire
                     return;
@@ -185,7 +197,7 @@ public class MetaAdsPlugin extends Plugin {
                 AdListener listener = new AdListener() {
                     @Override
                     public void onError(Ad ad, AdError adError) {
-                        Log.w(TAG, "Bannière : " + adError.getErrorMessage());
+                        Log.w(TAG, "Bannière : " + (adError != null ? adError.getErrorMessage() : "erreur"));
                     }
 
                     @Override
@@ -204,6 +216,9 @@ public class MetaAdsPlugin extends Plugin {
                 if (container == null) {
                     call.reject("Conteneur de bannière indisponible");
                     return;
+                }
+                if (view.getParent() instanceof ViewGroup) {
+                    ((ViewGroup) view.getParent()).removeView(view);
                 }
                 FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -229,6 +244,10 @@ public class MetaAdsPlugin extends Plugin {
     /** Retire la bannière et libère la place réservée. */
     @PluginMethod
     public void hideBanner(PluginCall call) {
+        if (getActivity() == null) {
+            call.resolve();
+            return;
+        }
         getActivity().runOnUiThread(() -> {
             destroyBanner();
             call.resolve();
@@ -256,6 +275,7 @@ public class MetaAdsPlugin extends Plugin {
         if (bannerContainer != null && bannerContainer.getParent() != null) {
             return bannerContainer;
         }
+        if (getActivity() == null) return null;
         View root = getActivity().findViewById(android.R.id.content);
         if (!(root instanceof ViewGroup)) {
             return null;
@@ -282,7 +302,9 @@ public class MetaAdsPlugin extends Plugin {
         if (bannerContainer != null) {
             try {
                 bannerContainer.removeAllViews();
-                ((ViewGroup) bannerContainer.getParent()).removeView(bannerContainer);
+                if (bannerContainer.getParent() instanceof ViewGroup) {
+                    ((ViewGroup) bannerContainer.getParent()).removeView(bannerContainer);
+                }
             } catch (Throwable ignored) { }
             bannerContainer = null;
         }
@@ -305,6 +327,10 @@ public class MetaAdsPlugin extends Plugin {
             call.reject("placementId manquant");
             return;
         }
+        if (getActivity() == null || getActivity().isFinishing()) {
+            call.reject("Activité indisponible");
+            return;
+        }
         getActivity().runOnUiThread(() -> {
             loadInterstitial(placementId);
             call.resolve();
@@ -321,7 +347,16 @@ public class MetaAdsPlugin extends Plugin {
         final String placementId = call.getString("placementId");
         final boolean forceReload = Boolean.TRUE.equals(call.getBoolean("reload", true));
 
+        if (getActivity() == null || getActivity().isFinishing()) {
+            call.reject("Activité indisponible");
+            return;
+        }
+
         getActivity().runOnUiThread(() -> {
+            if (getActivity() == null || getActivity().isFinishing()) {
+                call.reject("Activité détruite");
+                return;
+            }
             boolean ready = isInterstitialReady() && placementId != null && placementId.equals(interstitialPlacementId);
             if (!ready && forceReload && placementId != null) {
                 // Repli utile pour l'ouverture de l'application : le temps que
@@ -353,6 +388,7 @@ public class MetaAdsPlugin extends Plugin {
     private void loadInterstitial(String placementId) {
         if (interstitialLoading) return;
         if (interstitial != null && placementId.equals(interstitialPlacementId) && isInterstitialReady()) return;
+        if (getActivity() == null || getActivity().isFinishing()) return;
 
         destroyInterstitial();
         interstitialLoading = true;
@@ -371,7 +407,11 @@ public class MetaAdsPlugin extends Plugin {
                     // L'objet est consommé : on en prépare un autre pour la
                     // prochaine fois, sans bloquer l'interface.
                     destroyInterstitial();
-                    loadInterstitial(placementId);
+                    try {
+                        loadInterstitial(placementId);
+                    } catch (Throwable t) {
+                        Log.w(TAG, "Rechargement interstitiel impossible", t);
+                    }
                     notifyListeners("interstitialDismissed", new JSObject());
                 }
 
@@ -451,6 +491,10 @@ public class MetaAdsPlugin extends Plugin {
             call.reject("placementId manquant");
             return;
         }
+        if (getActivity() == null || getActivity().isFinishing()) {
+            call.reject("Activité indisponible");
+            return;
+        }
         final String userId = call.getString("userId", "");
         final String rewardId = call.getString("rewardId", "Coins");
         final boolean serverValidation = Boolean.TRUE.equals(call.getBoolean("serverValidation", false));
@@ -475,7 +519,16 @@ public class MetaAdsPlugin extends Plugin {
     public void showRewardedInterstitial(final PluginCall call) {
         final String placementId = call.getString("placementId");
 
+        if (getActivity() == null || getActivity().isFinishing()) {
+            call.reject("Activité indisponible");
+            return;
+        }
+
         getActivity().runOnUiThread(() -> {
+            if (getActivity() == null || getActivity().isFinishing()) {
+                call.reject("Activité détruite");
+                return;
+            }
             if (!isRewardedReady() || placementId == null || !placementId.equals(rewardedPlacementId)) {
                 if (placementId != null) {
                     loadRewarded(placementId, call.getString("userId", ""), call.getString("rewardId", "Coins"));
@@ -503,6 +556,7 @@ public class MetaAdsPlugin extends Plugin {
     private void loadRewarded(String placementId, String userId, String rewardId) {
         if (rewardedLoading) return;
         if (rewarded != null && placementId.equals(rewardedPlacementId) && isRewardedReady()) return;
+        if (getActivity() == null || getActivity().isFinishing()) return;
 
         destroyRewarded();
         rewardedLoading = true;

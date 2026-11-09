@@ -62,11 +62,10 @@
 
 # --- Plugins natifs ElyWalk -----------------------------------------------
 # Enregistrés explicitement dans MainActivity et appelés depuis le JavaScript.
-# `allowoptimization` : R8 peut optimiser le corps des méthodes (réduction et
-# vitesse) tout en conservant la classe et ses noms, indispensables au pont.
--keep,allowoptimization class com.elysium.elywalk.StepCounterPlugin { *; }
--keep,allowoptimization class com.elysium.elywalk.TrackingPlugin { *; }
--keep,allowoptimization class com.elysium.elywalk.MetaAdsPlugin { *; }
+# Ne pas utiliser allowoptimization sur les plugins Capacitor appelés par réflexion.
+-keep class com.elysium.elywalk.StepCounterPlugin { *; }
+-keep class com.elysium.elywalk.TrackingPlugin { *; }
+-keep class com.elysium.elywalk.MetaAdsPlugin { *; }
 # Widget, services de premier plan, receiver et activité : instanciés par le
 # système à partir du manifeste (R8 les conserve déjà, on le rend explicite).
 -keep class com.elysium.elywalk.ElyWalkWidget { *; }
@@ -75,21 +74,31 @@
 -keep class com.elysium.elywalk.BootReceiver { *; }
 -keep class com.elysium.elywalk.MainActivity { *; }
 
-# --- Meta Audience Network (régie publicitaire) et Facebook Login ---------
+# --- Meta Audience Network (régie publicitaire) et Facebook SDK ----------
 # Le SDK Audience Network est désormais embarqué (publicité principale de
 # l'application) : ses classes sont résolues par réflexion interne et par le
 # manifeste fusionné (com.facebook.ads.AudienceNetworkActivity). On les
 # conserve telles quelles.
-#
-# `com.facebook.login.**` reste une dépendance optionnelle du plugin Firebase
-# Authentication (compilée mais non embarquée) : -dontwarn évite un échec R8.
 -keep class com.facebook.ads.** { *; }
 -keep class com.facebook.ads.internal.** { *; }
-# Note : `-keep class … { *; }` préserve déjà ces classes ET leurs noms
-# (l'obfuscation est écartée par `-keep`), inutile d'ajouter un `-dontobfuscate`
-# global qui désactiverait l'obfuscation de toute l'application.
--dontwarn com.facebook.login.**
--dontwarn com.facebook.appevents.**
+-keeppackagenames com.facebook.*
+-keep public class com.facebook.ads.** { public protected *; }
+
+# Supprimer les avertissements de classes manquantes (R8 missing_rules.txt) :
+# - com.facebook.infer.annotation.** (annotations Infer du SDK Meta)
+# - com.facebook.** (handlers Facebook optionnels de Firebase Auth et composants internes)
+-dontwarn com.facebook.infer.annotation.**
+-dontwarn com.facebook.ads.internal.**
+-dontwarn com.facebook.**
+
+# --- Dépendances optionnelles de Firebase Authentication ------------------
+# Le plugin @capacitor-firebase/authentication compile des handlers pour
+# tous les fournisseurs (Google, Facebook, Play Games, Credentials).
+# Lorsqu'ils ne sont pas inclus au runtime, R8 doit ignorer les références.
+-dontwarn com.google.android.gms.auth.**
+-dontwarn com.google.android.gms.games.**
+-dontwarn com.google.android.libraries.identity.googleid.**
+-dontwarn androidx.credentials.**
 
 # --- Avertissements des SDK tiers -----------------------------------------
 # Classes optionnelles référencées mais absentes du classpath : elles ne

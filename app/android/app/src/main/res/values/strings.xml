@@ -15,8 +15,9 @@
     <string name="tracking_notif_paused_title">Sortie ElyWalk en pause</string>
     <string name="tracking_notif_paused_text">En pause · %1$s km · %2$d min</string>
     <string name="widget_description">Compteur de pas ElyWalk</string>
-    <!-- Client Token du SDK Meta (Monetization Manager → Paramètres →
-         Avancé → Client Token). Il authentifie les requêtes du SDK : une
-         valeur erronée renvoie « no fill ». -->
+    <!-- Identifiant et Client Token du SDK Meta (Monetization Manager →
+         Paramètres → Avancé). L'application ID DOIT être une ressource chaîne
+         et non un entier brut dans le manifeste, sous peine de NullPointerException. -->
+    <string name="facebook_app_id" translatable="false">1712220190424595</string>
     <string name="facebook_client_token" translatable="false">VOTRE_CLIENT_TOKEN_META</string>
 </resources>
