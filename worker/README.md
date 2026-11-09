@@ -71,7 +71,7 @@ Le client (voir `app/src/lib/attestation.ts`) demande un jeton, l'envoie à
 
 ### AdMob SSV (F05) — legacy
 
-> Depuis la version 1.5.0 de l'application, la régie publicitaire est **Meta
+> Depuis la version 1.9.0 de l'application, la régie publicitaire est **Meta
 > Audience Network**, qui ne fournit pas de vérification serveur signée pour les
 > récompenses. Cet endpoint n'est donc plus appelé ; il est conservé pour
 > compatibilité et peut être retiré sans impact.

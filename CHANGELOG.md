@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.5.0 — 2026-11-09
+## 1.9.0 — 2026-11-09
 
 ### Régie publicitaire : passage d'AdMob à Meta Audience Network
 

@@ -9,7 +9,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(StepCounterPlugin.class);
         registerPlugin(TrackingPlugin.class);
-        // Pont vers le SDK Meta Audience Network (remplace AdMob depuis 1.5.0).
+        // Pont vers le SDK Meta Audience Network (remplace AdMob depuis 1.9.0).
         registerPlugin(MetaAdsPlugin.class);
         super.onCreate(savedInstanceState);
     }

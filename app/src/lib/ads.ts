@@ -11,7 +11,7 @@ import {
 import { getAdConsent, subscribeAdConsent, type AdConsent } from './adConsent';
 
 // ============================================================================
-// Publicité — Meta Audience Network (régie unique depuis 1.5.0).
+// Publicité — Meta Audience Network (régie unique depuis 1.9.0).
 //
 // Le SDK Meta est du code natif Android : la WebView ne peut pas l'appeler
 // directement. Un plugin Capacitor maison (`MetaAdsPlugin.java`) expose donc :

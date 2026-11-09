@@ -178,7 +178,7 @@ npx wrangler deploy
 ```
 
 Les clés publiques AdMob SSV étaient récupérées automatiquement par le Worker ;
-l'endpoint `/ssv` n'est plus appelé depuis la 1.5.0 (Meta Audience Network ne
+l'endpoint `/ssv` n'est plus appelé depuis la 1.9.0 (Meta Audience Network ne
 propose pas de callback serveur signé pour les récompenses). Le crédit ElyCoins
 est borné par la transaction Firestore `adClaims` (une récompense par heure).
 
@@ -202,11 +202,11 @@ npx cap sync android
 npx cap open android
 ```
 
-La version Android est `4 / 1.5.0`.
+La version Android est `190 / 1.9.0`.
 
 ## Consentement publicitaire RGPD (F03)
 
-Depuis la 1.5.0, le consentement n'est plus fourni par Google UMP : il est
+Depuis la 1.9.0, le consentement n'est plus fourni par Google UMP : il est
 recueilli **dans l'application** (`src/lib/adConsent.ts` + `components/AdConsentSheet.tsx`).
 
 - Au premier lancement, l'écran « Confidentialité des annonces » propose deux
@@ -224,7 +224,7 @@ recueilli **dans l'application** (`src/lib/adConsent.ts` + `components/AdConsent
 > Monetization Manager → *Data processing options* que le mode `LDU` est bien
 > appliqué en cas de refus.
 
-## Meta Audience Network (régie publicitaire depuis 1.5.0)
+## Meta Audience Network (régie publicitaire depuis 1.9.0)
 
 ### Identifiants
 

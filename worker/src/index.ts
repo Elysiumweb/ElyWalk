@@ -239,7 +239,7 @@ async function verifyPlayIntegrity(
 // ---------------------------------------------------------------------------
 // F05 — AdMob Server-Side Verification (SSV)
 //
-// ⚠️ LEGACY : depuis la 1.5.0, la régie est Meta Audience Network, qui ne propose
+// ⚠️ LEGACY : depuis la 1.9.0, la régie est Meta Audience Network, qui ne propose
 // pas de callback serveur signé. Cet endpoint est conservé pour compatibilité et
 // pourra être supprimé. Le crédit ElyCoins est désormais borné par la transaction
 // Firestore `adClaims` (une récompense par heure et par compte).
