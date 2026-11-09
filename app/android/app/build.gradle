@@ -38,11 +38,11 @@ dependencies {
     implementation project(':capacitor-android')
     // Localisation fusionnée pour la sortie GPS en arrière-plan (service natif).
     implementation 'com.google.android.gms:play-services-location:21.3.0'
-    // Régie publicitaire : Meta Audience Network (remplace AdMob depuis la 1.9.0).
-    // Le SDK est publié sur Maven Central ; vérifier la dernière version sur
-    // https://central.sonatype.com/artifact/com.facebook.android/audience-network-sdk
-    implementation 'com.facebook.android:audience-network-sdk:6.21.0'
-    // Identifiant publicitaire (AAID) : dépendance requise par le SDK Meta.
+    // Meta Audience Network : suivre la version stable indiquée dans la doc Meta.
+    // 6.22.0 corrige notamment les métadonnées Maven de play-services-basement.
+    implementation 'androidx.annotation:annotation:1.0.0'
+    implementation 'com.facebook.android:audience-network-sdk:6.22.0'
+    // Identifiant publicitaire (AAID) : requis par le SDK Meta.
     implementation 'com.google.android.gms:play-services-ads-identifier:18.2.0'
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
