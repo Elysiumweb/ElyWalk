@@ -39,6 +39,16 @@ public class MainActivity extends BridgeActivity {
         // interstitiel récompensé).
         registerPlugin(MetaAdsPlugin.class);
 
+        // Initialisation anticipée avec le contexte d'activité (évite les
+        // plantages du SDK Meta sur Android 10+ lors de l'instanciation d'AdView).
+        try {
+            if (!com.facebook.ads.AudienceNetworkAds.isInitialized(this)) {
+                com.facebook.ads.AudienceNetworkAds.initialize(this);
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "Initialisation anticipée Meta Audience Network ignorée", t);
+        }
+
         // Repli si le moteur de rendu de la WebView meurt (mémoire insuffisante,
         // pilote graphique instable…). Sans ce rappel, Android termine le
         // processus de l'application : l'utilisateur voit l'appli se fermer

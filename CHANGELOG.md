@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.8.1 — 2026-11-09
+
+Version de **correctifs** : résout le plantage au lancement dès qu'une session est connectée et l'erreur de compilation R8 en build release (`missing_rules.txt`).
+
+- **F42 Erreur R8 — règles de conservation manquantes (`missing_rules.txt`).**
+  `./gradlew :app:minifyReleaseWithR8` échouait car R8 en mode complet (AGP 8+)
+  détectait des classes manquantes non marquées par `-dontwarn` :
+  - `com.facebook.infer.annotation.**` (annotations Infer du SDK Meta Audience Network) ;
+  - `com.facebook.**` (dépendances optionnelles Facebook du plugin `@capacitor-firebase/authentication` : `CallbackManager$Factory`, `AccessToken`, `FacebookCallback`…) ;
+  - `androidx.credentials.**`, `com.google.android.gms.auth.**`, `com.google.android.gms.games.**` (handlers optionnels de Firebase Auth) ;
+  - suppression de `allowoptimization` sur les plugins natifs (`MetaAdsPlugin`, `StepCounterPlugin`, `TrackingPlugin`) pour garantir que R8 ne renomme ni n'inline leurs méthodes `@PluginMethod` appelées par réflexion via le pont Capacitor.
+- **F43 Plantage au lancement une fois connecté — Meta Audience Network.**
+  Tant que l'utilisateur n'était pas connecté, la vue `AdBanner` n'était pas
+  montée et aucune annonce n'était demandée. Dès la connexion, le montage de
+  la bannière et le préchargement de l'interstitiel déclenchaient deux causes
+  de plantage immédiat :
+  1. `com.facebook.sdk.ApplicationId` dans le `AndroidManifest.xml` était posé en
+     valeur numérique brute (`1712220190424595`) : AAPT la convertit en entier/long,
+     de sorte que `metaData.getString("com.facebook.sdk.ApplicationId")` renvoyait
+     `null`, provoquant un `NullPointerException` / `FacebookException` fatal
+     dès la première requête du SDK. La clé pointe désormais vers la ressource chaîne
+     `@string/facebook_app_id`.
+  2. Sur Android 10+, instancier un `AdView` sans contexte d'activité préalable
+     provoquait un arrêt brutal du SDK Meta : `MainActivity.onCreate()` initialise
+     désormais explicitement `AudienceNetworkAds.initialize(this)` avec le contexte
+     de l'activité.
+  3. `MetaAdsPlugin` vérifie systématiquement la validité de l'activité (`isFinishing`),
+     isole les rappels d'erreurs et détache proprement la vue avant tout ajout dans le
+     conteneur de bannière.
+- **F44 Plantage au lancement une fois connecté — Service de pas (FGS Health).**
+  Dès la connexion, `pedometer.start()` démarre `StepCounterService` en premier
+  plan. Sur Android 14+ (targetSdk 36), un service de premier plan de type `health`
+  exige au manifeste la permission normale `HIGH_SAMPLING_RATE_SENSORS` ou la permission
+  d'exécution `ACTIVITY_RECOGNITION`. En cas de refus ou de latence d'octroi,
+  l'échec de `startForeground()` avec le type santé entraînait un arrêt par le système
+  (`ForegroundServiceDidNotStartInTimeException`). Ajout de `HIGH_SAMPLING_RATE_SENSORS`
+  et repli sans type si l'appel avec `FOREGROUND_SERVICE_TYPE_HEALTH` est rejeté.
+
 ## 1.8.0 — 2026-11-08
 
 Changement de **régie publicitaire** : ElyWalk quitte AdMob (compte refusé par

@@ -88,13 +88,23 @@ public class StepCounterService extends Service implements SensorEventListener {
         try {
             Notification n = buildNotification(StepStore.getTodaySteps(this));
             if (Build.VERSION.SDK_INT >= 34) {
-                startForeground(NOTIF_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH);
+                try {
+                    startForeground(NOTIF_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_HEALTH);
+                    return true;
+                } catch (Throwable t) {
+                    Log.w("ElyWalkSteps", "startForeground avec TYPE_HEALTH échoué, repli sans type", t);
+                    startForeground(NOTIF_ID, n);
+                    return true;
+                }
             } else {
                 startForeground(NOTIF_ID, n);
+                return true;
             }
-            return true;
-        } catch (RuntimeException e) {
+        } catch (Throwable e) {
             Log.e("ElyWalkSteps", "Foreground service unavailable", e);
+            try {
+                stopForeground(true);
+            } catch (Throwable ignored) {}
             stopSelf();
             return false;
         }

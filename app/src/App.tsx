@@ -149,7 +149,7 @@ function Shell() {
     });
     return () => {
       cancelled = true;
-      sub.then((h) => h.remove());
+      sub.then((h) => h.remove()).catch(() => undefined);
     };
   }, [profile?.onboardingDone]);
 
@@ -165,7 +165,14 @@ function Shell() {
   }
 
   if (location.pathname.startsWith('/legal/')) return <Routes><Route path="/legal/:doc" element={<LegalPage />} /></Routes>;
-  if (!user) return <AuthPage />;
+  if (!user) {
+    return (
+      <>
+        <AuthPage />
+        {consentPrompt && <ConsentGate onDone={onConsentDone} />}
+      </>
+    );
+  }
 
   return (
     <div className="app-shell">
