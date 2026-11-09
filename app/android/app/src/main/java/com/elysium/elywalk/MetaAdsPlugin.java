@@ -85,6 +85,8 @@ public class MetaAdsPlugin extends Plugin {
     private NativeAd nativeCardAd;
     private AdView rectangleAdView;
 
+    /** Hôte transparent superposé à la WebView (bannière, bandeau, surcouches). */
+    private FrameLayout adHost;
     /** Conteneur ancré en bas (bannière ou bandeau natif). */
     private FrameLayout bottomContainer;
     /** Surcouche plein écran (medium rectangle, carte native). */
@@ -124,14 +126,50 @@ public class MetaAdsPlugin extends Plugin {
         }
     }
 
-    private void addToWebView(View view, FrameLayout.LayoutParams params) {
+    /**
+     * Conteneur hôte unique, ajouté une seule fois au-dessus de la WebView.
+     *
+     * <p>{@code ViewGroup.generateLayoutParams(...)} étant {@code protected}, on
+     * n'essaie plus de convertir les {@link FrameLayout.LayoutParams} pour un
+     * parent quelconque : le parent est casté s'il s'agit déjà d'un
+     * {@code FrameLayout} (cas de Capacitor), sinon on ajoute l'hôte sans
+     * paramètres puis on fixe sa taille sur les {@code LayoutParams} générés par
+     * le parent lui-même.</p>
+     */
+    private FrameLayout ensureAdHost() {
+        if (adHost != null) return adHost;
+
         View webView = getBridge().getWebView();
+        if (webView == null || !(webView.getParent() instanceof ViewGroup)) return null;
         ViewGroup parent = (ViewGroup) webView.getParent();
+
+        adHost = new FrameLayout(getContext());
+        adHost.setClipChildren(false);
+        adHost.setClipToPadding(false);
+
         if (parent instanceof FrameLayout) {
-            parent.addView(view, params);
+            parent.addView(adHost, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+            ));
         } else {
-            parent.addView(view, parent.generateLayoutParams(params));
+            // Parent d'un autre type (LinearLayout de customisation, etc.) :
+            // addView() sans paramètres laisse le parent générer les siens,
+            // qu'on redimensionne ensuite.
+            parent.addView(adHost);
+            ViewGroup.LayoutParams lp = adHost.getLayoutParams();
+            if (lp == null) {
+                adHost.setLayoutParams(new ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                ));
+            } else {
+                lp.width = ViewGroup.LayoutParams.MATCH_PARENT;
+                lp.height = ViewGroup.LayoutParams.MATCH_PARENT;
+                adHost.setLayoutParams(lp);
+            }
         }
+        return adHost;
     }
 
     /** Garantit une résolution unique d'un appel (les callbacks SDK peuvent doubler). */
@@ -153,6 +191,8 @@ public class MetaAdsPlugin extends Plugin {
 
     private FrameLayout ensureBottomContainer() {
         if (bottomContainer == null) {
+            FrameLayout host = ensureAdHost();
+            if (host == null) return null;
             bottomContainer = new FrameLayout(getContext());
             FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -171,7 +211,7 @@ public class MetaAdsPlugin extends Plugin {
                 view.setPadding(0, 0, 0, bottom);
                 return insets;
             });
-            addToWebView(bottomContainer, params);
+            host.addView(bottomContainer, params);
             bottomContainer.requestApplyInsets();
         }
         // La surcouche publicitaire doit rester au-dessus de la bannière.
@@ -181,6 +221,8 @@ public class MetaAdsPlugin extends Plugin {
 
     private FrameLayout ensureOverlay() {
         if (overlayContainer == null) {
+            FrameLayout host = ensureAdHost();
+            if (host == null) return null;
             overlayContainer = new FrameLayout(getContext());
             overlayContainer.setBackgroundColor(Color.parseColor("#CC000000"));
             overlayContainer.setClickable(true);
@@ -189,7 +231,7 @@ public class MetaAdsPlugin extends Plugin {
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.MATCH_PARENT
             );
-            addToWebView(overlayContainer, params);
+            host.addView(overlayContainer, params);
         }
         overlayContainer.removeAllViews();
         overlayContainer.setVisibility(View.VISIBLE);
@@ -264,8 +306,9 @@ public class MetaAdsPlugin extends Plugin {
         return card;
     }
 
-    private void centerInOverlay(View card) {
+    private boolean centerInOverlay(View card) {
         FrameLayout overlay = ensureOverlay();
+        if (overlay == null) return false;
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
@@ -274,6 +317,7 @@ public class MetaAdsPlugin extends Plugin {
         int margin = dp(16);
         params.setMargins(margin, margin, margin, margin);
         overlay.addView(card, params);
+        return true;
     }
 
     // ------------------------------------------------------------------------
@@ -290,6 +334,13 @@ public class MetaAdsPlugin extends Plugin {
         closeOverlay();
         if (bottomContainer != null) {
             bottomContainer.removeAllViews();
+            bottomContainer = null;
+        }
+        if (adHost != null) {
+            adHost.removeAllViews();
+            ViewGroup parent = (ViewGroup) adHost.getParent();
+            if (parent != null) parent.removeView(adHost);
+            adHost = null;
         }
         super.handleOnDestroy();
     }
@@ -357,9 +408,14 @@ public class MetaAdsPlugin extends Plugin {
             destroyBanner();
             destroyNativeBanner();
 
+            final FrameLayout container = ensureBottomContainer();
+            if (container == null) {
+                if (once.claim()) call.resolve(object("height", 0));
+                return;
+            }
+
             final AdView adView = new AdView(getContext(), placementId, AdSize.BANNER_HEIGHT_50);
             bannerAdView = adView;
-            FrameLayout container = ensureBottomContainer();
             container.removeAllViews();
             container.addView(adView, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -514,6 +570,7 @@ public class MetaAdsPlugin extends Plugin {
             nativeBanner.registerViewForInteraction(unit, icon, clickableViews);
 
             FrameLayout bottom = ensureBottomContainer();
+            if (bottom == null) return 0;
             bottom.removeAllViews();
             bottom.addView(container, new FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -765,6 +822,10 @@ public class MetaAdsPlugin extends Plugin {
 
         runOnUi(() -> {
             destroyRectangle();
+            if (ensureOverlay() == null) {
+                if (once.claim()) call.resolve(object("shown", false));
+                return;
+            }
 
             final AdView adView = new AdView(getContext(), placementId, AdSize.RECTANGLE_HEIGHT_250);
             rectangleAdView = adView;
@@ -926,8 +987,7 @@ public class MetaAdsPlugin extends Plugin {
             nativeAd.registerViewForInteraction(unit, media, icon, clickableViews);
 
             LinearLayout card = buildOverlayCard(container, dp(RECTANGLE_WIDTH_DP));
-            centerInOverlay(card);
-            return true;
+            return centerInOverlay(card);
         } catch (Throwable t) {
             Log.e(TAG, "inflateNativeCard: " + t.getMessage());
             closeOverlay();
