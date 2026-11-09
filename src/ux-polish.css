@@ -1,0 +1,97 @@
+/* UX and accessibility polish — loaded after the brand stylesheet. */
+:root { --muted: #b0aca2; }
+body { user-select: text; }
+button, .tab, .chip { user-select: none; }
+
+.toast-stack { pointer-events: none; }
+.toast { display: flex; align-items: center; gap: 10px; pointer-events: auto; }
+.toast span { flex: 1; }
+.toast button { width: 34px; height: 34px; flex: 0 0 auto; border: 0; border-radius: 50%; background: rgba(255,255,255,.06); color: var(--muted); cursor: pointer; }
+
+/* Strong, consistent keyboard affordances. */
+:where(button, a, input, textarea, [tabindex]):focus-visible {
+  outline: 3px solid var(--gold);
+  outline-offset: 3px;
+}
+.btn:focus-visible, .chip:focus-visible { box-shadow: 0 0 0 4px rgba(216,202,130,.2); }
+
+/* Titles stay readable when background-clip is unsupported. */
+.screen-title { color: var(--white); -webkit-text-fill-color: currentColor; background: none; }
+
+/* Keep the decorative seal away from actionable header content. */
+.screen-header:has(.badge)::after, .screen-header:has(.btn)::after { display: none; }
+
+/* Six reliable 48 px+ targets; visual labels remain available to assistive tech. */
+.tab { min-height: 48px; min-width: 48px; font-size: 11px; }
+.tab-label {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+}
+
+.goal-label { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.web-counter-note p { color: var(--muted); font-size: 13px; }
+.daily-action { padding: 12px; margin-bottom: 10px; border: 1px solid var(--gold-border); border-radius: var(--radius); background: var(--surface); }
+.daily-action-done { border-color: rgba(134,201,138,.35); }
+.validation-success { display: flex; gap: 10px; align-items: center; color: var(--success); margin: 0 2px 12px; }
+.validation-success > span { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; background: rgba(134,201,138,.12); font-weight: 700; }
+.validation-success strong, .validation-success small { display: block; }
+.validation-success small { color: var(--muted); font-size: 11px; margin-top: 2px; }
+.secondary-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-top: 5px; }
+.secondary-actions .text-button { min-height: 42px; font-size: 12px; text-align: center; }
+
+.password-field { position: relative; }
+.password-field .input { padding-right: 88px; }
+.password-toggle { position: absolute; right: 5px; top: 5px; height: 38px; padding: 0 9px; color: var(--gold); border: 0; background: transparent; font: 12px var(--font-body); cursor: pointer; }
+.password-strength { position: relative; padding-top: 7px; color: var(--muted); font-size: 11px; }
+.password-strength::before { content: ''; display: block; height: 3px; margin-bottom: 4px; border-radius: 2px; background: var(--surface-2); }
+.password-strength > span { position: absolute; left: 0; top: 7px; height: 3px; border-radius: 2px; background: var(--danger); }
+.strength-3 > span, .strength-4 > span { background: var(--success); }
+.field-help { display: block; color: var(--muted); margin-top: 5px; }
+
+.row-sub { line-height: 1.35; overflow-wrap: anywhere; }
+.current-user-row { background: var(--gold-dim); border-radius: 10px; padding: 12px 8px; scroll-margin: 100px 0; }
+.leaderboard-skeleton { padding: 8px 16px; }
+.skeleton-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; }
+.skeleton-row > span { width: 42px; height: 42px; flex: 0 0 auto; border-radius: 50%; }
+.skeleton-row div { flex: 1; }
+.skeleton-row b, .skeleton-row small { display: block; height: 10px; border-radius: 5px; margin: 4px 0; }
+.skeleton-row small { width: 55%; }
+.skeleton-row > span, .skeleton-row b, .skeleton-row small { background: linear-gradient(90deg,var(--surface-2),#343437,var(--surface-2)); background-size: 200% 100%; animation: skeleton 1.3s infinite; }
+@keyframes skeleton { to { background-position: -200% 0; } }
+
+.wallet-actions { margin-top: 2px; }
+.transaction-icon { width: 34px; height: 34px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 10px; color: var(--gold); background: var(--gold-dim); }
+
+.sheet-close { position: absolute; top: 10px; right: 12px; width: 40px; height: 40px; border: 0; border-radius: 50%; background: var(--surface-2); color: var(--muted); cursor: pointer; }
+.map-container .leaflet-tile-pane { filter: none; }
+.map-card { bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
+.map-locate-btn { bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
+.map-empty { position: absolute; z-index: 15; top: 50%; left: 50%; transform: translate(-50%,-50%); width: min(82%,340px); padding: 18px; text-align: center; border: 1px solid var(--gold-border); border-radius: var(--radius); background: rgba(17,17,17,.92); box-shadow: 0 10px 30px #0008; pointer-events: none; }
+.map-empty strong, .map-empty span { display: block; }
+.map-empty strong { color: var(--gold); font-family: var(--font-display); font-size: 13px; }
+.map-empty span { color: var(--muted); margin-top: 6px; font-size: 12px; }
+
+/* Shine is an intentional interaction, not a permanent GPU animation. */
+.btn-gold::after { animation: none; left: -60%; transition: left .55s ease; }
+.btn-gold:hover::after, .btn-gold:focus-visible::after { left: 130%; }
+.screen, .card { animation: none; }
+
+@media (max-height: 700px) {
+  .auth-screen { padding-top: calc(env(safe-area-inset-top,0px) + 16px); padding-bottom: calc(env(safe-area-inset-bottom,0px) + 22px); }
+  .auth-logo { width: 82px; height: 82px; }
+  .auth-sub { margin-bottom: 12px; }
+  .auth-deco-bottom, .auth-deco-top { position: absolute; }
+}
+
+@media (min-width: 760px) {
+  body { padding: 24px 0; }
+  #root { width: 580px; min-height: calc(100vh - 48px); height: auto; margin: 0 auto; border: 1px solid var(--gold-border); border-radius: 28px; overflow: hidden; box-shadow: 0 24px 80px #000; }
+  .app-shell { min-height: calc(100vh - 50px); position: relative; }
+  .tabbar { left: 50%; right: auto; width: 578px; transform: translateX(-50%); border-radius: 0 0 27px 27px; }
+  .tab-label { position: static; width: auto; height: auto; margin: 0; overflow: visible; clip: auto; }
+  .map-screen { height: calc(100vh - 50px - var(--tabbar-h)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: .01ms !important; }
+}
