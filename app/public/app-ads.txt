@@ -1,0 +1,6 @@
+# ElyWalk — app-ads.txt
+# Régie : Meta Audience Network (Meta Platforms Ireland Ltd)
+# Domaine de développeur déclaré sur la fiche Play Store : elywalk-2f7ba.web.app
+# Ce fichier doit rester accessible à la racine du domaine :
+#   https://elywalk-2f7ba.web.app/app-ads.txt
+facebook.com, 1598870752271390, DIRECT, c3e20eee3f780d68

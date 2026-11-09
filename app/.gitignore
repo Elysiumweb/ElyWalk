@@ -1,0 +1,11 @@
+# Dépendances
+node_modules/
+
+# Build web (Vite) — régénéré par `npm run build`
+dist/
+dist-ssr/
+*.local
+
+# Divers
+.DS_Store
+*.log

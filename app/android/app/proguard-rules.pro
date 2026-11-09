@@ -19,3 +19,13 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# ---------------------------------------------------------------------------
+# Meta Audience Network (régie publicitaire — voir MetaAdsPlugin.java)
+# À conserver même si `minifyEnabled` est aujourd'hui à false : le SDK est
+# chargé par réflexion (adaptateurs, rapports AdChoices).
+# ---------------------------------------------------------------------------
+-keep class com.facebook.ads.** { *; }
+-keep class com.facebook.ads.internal.** { *; }
+-dontwarn com.facebook.ads.**
+-keepattributes *Annotation*

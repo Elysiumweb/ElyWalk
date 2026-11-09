@@ -7,6 +7,7 @@ import { requestConversion, listMyWithdrawals, listMyTransactions } from '../lib
 import { fmtCoins, fmtEuros, coinsToEuros } from '../lib/coins';
 import { MIN_PAYPAL_COINS, isPresidentUid } from '../lib/constants';
 import { updateUserFields } from '../lib/db';
+import { showWithdrawalAd } from '../lib/ads';
 import type { Withdrawal, CoinTransaction } from '../lib/types';
 
 export default function WalletPage() {
@@ -50,6 +51,8 @@ export default function WalletPage() {
         if (!paypalEmail.includes('@')) throw new Error('E-mail PayPal invalide.');
         await updateUserFields(profile.uid, { paypalEmail });
       }
+      // Annonce avant le retrait (medium rectangle 300×250, Meta Audience Network).
+      if (type === 'paypal') await showWithdrawalAd();
       await requestConversion(profile, type, coins, paypalEmail);
       toast(
         type === 'paypal'

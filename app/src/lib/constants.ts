@@ -1,10 +1,26 @@
 // ===== ElyWalk — Constantes globales =====
 
-// --- AdMob (production) ---
-export const ADMOB_APP_ID = 'ca-app-pub-6906841385343667~6481018527';
-export const AD_UNIT_REWARDED = 'ca-app-pub-6906841385343667/3683414466';
-export const AD_UNIT_APP_OPEN = 'ca-app-pub-6906841385343667/6616749893';
-export const AD_UNIT_INTERSTITIAL = 'ca-app-pub-6906841385343667/3494240028';
+// --- Meta Audience Network (production) ---
+// Format des identifiants de placement : `<APP_ID>_<PLACEMENT_ID>`.
+// Ils sont créés dans Monetization Manager (business.facebook.com/audiencenetwork).
+export const META_APP_ID = '1712220190424595';
+
+/** Bannière 320×50 (bas de page). */
+export const META_PLACEMENT_BANNER = '1712220190424595_1712220347091246';
+/** Interstitiel plein écran (ouverture de l'app, validation des pas, fin de sortie). */
+export const META_PLACEMENT_INTERSTITIAL = '1712220190424595_1712220353757912';
+/** Medium rectangle 300×250 (retrait d'ElyCoins). */
+export const META_PLACEMENT_MEDIUM_RECTANGLE = '1712220190424595_1712220350424579';
+/** Natif (carte de fin de sortie). */
+export const META_PLACEMENT_NATIVE = '1712220190424595_1712220357091245';
+/** Native banner (bandeau compact des listes). */
+export const META_PLACEMENT_NATIVE_BANNER = '1712220190424595_1712220360424578';
+/** Interstitiel récompensé (vidéo → ElyCoins). */
+export const META_PLACEMENT_REWARDED_INTERSTITIAL = '1712220190424595_1712220367091244';
+
+// Domaine de développeur déclaré sur la fiche Play Store : il doit servir
+// `https://<domaine>/app-ads.txt` (voir app/public/app-ads.txt).
+export const APP_ADS_TXT_URL = 'https://elywalk-2f7ba.web.app/app-ads.txt';
 
 // --- Documents légaux en ligne (exigence Play Store : URL publique) ---
 // Page statique servie par Firebase Hosting (app/public/privacy.html).

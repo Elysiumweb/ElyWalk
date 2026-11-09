@@ -131,13 +131,14 @@
   <tr><td>Gestion du compte, authentification, assistance</td><td>Exécution du contrat</td></tr>
   <tr><td>Sécurité, prévention de la fraude et des abus (attestation d’intégrité, vérification des récompenses publicitaires, détection des parrainages fictifs)</td><td>Intérêt légitime</td></tr>
   <tr><td>Notifications : rappel quotidien et notifications push</td><td>Consentement (révocable à tout moment depuis Profil → Notifications)</td></tr>
-  <tr><td>Publicité personnalisée ou non personnalisée</td><td>Consentement (module Google UMP / Funding Choices), révocable depuis Profil → Confidentialité des annonces</td></tr>
+  <tr><td>Publicité personnalisée ou non personnalisée</td><td>Consentement explicite recueilli au premier lancement, révocable depuis Profil → Confidentialité des annonces</td></tr>
 </table>
 
 <h2>4. Publicité et consentement</h2>
-<p>Les annonces sont servies par <strong>Google AdMob</strong>. Dans l’Espace économique européen et au Royaume-Uni, un formulaire de consentement est affiché avant toute annonce ; vous pouvez le modifier à tout moment depuis <em>Profil → Confidentialité des annonces</em>. Sans consentement, aucune annonce personnalisée n’est diffusée.</p>
+<p>Les annonces sont diffusées par <strong>Meta Audience Network</strong> (Meta Platforms Ireland Ltd). <strong>Aucune annonce n’est demandée tant que vous n’avez pas exprimé de choix</strong> : un écran de consentement est présenté au premier lancement et peut être rouvert à tout moment depuis <em>Profil → Confidentialité des annonces</em>. Vous pouvez accepter les annonces personnalisées ou demander des annonces non personnalisées (traitement limité des données) ; votre choix est conservé sur l’appareil et révocable à volonté.</p>
+<p>Notre domaine de développeur publie un fichier <a href="/app-ads.txt">app-ads.txt</a> déclarant Meta comme régie autorisée, conformément aux règles de transparence du secteur.</p>
 <div class="note">
-  <strong>Aucune donnée d’activité physique (pas, distance, calories) n’est transmise à Google AdMob ou à une quelconque régie publicitaire.</strong> Vos données de santé ne sont jamais utilisées à des fins publicitaires.
+  <strong>Aucune donnée d’activité physique (pas, distance, calories, position) n’est transmise à Meta Audience Network ou à une quelconque régie publicitaire.</strong> Vos données de santé ne sont jamais utilisées à des fins publicitaires.
 </div>
 
 <h2>5. Destinataires de vos données</h2>
@@ -145,8 +146,8 @@
 <table>
   <tr><th>Destinataire</th><th>Rôle</th><th>Données concernées</th></tr>
   <tr><td><strong>Google Firebase</strong> (Google Ireland Limited)</td><td>Hébergement, base de données, authentification, stockage, notifications push</td><td>Compte, activité physique, localisation, jetons de notification, opérations</td></tr>
-  <tr><td><strong>Google AdMob</strong> (Google Ireland Limited)</td><td>Diffusion des annonces</td><td>Identifiant publicitaire, données d’interaction publicitaire — aucune donnée d’activité physique</td></tr>
-  <tr><td><strong>Cloudflare, Inc.</strong></td><td>Backend de confiance (attestation d’intégrité Play Integrity, vérification serveur des récompenses AdMob, envoi des notifications, file de retraits)</td><td>Identifiant de compte, jetons d’intégrité, preuves de récompense</td></tr>
+  <tr><td><strong>Meta Audience Network</strong> (Meta Platforms Ireland Ltd)</td><td>Diffusion des annonces</td><td>Identifiant publicitaire, données techniques et d’interaction publicitaire — aucune donnée d’activité physique</td></tr>
+  <tr><td><strong>Cloudflare, Inc.</strong></td><td>Backend de confiance (attestation d’intégrité Play Integrity, anti-fraude sur les récompenses publicitaires, envoi des notifications, file de retraits)</td><td>Identifiant de compte, jetons d’intégrité, horodatages de récompense</td></tr>
   <tr><td><strong>PayPal</strong></td><td>Exécution des retraits</td><td>Adresse PayPal, montant — uniquement si vous demandez un retrait</td></tr>
   <tr><td><strong>ipify / ipapi.co</strong></td><td>Obtention de l’adresse IP publique (anti-fraude parrainage)</td><td>Adresse IP</td></tr>
 </table>
@@ -179,7 +180,7 @@
 <p>Vous pouvez également introduire une réclamation auprès de la <strong>CNIL</strong> (Commission Nationale de l’Informatique et des Libertés — <a href="https://www.cnil.fr" rel="noopener noreferrer" target="_blank">www.cnil.fr</a>).</p>
 
 <h2>9. Sécurité et lutte contre la fraude</h2>
-<p>L’accès à vos données est protégé par l’authentification Firebase, des règles d’accès restrictives et des contrôles d’intégrité. Pour empêcher la fraude sur les récompenses, l’application peut solliciter une attestation <strong>Play Integrity</strong> et fait vérifier les récompenses publicitaires côté serveur (<strong>AdMob SSV</strong>). Ces vérifications portent sur l’intégrité de l’appareil et de l’application, jamais sur le contenu de vos communications. Aucun système n’étant infaillible, nous mettons en œuvre des mesures proportionnées aux risques.</p>
+<p>L’accès à vos données est protégé par l’authentification Firebase, des règles d’accès restrictives et des contrôles d’intégrité. Pour empêcher la fraude sur les récompenses, l’application peut solliciter une attestation <strong>Play Integrity</strong> et borne les récompenses publicitaires par un registre horodaté côté serveur (une récompense par heure et par compte). Ces vérifications portent sur l’intégrité de l’appareil et de l’application, jamais sur le contenu de vos communications. Aucun système n’étant infaillible, nous mettons en œuvre des mesures proportionnées aux risques.</p>
 
 <h2>10. Âge minimum</h2>
 <p>ElyWalk n’est pas destinée aux enfants. L’âge minimum d’utilisation est de <strong>15 ans</strong>. Aucune donnée n’est sciemment collectée auprès d’enfants de moins de 15 ans ; si tel était le cas, le compte et les données associées seraient supprimés sur simple signalement à <a href="mailto:contact@elysium-esport.fr">contact@elysium-esport.fr</a>.</p>
@@ -198,7 +199,9 @@
   <tr><td><code>POST_NOTIFICATIONS</code></td><td>Notification persistante du comptage, rappel quotidien et notifications push</td></tr>
   <tr><td><code>FOREGROUND_SERVICE</code> / <code>FOREGROUND_SERVICE_HEALTH</code> / <code>FOREGROUND_SERVICE_LOCATION</code></td><td>Maintien du comptage des pas et du suivi GPS en arrière-plan</td></tr>
   <tr><td><code>RECEIVE_BOOT_COMPLETED</code></td><td>Relance du comptage après redémarrage du téléphone</td></tr>
-  <tr><td><code>INTERNET</code></td><td>Communication avec les services Firebase, AdMob et le backend</td></tr>
+  <tr><td><code>INTERNET</code></td><td>Communication avec les services Firebase, Meta Audience Network et le backend</td></tr>
+  <tr><td><code>ACCESS_NETWORK_STATE</code></td><td>Vérification de la connectivité avant le chargement d’une annonce</td></tr>
+  <tr><td><code>com.google.android.gms.permission.AD_ID</code></td><td>Identifiant publicitaire, uniquement après consentement explicite</td></tr>
 </table>
 
 <h2>14. Nous contacter</h2>

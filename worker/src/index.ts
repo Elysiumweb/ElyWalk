@@ -10,7 +10,8 @@
  *
  * Endpoints :
  *   POST /verify-integrity            — vérifie un jeton Play Integrity (F05)
- *   GET  /ssv                         — callback AdMob Server-Side Verification (F05)
+ *   GET  /ssv                         — [LEGACY] callback AdMob SSV (F05), inutilisé
+ *                                       depuis le passage à Meta Audience Network
  *   POST /fcm/send                    — envoi d'un push FCM (protégé par API_SECRET)
  *   GET  /cron/process-notifications  — consomme friendRequests/withdrawals → FCM (F11)
  *   GET  /cron/process-payouts        — traite la file de retraits (F06)
@@ -237,6 +238,11 @@ async function verifyPlayIntegrity(
 
 // ---------------------------------------------------------------------------
 // F05 — AdMob Server-Side Verification (SSV)
+//
+// ⚠️ LEGACY : depuis la 1.5.0, la régie est Meta Audience Network, qui ne propose
+// pas de callback serveur signé. Cet endpoint est conservé pour compatibilité et
+// pourra être supprimé. Le crédit ElyCoins est désormais borné par la transaction
+// Firestore `adClaims` (une récompense par heure et par compte).
 // ---------------------------------------------------------------------------
 // La signature SSV de Google est une signature **ECDSA P-256 (SHA-256)** au
 // format DER. Les clés publiques sont servies par Google (rotation automatique)

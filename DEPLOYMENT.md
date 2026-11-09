@@ -10,8 +10,8 @@ L'`applicationId` / `appId` est désormais **`com.elysium.elywalk`** (fini
    empreinte SHA-1 (le keystore n'a pas changé), puis **retélécharger
    `google-services.json`** et remplacer `app/google-services.json` **et**
    `app/android/app/google-services.json`.
-2. **AdMob** : enregistrer (ou renommer) l'application `com.elysium.elywalk`
-   pour que les IDs de blocs restent valides.
+2. **Meta Audience Network** : dans Monetization Manager, ajouter l'application
+   Android `com.elysium.elywalk` (voir § « Meta Audience Network » plus bas).
 3. **Play Console** : créer la fiche de l'app avec `com.elysium.elywalk`.
 
 Les réglages suivants ont déjà été propagés dans le code :
@@ -72,8 +72,9 @@ Checklist Play Store :
 - [ ] *Play Console → Politique → Règles de confidentialité* : coller l'URL ci-dessus.
 - [ ] L'URL répond en 200 sans authentification, sans redirection et sans géoblocage.
 - [ ] Le contenu couvre bien : données d'activité physique (santé), localisation,
-      identifiants appareil (IP, HWID, jeton FCM, ID publicitaire), publicité AdMob,
-      sous-traitants (Firebase, AdMob, Cloudflare, PayPal, ipify), durées, droits RGPD.
+      identifiants appareil (IP, HWID, jeton FCM, ID publicitaire), publicité
+      Meta Audience Network, sous-traitants (Firebase, Meta, Cloudflare, PayPal, ipify),
+      durées, droits RGPD.
 - [ ] Cohérence avec la fiche *Sécurité des données* et avec `LegalPage.tsx`.
 
 Vérification après déploiement :
@@ -161,7 +162,8 @@ Les Cloud Functions Firebase exigent le plan payant **Blaze**. ElyWalk utilise
 donc un **Cloudflare Worker** gratuit (voir `worker/README.md`) qui fournit :
 
 - l'attestation **Play Integrity** (`/verify-integrity`) ;
-- la vérification **AdMob SSV** (`/ssv`) ;
+- ~~la vérification AdMob SSV (`/ssv`)~~ — **legacy** : conservé pour compatibilité
+  mais inutilisé depuis le passage à Meta Audience Network (pas d'équivalent SSV) ;
 - l'envoi de **push FCM** (`/fcm/send`) ;
 - la consommation des jetons FCM via **cron** (`/cron/process-notifications`) ;
 - la file de retraits (`/cron/process-payouts`).
@@ -175,8 +177,10 @@ npx wrangler secret put API_SECRET
 npx wrangler deploy
 ```
 
-Les clés publiques AdMob SSV sont récupérées automatiquement par le Worker depuis
-le serveur de clés Google (aucun secret SSV à configurer).
+Les clés publiques AdMob SSV étaient récupérées automatiquement par le Worker ;
+l'endpoint `/ssv` n'est plus appelé depuis la 1.5.0 (Meta Audience Network ne
+propose pas de callback serveur signé pour les récompenses). Le crédit ElyCoins
+est borné par la transaction Firestore `adClaims` (une récompense par heure).
 
 Côté app, renseigner `ATTESTATION_WORKER_URL` dans `app/src/lib/constants.ts` et
 installer le plugin d'intégrité :
@@ -198,15 +202,106 @@ npx cap sync android
 npx cap open android
 ```
 
-La version Android est `3 / 1.4.0`.
+La version Android est `4 / 1.5.0`.
 
 ## Consentement publicitaire RGPD (F03)
 
-AdMob est initialisé avec le module de consentement Google **UMP** (Funding
-Choices) : avant toute annonce, le formulaire de consentement est affiché pour
-les utilisateurs de l'EEE/UK. L'utilisateur peut le réviser à tout moment
-(Profil → *Confidentialité des annonces*). Créer le **message RGPD** dans la
-console AdMob → *Confidentialité et messages*.
+Depuis la 1.5.0, le consentement n'est plus fourni par Google UMP : il est
+recueilli **dans l'application** (`src/lib/adConsent.ts` + `components/AdConsentSheet.tsx`).
+
+- Au premier lancement, l'écran « Confidentialité des annonces » propose deux
+  choix : annonces personnalisées, ou annonces non personnalisées (`LDU`).
+- Tant qu'aucun choix n'est exprimé (`unknown`), **aucune annonce n'est
+  demandée** : ni bannière, ni interstitiel, ni vidéo récompensée.
+- Le choix est persisté (`Preferences`, clé `ads.consent.v1`), transmis au SDK
+  natif via `MetaAds.setConsent({ personalized })` puis révocable à tout moment
+  depuis Profil → *Confidentialité des annonces*.
+
+> ⚠️ **EEE / Royaume-Uni** : ce garde-fou applicatif ne remplace pas une CMP
+> enregistrée IAB TCF v2. Pour une mise en production conforme, brancher une CMP
+> (Didomi, Axeptio, Google UMP + adaptateur, ou le consentement natif Meta) qui
+> écrit la chaîne `IABTCF_*` lue par le SDK Audience Network, et vérifier dans
+> Monetization Manager → *Data processing options* que le mode `LDU` est bien
+> appliqué en cas de refus.
+
+## Meta Audience Network (régie publicitaire depuis 1.5.0)
+
+### Identifiants
+
+| Rôle | Constante (`app/src/lib/constants.ts`) | Placement |
+| --- | --- | --- |
+| Bannière 320×50 (toutes les pages) | `META_PLACEMENT_BANNER` | `1712220190424595_1712220347091246` |
+| Interstitiel (ouverture, validation des pas, fin de sortie) | `META_PLACEMENT_INTERSTITIAL` | `1712220190424595_1712220353757912` |
+| Medium rectangle 300×250 (retrait) | `META_PLACEMENT_MEDIUM_RECTANGLE` | `1712220190424595_1712220350424579` |
+| Natif (carte de fin de sortie) | `META_PLACEMENT_NATIVE` | `1712220190424595_1712220357091245` |
+| Native banner (bandeau des listes) | `META_PLACEMENT_NATIVE_BANNER` | `1712220190424595_1712220360424578` |
+| Interstitiel récompensé (vidéo → ElyCoins) | `META_PLACEMENT_REWARDED_INTERSTITIAL` | `1712220190424595_1712220367091244` |
+
+App ID : `1712220190424595`.
+
+### `app-ads.txt` (obligatoire)
+
+Le fichier `app/public/app-ads.txt` est copié à la racine de `dist/` par
+`npm run build`, donc servi par Firebase Hosting :
+
+```
+facebook.com, 1598870752271390, DIRECT, c3e20eee3f780d68
+```
+
+- URL à déclarer dans Play Console (champ *Site web* de la fiche) :
+  `https://elywalk-2f7ba.web.app` — c'est ce domaine qui est exploré pour
+  trouver `app-ads.txt`.
+- Vérification : `curl https://elywalk-2f7ba.web.app/app-ads.txt` doit renvoyer
+  la ligne ci-dessus en `text/plain` (les rewrites SPA ne s'appliquent pas aux
+  fichiers existants).
+- Après modification, forcer la relecture dans Monetization Manager →
+  *app-ads.txt* (le crawl Meta peut prendre 24 à 48 h).
+
+### Formats et emplacements
+
+| Emplacement | Format | Fichier |
+| --- | --- | --- |
+| Ouverture / retour dans l'app | Interstitiel, plafonné à 2/jour et espacé de 10 min | `src/App.tsx` + `lib/ads.ts` |
+| Validation des pas | Interstitiel | `src/pages/HomePage.tsx` |
+| Vidéo récompensée (ElyCoins) | Interstitiel récompensé | `src/pages/HomePage.tsx` |
+| Retrait ElyCoins | Medium rectangle 300×250 | `src/pages/WalletPage.tsx` |
+| Toutes les pages | Bannière 320×50 (+ native banner sur `/history`) | `src/components/AdBanner.tsx` |
+| Fin de sortie GPS | Carte native | `src/pages/ActivityPage.tsx` |
+
+Le rendu natif est assuré par un **plugin Capacitor maison** :
+`android/app/src/main/java/com/elysium/elywalk/MetaAdsPlugin.java`
+(layouts `res/layout/meta_ad_*.xml`). Il n'existe pas de plugin Capacitor officiel
+pour Meta Audience Network, d'où cette implémentation directe du SDK.
+
+### Build Android
+
+```bash
+cd app
+npm run build && npx cap sync android
+```
+
+Le SDK est déclaré dans `android/app/build.gradle` :
+
+```gradle
+implementation 'com.facebook.android:audience-network-sdk:6.21.0'
+implementation 'com.google.android.gms:play-services-ads-identifier:18.2.0'
+```
+
+Vérifier la dernière version publiée :
+<https://central.sonatype.com/artifact/com.facebook.android/audience-network-sdk>.
+
+`minSdkVersion` doit rester ≥ 21 (ElyWalk est à 24) et
+`android:hardwareAccelerated="true"` est activé dans le manifeste (vidéos).
+
+### Test des annonces
+
+- Meta Audience Network fonctionne en **bidding uniquement** : sans campagne
+  active, `onError` renvoie un *no fill* — c'est normal, l'application continue
+  de fonctionner (toutes les fonctions publicitaires résolvent sans bloquer).
+- Pour tester un remplissage, créer un placement de test dans Monetization
+  Manager ou ajouter l'appareil de test via `AdSettings.addTestDevice(...)`.
+- Sur la version web (`npm run dev`), les publicités sont **inertes** : les
+  fonctions de `lib/ads.ts` résolvent immédiatement.
 
 ## Notifications (F10)
 
