@@ -9,7 +9,7 @@ import { showInterstitial, showRewardedAd } from '../lib/ads';
 import { validateSteps, creditAdReward, syncTodaySteps } from '../lib/db';
 import { coinsForSteps, caloriesForSteps, fmtCoins, fmtNumber, dateStr, nextStepTier, formatDistance } from '../lib/coins';
 import { shareDailyStats } from '../lib/share';
-import { DAILY_STEP_GOAL, STEP_TIERS, AD_REWARD_COINS, ATTESTATION_WORKER_URL } from '../lib/constants';
+import { DAILY_STEP_GOAL, STEP_TIERS, AD_REWARD_COINS } from '../lib/constants';
 import LevelBadge from '../components/LevelBadge';
 import { Capacitor } from '@capacitor/core';
 
@@ -123,7 +123,7 @@ export default function HomePage() {
     setBusyValidate(true);
     try {
       const stepsToValidate = pedometer.getTodaySteps();
-      // Annonce interstitielle avant le crédit.
+      // Annonce interstitielle avant le crédit (placement « Interstitial #2 »).
       await showInterstitial();
       const result = await validateSteps(profile.uid, stepsToValidate);
       toast(`+${fmtCoins(result.coins)} ElyCoins · Série de ${result.streak} jour${result.streak > 1 ? 's' : ''} !${result.freezeUsed ? ' Gel utilisé pour rattraper la journée manquée.' : ''}`, 'success');
@@ -143,17 +143,14 @@ export default function HomePage() {
         toast('Les publicités sont disponibles uniquement sur l’application Android.', 'error');
         return;
       }
-      const rewarded = await showRewardedAd(profile.uid);
+      const rewarded = await showRewardedAd();
       if (rewarded) {
-        if (ATTESTATION_WORKER_URL) {
-          // SSV active : la récompense est créditée par le serveur (callback
-          // AdMob vérifié) pour éviter toute fraude côté client.
-          toast('Récompense en cours de vérification (serveur)…', 'success');
-        } else {
-          // Fallback temporaire (SSV non configurée) : crédit client borné.
-          await creditAdReward(profile.uid);
-          toast(`+${fmtCoins(AD_REWARD_COINS)} ElyCoins !`, 'success');
-        }
+        // Meta Audience Network n'expose pas de vérification serveur signée
+        // (pas d'équivalent AdMob SSV) : le crédit reste côté client, mais il
+        // est borné par la transaction Firestore `adClaims` (1 récompense par
+        // heure et par compte, règle `validAdCredit`).
+        await creditAdReward(profile.uid);
+        toast(`+${fmtCoins(AD_REWARD_COINS)} ElyCoins !`, 'success');
       } else {
         toast('Publicité non terminée — aucune récompense.', 'error');
       }

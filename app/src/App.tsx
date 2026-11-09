@@ -5,6 +5,8 @@ import { Capacitor } from '@capacitor/core';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './components/Toast';
 import TabBar from './components/TabBar';
+import AdBanner from './components/AdBanner';
+import AdConsentSheet from './components/AdConsentSheet';
 import { initAds, loadAppOpenAd, showAppOpenAdIfReady } from './lib/ads';
 import { pedometer } from './lib/pedometer';
 import AuthPage from './pages/AuthPage';
@@ -48,13 +50,15 @@ function Shell() {
   useEffect(() => { if (user) setupNotifications(user.uid).catch(console.warn); }, [user?.uid]);
   useEffect(() => { const open=(raw:string)=>{const url=new URL(raw);const ref=url.searchParams.get('ref')||(url.protocol==='elywalk:'?url.searchParams.get('code'):null);if(ref)setPendingReferralCode(ref.toUpperCase())}; CapApp.getLaunchUrl().then(r=>r?.url&&open(r.url));const sub=CapApp.addListener('appUrlOpen',e=>open(e.url));return()=>{sub.then(h=>h.remove())}; }, [setPendingReferralCode]);
 
-  // Consentement RGPD (UMP) dès le lancement, AVANT toute publicité.
+  // Initialisation du SDK Meta Audience Network dès le lancement, AVANT toute
+  // publicité. Le SDK natif n'est alimenté en annonces qu'après un choix de
+  // consentement explicite (voir components/AdConsentSheet + lib/adConsent).
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
     initAds().catch(console.warn);
   }, []);
 
-  // Annonce à l'ouverture + au retour sur l'application (App Open Ad).
+  // Annonce à l'ouverture + au retour sur l'application (interstitiel #2).
   // Garde-fous : exemptée tant que l'onboarding n'est pas terminé, plafonnée
   // quotidiennement et espacée d'un cooldown (voir ads.ts).
   useEffect(() => {
@@ -118,7 +122,9 @@ function Shell() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       <ProductStatus />
+      <AdBanner />
       <TabBar />
+      <AdConsentSheet />
     </div>
   );
 }

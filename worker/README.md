@@ -16,7 +16,7 @@ offertes, tâches planifiées incluses).
 |---|---|---|
 | `GET` | `/` | État de santé |
 | `POST` | `/verify-integrity` | Vérifie un jeton **Play Integrity** (F05) |
-| `GET` | `/ssv` | Callback **AdMob Server-Side Verification** (F05) |
+| `GET` | `/ssv` | **[LEGACY]** Callback AdMob SSV (F05) — inutilisé depuis le passage à Meta Audience Network |
 | `POST` | `/fcm/send` | Envoi d'un **push FCM** (protégé par `API_SECRET`) |
 | `GET` | `/cron/process-notifications` | Consomme `friendRequests` + `withdrawals` → push (F11) |
 | `GET` | `/cron/process-payouts` | File de retraits (F06) |
@@ -69,7 +69,12 @@ pour tester (ex. `curl https://<votre-worker>.workers.dev/cron/process-notificat
 Le client (voir `app/src/lib/attestation.ts`) demande un jeton, l'envoie à
 `/verify-integrity`, et le Worker confirme (ou non) l'intégrité de l'appareil.
 
-### AdMob SSV (F05)
+### AdMob SSV (F05) — legacy
+
+> Depuis la version 1.9.0 de l'application, la régie publicitaire est **Meta
+> Audience Network**, qui ne fournit pas de vérification serveur signée pour les
+> récompenses. Cet endpoint n'est donc plus appelé ; il est conservé pour
+> compatibilité et peut être retiré sans impact.
 1. Console AdMob → bloc **Récompensées** → *Vérification côté serveur* : renseigner
    l'URL `https://<votre-worker>.workers.dev/ssv`.
 2. Les **clés publiques** sont récupérées automatiquement par le Worker depuis le

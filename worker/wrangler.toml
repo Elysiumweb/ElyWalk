@@ -3,7 +3,8 @@
 # Remplace les Cloud Functions Firebase (qui nécessitent le plan payant Blaze).
 # Fournit :
 #   - /verify-integrity     : attestation Play Integrity (F05)
-#   - /ssv                  : callback AdMob Server-Side Verification (F05)
+#   - /ssv                  : [LEGACY] callback AdMob SSV (F05), inutilisé depuis
+#                             le passage à Meta Audience Network
 #   - /fcm/send             : envoi de push FCM protégé (F11)
 #   - /cron/process-notifications : consommateur des jetons FCM (F11)
 #   - /cron/process-payouts       : traitement de la file de retraits (F06)

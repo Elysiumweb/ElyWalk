@@ -45,6 +45,7 @@ import {
   type GpsQualityLevel,
 } from '../lib/activity';
 import { notifyActivityGoal } from '../lib/notifications';
+import { showEndOfActivityAd } from '../lib/ads';
 
 const FALLBACK_CENTER: [number, number] = [46.6, 2.4];
 const PAGE_SIZE = 20;
@@ -629,6 +630,8 @@ export default function ActivityPage() {
         `Sortie enregistrée · ${formatDistance(finalDistance, unitSystem)} · ${Math.floor(duration / 60)} min${pauseLabel}`,
         'success',
       );
+      // Annonce de fin de sortie (carte native Meta Audience Network, #4).
+      void showEndOfActivityAd();
     } catch (e) {
       toast((e as Error).message, 'error');
       setRunning(false);

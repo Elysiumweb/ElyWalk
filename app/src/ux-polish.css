@@ -89,7 +89,7 @@ button, .tab, .chip { user-select: none; }
   .app-shell { min-height: calc(100vh - 50px); position: relative; }
   .tabbar { left: 50%; right: auto; width: 578px; transform: translateX(-50%); border-radius: 0 0 27px 27px; }
   .tab-label { position: static; width: auto; height: auto; margin: 0; overflow: visible; clip: auto; }
-  .map-screen { height: calc(100vh - 50px - var(--tabbar-h)); }
+  .map-screen { height: calc(100vh - 50px - var(--tabbar-h) - var(--ad-banner-h, 0px)); }
 }
 
 @media (prefers-reduced-motion: reduce) {

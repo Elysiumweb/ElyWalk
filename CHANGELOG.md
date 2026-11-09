@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.9.0 — 2026-11-09
+
+### Régie publicitaire : passage d'AdMob à Meta Audience Network
+
+- **F24** Migration complète de la régie : le SDK Google Mobile Ads et le plugin
+  `@capacitor-community/admob` sont retirés au profit de **Meta Audience Network**
+  (`com.facebook.android:audience-network-sdk`). Nouveau plugin Capacitor maison
+  `MetaAdsPlugin.java` (bannière, native banner, interstitiel, interstitiel
+  récompensé, medium rectangle, carte native) — il n'existe pas de plugin
+  Capacitor officiel pour Meta AN.
+- **F25** Les six emplacements produits sont branchés : bannière 320×50 sur
+  toutes les pages (`AdBanner`), interstitiel à l'ouverture (plafond 2/jour,
+  cooldown 10 min), interstitiel à la validation des pas, interstitiel récompensé
+  pour la vidéo ElyCoins, medium rectangle 300×250 avant un retrait, carte native
+  à la fin d'une sortie. Le placement « native banner » sert de bandeau compact
+  sur la page « Mes sorties ».
+- **F26** `app/public/app-ads.txt` déclare Meta (`facebook.com, 1598870752271390,
+  DIRECT, c3e20eee3f780d68`), servi à la racine du domaine Hosting.
+- **F27** Consentement RGPD sans dépendance externe : nouveau module
+  `lib/adConsent.ts` + écran `AdConsentSheet` (annonces personnalisées ou non).
+  Aucune annonce n'est demandée tant qu'aucun choix n'a été exprimé ; le choix
+  est révocable depuis Profil → *Confidentialité des annonces*.
+- **F28** Fin de la dépendance à AdMob SSV : la récompense ElyCoins est créditée
+  côté client, bornée par la transaction Firestore `adClaims` (une récompense par
+  heure et par compte). L'endpoint `/ssv` du Worker reste en place mais n'est
+  plus utilisé.
+- **F29** La bannière native réserve sa hauteur via la variable CSS
+  `--ad-banner-h` : la barre d'onglets, les feuilles modales et les écrans
+  (carte, sortie GPS) remontent automatiquement pour ne jamais être masqués.
+- Textes légaux (CGU, politique de confidentialité, suppression de données) mis à
+  jour : Meta Platforms Ireland Ltd comme sous-traitant publicitaire, portée du
+  consentement, permissions `ACCESS_NETWORK_STATE` et `AD_ID`.
+
 ## 1.4.0 — 2026-10-22
 
 - **F16** Pause / reprise d'une sortie : nouveau bouton dans l'écran Sortie GPS et méthodes `pause()` / `resume()` du plugin `Tracking`. Le service natif `TrackingService` gère l'état `paused` (GPS coupé, notification « en pause », reprise après kill du process) et le temps de pause est exclu de la durée active, de la vitesse et de l'allure.
