@@ -1,0 +1,5 @@
+.copy-value { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; margin-top: 2px; padding: 3px 0; overflow: hidden; color: var(--muted); background: none; border: 0; font: 13px var(--font-body); text-overflow: ellipsis; white-space: nowrap; cursor: copy; }
+.copy-value span { color: var(--gold); }
+.referral-code { width: 100%; margin-bottom: 10px; padding: 15px; border: 1px solid var(--gold-border); border-radius: var(--radius-sm); color: var(--white); background: radial-gradient(circle at 80% 0,rgba(216,202,130,.15),transparent 45%),var(--surface-2); text-align: left; cursor: copy; }
+.referral-code span, .referral-code small { display: block; color: var(--muted); font: 11px var(--font-body); }
+.referral-code strong { display: block; margin: 4px 0; color: var(--gold); font: 22px var(--font-display); letter-spacing: .18em; }
