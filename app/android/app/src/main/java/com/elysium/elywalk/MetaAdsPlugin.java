@@ -356,17 +356,38 @@ public class MetaAdsPlugin extends Plugin {
             call.reject("Contexte indisponible");
             return;
         }
-        if (!AudienceNetworkAds.isInitialized(context)) {
+        if (AudienceNetworkAds.isInitialized(context)) {
+            call.resolve();
+            return;
+        }
+
+        // N'autorise pas le pont JS à lancer loadAd avant la fin réelle de
+        // l'initialisation. Meta demande que initialize() précède toute autre
+        // opération du SDK ; résoudre simplement après l'appel asynchrone
+        // créait une course au démarrage.
+        final Once once = new Once();
+        try {
             AudienceNetworkAds.buildInitSettings(context)
                     .withInitListener(new AudienceNetworkAds.InitListener() {
                         @Override
                         public void onInitialized(AudienceNetworkAds.InitResult result) {
                             Log.d(TAG, "SDK init: " + result.getMessage());
+                            runOnUi(() -> {
+                                if (once.claim()) call.resolve();
+                            });
                         }
                     })
                     .initialize();
+            main.postDelayed(() -> {
+                if (once.claim()) {
+                    Log.e(TAG, "SDK init timed out");
+                    call.reject("Délai dépassé pendant l'initialisation du SDK Meta Audience Network");
+                }
+            }, LOAD_TIMEOUT_MS);
+        } catch (Throwable t) {
+            Log.e(TAG, "SDK init failed", t);
+            if (once.claim()) call.reject("Échec d'initialisation du SDK Meta Audience Network: " + t.getMessage());
         }
-        call.resolve();
     }
 
     /**

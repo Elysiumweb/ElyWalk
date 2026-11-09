@@ -81,6 +81,7 @@ const LOAD_TIMEOUT_MS = 10000;
 // ---------------------------------------------------------------------------
 
 let initialized = false;
+let initialization: Promise<void> | null = null;
 /** `true` uniquement quand l'utilisateur a exprimé un choix (personnalisé ou non). */
 let adsAllowed = false;
 let appliedConsent: AdConsent | null = null;
@@ -104,17 +105,26 @@ async function applyConsent(): Promise<void> {
 /** Initialise le SDK Meta puis applique le consentement RGPD. */
 export async function initAds(): Promise<void> {
   if (!isNative() || initialized) return;
-  try {
-    await MetaAds.initialize();
-    initialized = true;
-    await applyConsent();
-    if (!consentSubscribed) {
-      consentSubscribed = true;
-      subscribeAdConsent(() => { void applyConsent(); });
+  if (initialization) return initialization;
+
+  initialization = (async () => {
+    try {
+      // Le plugin Android ne résout initialize qu'après le callback Meta :
+      // toute requête publicitaire attend donc vraiment la fin du démarrage.
+      await MetaAds.initialize();
+      initialized = true;
+      await applyConsent();
+      if (!consentSubscribed) {
+        consentSubscribed = true;
+        subscribeAdConsent(() => { void applyConsent(); });
+      }
+    } catch (e) {
+      console.warn('[MetaAds] init error', e);
+    } finally {
+      initialization = null;
     }
-  } catch (e) {
-    console.warn('[MetaAds] init error', e);
-  }
+  })();
+  return initialization;
 }
 
 /** `true` si un choix de consentement autorise la diffusion d'annonces. */
