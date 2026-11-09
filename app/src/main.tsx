@@ -9,9 +9,25 @@ import './profile-polish.css';
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import { installStartupGuard, showStartupFallback } from './lib/startup-guard';
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
-);
+installStartupGuard();
+
+const root = document.getElementById('root');
+try {
+  if (!root) throw new Error('Élément #root introuvable');
+
+  // Si React reste bloqué avant son premier rendu, proposer une action au
+  // lieu de laisser indéfiniment l'écran de chargement ou une page blanche.
+  window.setTimeout(() => {
+    if (root.childElementCount === 0) showStartupFallback('React n’a pas démarré');
+  }, 10000);
+
+  ReactDOM.createRoot(root).render(
+    <React.StrictMode>
+      <App />
+    </React.StrictMode>
+  );
+} catch (error) {
+  showStartupFallback(error);
+}

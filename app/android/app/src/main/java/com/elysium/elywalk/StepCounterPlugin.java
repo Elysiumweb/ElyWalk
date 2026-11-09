@@ -139,9 +139,15 @@ public class StepCounterPlugin extends Plugin {
     }
 
     private void resolveToday(PluginCall call) {
-        JSObject ret = new JSObject();
-        ret.put("todaySteps", StepStore.getTodaySteps(getContext()));
-        call.resolve(ret);
+        try {
+            JSObject ret = new JSObject();
+            ret.put("todaySteps", StepStore.getTodaySteps(getContext()));
+            call.resolve(ret);
+        } catch (RuntimeException e) {
+            // Capacitor relance les exceptions des @PluginMethod sur le thread
+            // principal : toujours les convertir en rejet Javascript.
+            call.reject("Impossible de lire les pas enregistrés", e);
+        }
     }
 
     private boolean needsActivityPermission() {

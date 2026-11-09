@@ -227,11 +227,22 @@ public class TrackingService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
-        createChannel();
+        // Android exige la promotion dans les 5 s suivant startForegroundService.
+        // Ne surtout pas restaurer une trace depuis le disque avant cet appel :
+        // un dépassement du délai termine tout le processus de l'application.
+        if (!promoteToForeground(0d, 0d, false)) return;
+
         // Reprise après un éventuel kill du process (START_STICKY).
         restoreIfNeeded();
-        if (!promoteToForeground(currentDistanceKm(), currentDurationMin(), isPaused())) return;
-        fusedClient = LocationServices.getFusedLocationProviderClient(this);
+        updateNotification(currentDistanceKm(), currentDurationMin(), isPaused());
+        try {
+            fusedClient = LocationServices.getFusedLocationProviderClient(this);
+        } catch (RuntimeException e) {
+            Log.e("ElyWalkTracking", "Google Play services indisponible", e);
+            stopSession(this);
+            stopSelf();
+            return;
+        }
         locationCallback = new LocationCallback() {
             @Override
             public void onLocationResult(@NonNull LocationResult locationResult) {
@@ -428,6 +439,8 @@ public class TrackingService extends Service {
     }
 
     private Notification buildNotification(double km, double min, boolean isPaused) {
+        // Le canal doit exister avant la toute première promotion.
+        createChannel();
         Intent launch = new Intent(this, MainActivity.class);
         launch.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         PendingIntent pi = PendingIntent.getActivity(
@@ -452,8 +465,12 @@ public class TrackingService extends Service {
     }
 
     private void updateNotification(double km, double min, boolean isPaused) {
-        NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-        if (nm != null) nm.notify(NOTIF_ID, buildNotification(km, min, isPaused));
+        try {
+            NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+            if (nm != null) nm.notify(NOTIF_ID, buildNotification(km, min, isPaused));
+        } catch (RuntimeException e) {
+            Log.w("ElyWalkTracking", "Notification de suivi indisponible", e);
+        }
     }
 
     // ---- Persistance (reprise après kill du process) ----

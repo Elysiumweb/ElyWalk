@@ -44,10 +44,26 @@ public class StepCounterService extends Service implements SensorEventListener {
         ContextCompat.startForegroundService(ctx.getApplicationContext(), i);
     }
 
+    /**
+     * Démarre le compteur sans faire remonter les refus des ROM Android.
+     * Le comptage est une fonctionnalité secondaire au démarrage : un service
+     * de premier plan refusé ne doit jamais fermer l'application.
+     */
+    public static boolean startQuietly(Context ctx) {
+        try {
+            start(ctx);
+            return true;
+        } catch (RuntimeException e) {
+            Log.w("ElyWalkSteps", "Démarrage du service de pas différé", e);
+            return false;
+        }
+    }
+
     @Override
     public void onCreate() {
         super.onCreate();
-        createChannel();
+        // Android impose une promotion en premier plan dans les 5 secondes.
+        // buildNotification() crée le canal nécessaire avant startForeground().
         if (!promoteToForeground()) return;
         sensorManager = (SensorManager) getSystemService(SENSOR_SERVICE);
         if (sensorManager != null) {
@@ -56,10 +72,10 @@ public class StepCounterService extends Service implements SensorEventListener {
                 // SENSOR_DELAY_NORMAL : basse consommation, suffisant pour des pas.
                 try {
                     sensorManager.registerListener(this, stepSensor, SensorManager.SENSOR_DELAY_NORMAL);
-                } catch (SecurityException e) {
-                    Log.w("ElyWalkSteps", "Activity recognition permission unavailable", e);
-                    stopSelf();
-                    return;
+                } catch (RuntimeException e) {
+                    // Permission retirée ou capteur défaillant : l'accueil reste
+                    // utilisable, seul le comptage automatique est indisponible.
+                    Log.w("ElyWalkSteps", "Step counter sensor unavailable", e);
                 }
             }
         }
@@ -91,7 +107,11 @@ public class StepCounterService extends Service implements SensorEventListener {
     @Override
     public void onDestroy() {
         if (sensorManager != null) {
-            sensorManager.unregisterListener(this);
+            try {
+                sensorManager.unregisterListener(this);
+            } catch (RuntimeException e) {
+                Log.w("ElyWalkSteps", "Impossible de libérer le capteur", e);
+            }
         }
         super.onDestroy();
     }
@@ -105,13 +125,29 @@ public class StepCounterService extends Service implements SensorEventListener {
     public void onSensorChanged(SensorEvent event) {
         if (event == null || event.sensor == null) return;
         if (event.sensor.getType() != Sensor.TYPE_STEP_COUNTER) return;
+        if (event.values == null || event.values.length == 0) return;
         long value = (long) event.values[0];
-        int today = StepStore.applySensorValue(this, value);
+        int today;
+        try {
+            today = StepStore.applySensorValue(this, value);
+        } catch (RuntimeException e) {
+            Log.e("ElyWalkSteps", "Lecture des pas impossible", e);
+            return;
+        }
         StepsListener l = listener;
         if (l != null) {
-            l.onSteps(today);
+            try {
+                l.onSteps(today);
+            } catch (RuntimeException e) {
+                // Un pont WebView détruit ne doit pas tuer le service natif.
+                Log.w("ElyWalkSteps", "Notification du pont JS en échec", e);
+            }
         }
-        ElyWalkWidget.updateAll(this);
+        try {
+            ElyWalkWidget.updateAll(this);
+        } catch (RuntimeException e) {
+            Log.w("ElyWalkSteps", "Mise à jour du widget impossible", e);
+        }
         if (lastNotifiedSteps < 0 || Math.abs(today - lastNotifiedSteps) >= 10) {
             lastNotifiedSteps = today;
             updateNotification(today);
@@ -136,6 +172,8 @@ public class StepCounterService extends Service implements SensorEventListener {
     }
 
     private Notification buildNotification(int steps) {
+        // Le canal doit exister avant la notification sur Android 8+.
+        createChannel();
         Intent launch = new Intent(this, MainActivity.class);
         launch.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         PendingIntent pi = PendingIntent.getActivity(
@@ -158,7 +196,11 @@ public class StepCounterService extends Service implements SensorEventListener {
     }
 
     private void updateNotification(int steps) {
-        NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-        if (nm != null) nm.notify(NOTIF_ID, buildNotification(steps));
+        try {
+            NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+            if (nm != null) nm.notify(NOTIF_ID, buildNotification(steps));
+        } catch (RuntimeException e) {
+            Log.w("ElyWalkSteps", "Notification de pas indisponible", e);
+        }
     }
 }

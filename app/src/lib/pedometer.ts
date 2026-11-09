@@ -31,6 +31,7 @@ class PedometerService {
   private todaySteps = 0;
   private listeners = new Set<Listener>();
   private started = false;
+  private startPromise: Promise<void> | null = null;
   private nativeHandle: { remove: () => void } | null = null;
   private appHandle: { remove: () => void } | null = null;
 
@@ -73,6 +74,20 @@ class PedometerService {
   /** Démarre le service natif (permission déjà accordée). */
   async start(): Promise<void> {
     if (!this.isNative() || this.started) return;
+    // Shell et HomePage démarrent au même moment après restauration de la
+    // session (et StrictMode répète les effets en développement). Une seule
+    // tentative native doit être partagée entre tous ces appels.
+    if (this.startPromise) return this.startPromise;
+
+    this.startPromise = this.startNative();
+    try {
+      await this.startPromise;
+    } finally {
+      this.startPromise = null;
+    }
+  }
+
+  private async startNative(): Promise<void> {
     try {
       if (!this.nativeHandle) {
         this.nativeHandle = await Native.addListener('steps', (d) => {
@@ -87,10 +102,11 @@ class PedometerService {
       Native.requestBatteryExemption().catch(() => undefined);
       if (!this.appHandle) {
         this.appHandle = await CapApp.addListener('appStateChange', ({ isActive }) => {
-          if (isActive) this.loadPersisted();
+          if (isActive) void this.loadPersisted();
         });
       }
     } catch (e) {
+      // Un refus du service Android ne doit jamais interrompre la navigation.
       console.warn('[Pedometer] start error', e);
     }
   }

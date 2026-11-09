@@ -58,35 +58,48 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    const celebrationKey = `elywalk.goalCelebrated.${today}`;
-    const crossed = previousSteps.current !== null && previousSteps.current < dailyGoal && steps >= dailyGoal;
-    const recoveredWhileClosed = steps >= dailyGoal && localStorage.getItem(celebrationKey) !== '1';
-    if ((crossed || recoveredWhileClosed) && !celebratedToday.current) {
-      celebratedToday.current = true;
-      localStorage.setItem(celebrationKey, '1');
-      celebrate('Objectif quotidien atteint !');
+    try {
+      const celebrationKey = `elywalk.goalCelebrated.${today}`;
+      const crossed = previousSteps.current !== null && previousSteps.current < dailyGoal && steps >= dailyGoal;
+      const recoveredWhileClosed = steps >= dailyGoal && localStorage.getItem(celebrationKey) !== '1';
+      if ((crossed || recoveredWhileClosed) && !celebratedToday.current) {
+        celebratedToday.current = true;
+        localStorage.setItem(celebrationKey, '1');
+        celebrate('Objectif quotidien atteint !');
+      }
+      previousSteps.current = steps;
+    } catch (e) {
+      // Le stockage peut être bloqué par la WebView : les pas restent visibles.
+      console.warn('[Home] préférence de célébration indisponible', e);
+      previousSteps.current = steps;
     }
-    previousSteps.current = steps;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [steps, dailyGoal]);
 
   useEffect(() => {
     let unsub: (() => void) | undefined;
+    let cancelled = false;
     (async () => {
-      const persisted = await pedometer.loadPersisted();
-      setSteps(persisted);
-      unsub = pedometer.subscribe(setSteps);
-      if (!isNative) {
-        setPerm('unavailable');
-        return;
-      }
-      const p = await pedometer.checkPermission();
-      setPerm(p);
-      if (p === 'granted') {
-        await pedometer.start();
+      try {
+        const persisted = await pedometer.loadPersisted();
+        if (cancelled) return;
+        setSteps(persisted);
+        unsub = pedometer.subscribe((value) => { if (!cancelled) setSteps(value); });
+        if (!isNative) {
+          setPerm('unavailable');
+          return;
+        }
+        const p = await pedometer.checkPermission();
+        if (cancelled) return;
+        setPerm(p);
+        if (p === 'granted') await pedometer.start();
+      } catch (e) {
+        console.warn('[Pedometer] initialisation impossible', e);
+        if (!cancelled) setPerm('unavailable');
       }
     })();
     return () => {
+      cancelled = true;
       if (unsub) unsub();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

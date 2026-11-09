@@ -267,6 +267,16 @@ img.avatar {
   min-height: 100%; display: flex; align-items: center; justify-content: center;
   flex-direction: column; gap: 16px; background: var(--black-2);
 }
+.startup-fallback {
+  min-height: 100vh;
+  display: flex; align-items: center; justify-content: center;
+  flex-direction: column; gap: 14px; text-align: center;
+  padding: calc(env(safe-area-inset-top, 0px) + 32px) 24px calc(env(safe-area-inset-bottom, 0px) + 32px);
+  background: var(--black-2);
+}
+.startup-fallback-logo { width: 96px; height: auto; }
+.startup-fallback-title { font-size: 18px; color: var(--gold); }
+.startup-fallback-body { color: var(--muted); font-size: 14px; max-width: 320px; line-height: 1.6; }
 .spinner {
   width: 34px; height: 34px; border-radius: 50%;
   border: 3px solid var(--gold-dim); border-top-color: var(--gold);

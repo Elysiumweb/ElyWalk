@@ -28,11 +28,8 @@ public class BootReceiver extends BroadcastReceiver {
                 return;
             }
         }
-        try {
-            StepCounterService.start(context);
-        } catch (Exception ignored) {
-            // Sur certaines ROM le FGS ne peut pas démarrer depuis le boot
-            // tant que l'utilisateur n'a pas rouvert l'app — ce n'est pas fatal.
-        }
+        // Sur certaines ROM le FGS ne peut pas démarrer depuis le boot tant
+        // que l'utilisateur n'a pas rouvert l'app — ce n'est pas fatal.
+        StepCounterService.startQuietly(context);
     }
 }

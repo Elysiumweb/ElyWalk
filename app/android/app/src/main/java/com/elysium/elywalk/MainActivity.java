@@ -3,8 +3,10 @@ package com.elysium.elywalk;
 import android.content.pm.PackageInfo;
 import android.os.Build;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.View;
 import android.view.WindowManager;
+import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebView;
 
 import androidx.core.graphics.Insets;
@@ -13,8 +15,11 @@ import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 
 import com.getcapacitor.BridgeActivity;
+import com.getcapacitor.WebViewListener;
 
 public class MainActivity extends BridgeActivity {
+
+    private static final String TAG = "ElyWalk";
 
     /**
      * Version de WebView (Chromium) à partir de laquelle les encarts système
@@ -27,6 +32,19 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(StepCounterPlugin.class);
         registerPlugin(TrackingPlugin.class);
+
+        // Sans ce rappel, Android termine le processus quand le moteur de la
+        // WebView meurt (pression mémoire ou pilote graphique défaillant).
+        bridgeBuilder.addWebViewListener(new WebViewListener() {
+            @Override
+            public boolean onRenderProcessGone(WebView webView, RenderProcessGoneDetail detail) {
+                boolean crashed = detail != null && detail.didCrash();
+                Log.e(TAG, "Moteur de rendu WebView interrompu (crash=" + crashed + ")");
+                runOnUiThread(() -> recreate());
+                return true;
+            }
+        });
+
         super.onCreate(savedInstanceState);
         enableEdgeToEdgeCompat();
     }
