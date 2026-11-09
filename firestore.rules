@@ -1,0 +1,234 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function auth() { return request.auth != null; }
+    function self(uid) { return auth() && request.auth.uid == uid; }
+    function verified() { return auth() && request.auth.token.email_verified == true; }
+    function president() { return auth() && request.auth.uid in ['BZ333LlhuJMoD4rXIquGE0zzjX43','7XLpqYMKEMX5kLrQtts6NG3zRB32']; }
+    function numberBetween(value, low, high) { return value is number && value >= low && value <= high; }
+    function economyUnchanged() {
+      return request.resource.data.elycoins == resource.data.elycoins
+        && request.resource.data.totalSteps == resource.data.totalSteps
+        && request.resource.data.totalCalories == resource.data.totalCalories
+        && request.resource.data.streak == resource.data.streak
+        && request.resource.data.lastValidatedDate == resource.data.lastValidatedDate;
+    }
+    function safePublicSync() {
+      return economyUnchanged()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['todaySteps','todayDate'])
+        && numberBetween(request.resource.data.todaySteps, 0, 60000);
+    }
+    function safeProfileEdit() {
+      return economyUnchanged() && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        'displayName','photoURL','paypalEmail','referredBy','referralRejected','signupIp','lastIp','hwid','hwids',
+        'dailyStepGoal','strideLengthCm','bio','onboardingDone','todaySteps','todayDate','health','unitSystem','activityPrivacy'
+      ]) && numberBetween(request.resource.data.todaySteps, 0, 60000);
+    }
+    function validStepCredit(uid) {
+      let day = request.resource.data.lastValidatedDate;
+      let daily = getAfter(/databases/$(database)/documents/users/$(uid)/dailySteps/$(day)).data;
+      return verified() && day != resource.data.lastValidatedDate
+        && daily.steps is int && numberBetween(daily.steps, 0, 60000)
+        && request.resource.data.totalSteps == resource.data.totalSteps + daily.steps
+        && request.resource.data.totalCalories == resource.data.totalCalories + daily.calories
+        && request.resource.data.elycoins == resource.data.elycoins + daily.coins
+        && request.resource.data.todaySteps == daily.steps
+        && request.resource.data.streakFreezes is int
+        && request.resource.data.streakFreezes >= 0
+        && request.resource.data.streakFreezes <= 1;
+    }
+    function validAdCredit(uid) {
+      let slot = request.resource.data.lastAdSlot;
+      let claim = getAfter(/databases/$(database)/documents/adClaims/$(slot)).data;
+      return verified() && (!('lastAdSlot' in resource.data) || slot != resource.data.lastAdSlot) && claim.uid == uid && claim.coins == 0.1
+        && request.resource.data.lastAdRewardAt == request.time
+        && (!('lastAdRewardAt' in resource.data) || request.time > resource.data.lastAdRewardAt + duration.value(1, 'h'))
+        && request.resource.data.elycoins == resource.data.elycoins + 0.1
+        && request.resource.data.totalSteps == resource.data.totalSteps
+        && request.resource.data.totalCalories == resource.data.totalCalories;
+    }
+    function validReferralCredit(uid) {
+      let claimId = request.resource.data.lastReferralClaim;
+      let before = get(/databases/$(database)/documents/referralClaims/$(claimId)).data;
+      let after = getAfter(/databases/$(database)/documents/referralClaims/$(claimId)).data;
+      return verified() && (!('lastReferralClaim' in resource.data) || claimId != resource.data.lastReferralClaim) && before.claimed == false && after.claimed == true
+        && after.sponsorUid == uid && request.resource.data.elycoins == resource.data.elycoins + 10
+        && request.resource.data.totalSteps == resource.data.totalSteps;
+    }
+    // Un utilisateur peut dépenser son solde, jamais le créditer librement. La création
+    // atomique du retrait est contrôlée dans /withdrawals.
+    function validChallengeCredit(uid) {
+      let challengeId = request.resource.data.lastChallengeClaim;
+      let after = getAfter(/databases/$(database)/documents/users/$(uid)/challenges/$(challengeId)).data;
+      return verified() && (!('lastChallengeClaim' in resource.data) || challengeId != resource.data.lastChallengeClaim)
+        && after.claimed == true && after.uid == uid
+        && after.reward is number && request.resource.data.elycoins == resource.data.elycoins + after.reward
+        && request.resource.data.totalSteps == resource.data.totalSteps
+        && request.resource.data.totalCalories == resource.data.totalCalories
+        && request.resource.data.streak == resource.data.streak
+        && request.resource.data.lastValidatedDate == resource.data.lastValidatedDate;
+    }
+    function validDebit() {
+      return verified() && request.resource.data.elycoins >= 0
+        && request.resource.data.elycoins < resource.data.elycoins
+        && request.resource.data.totalSteps == resource.data.totalSteps
+        && request.resource.data.totalCalories == resource.data.totalCalories;
+    }
+
+    match /users/{uid} {
+      allow read: if auth();
+      allow create: if self(uid) && request.resource.data.uid == uid
+        && request.resource.data.elycoins == 0 && request.resource.data.totalSteps == 0;
+      allow update: if president() || (self(uid) && (safeProfileEdit() || safePublicSync() || validStepCredit(uid) || validAdCredit(uid) || validReferralCredit(uid) || validChallengeCredit(uid) || validDebit()));
+      allow delete: if self(uid);
+      match /dailySteps/{day} {
+        allow read: if auth();
+        allow create: if self(uid) && verified()
+          && request.resource.data.steps is int && numberBetween(request.resource.data.steps, 0, 60000)
+          && numberBetween(request.resource.data.coins, 1, 50);
+        allow update, delete: if false;
+      }
+      match /notificationTokens/{tokenId} {
+        allow read, create, update, delete: if self(uid);
+      }
+      match /challenges/{challengeId} {
+        allow read: if self(uid);
+        allow create, update: if self(uid) && verified()
+          && request.resource.data.uid == uid
+          && request.resource.data.progress is number
+          && request.resource.data.progress >= 0
+          && request.resource.data.claimed is bool;
+        allow delete: if self(uid);
+      }
+      match /transactions/{txId} {
+        allow read: if self(uid) || president();
+        allow create: if president() || (self(uid) && verified() && numberBetween(request.resource.data.coins, -10000000, 50)
+          && request.resource.data.createdAt is number);
+        allow delete: if self(uid); // suppression RGPD uniquement, aucune incidence sur le solde
+        allow update: if false;
+      }
+    }
+
+    match /adClaims/{slot} {
+      allow read: if auth();
+      allow create: if verified() && request.resource.data.uid == request.auth.uid
+        && request.resource.data.slot == slot && slot.matches('^' + request.auth.uid + '_[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}$')
+        && request.resource.data.coins == 0.1;
+      allow update, delete: if false;
+    }
+    match /referralCodes/{code} {
+      allow read: if auth(); allow create: if auth() && request.resource.data.uid == request.auth.uid;
+      allow delete: if auth() && resource.data.uid == request.auth.uid; allow update: if false;
+    }
+    match /referralClaims/{referredUid} {
+      allow read: if auth();
+      allow create: if self(referredUid) && request.resource.data.referredUid == referredUid;
+      allow update: if auth() && resource.data.sponsorUid == request.auth.uid && resource.data.claimed == false
+        && request.resource.data.claimed == true;
+      allow delete: if auth() && (referredUid == request.auth.uid || resource.data.sponsorUid == request.auth.uid);
+    }
+    match /friendRequests/{id} {
+      allow read: if auth() && (resource.data.from == request.auth.uid || resource.data.to == request.auth.uid);
+      allow create: if auth() && request.resource.data.from == request.auth.uid && request.resource.data.status == 'pending';
+      allow update: if auth() && resource.data.to == request.auth.uid;
+      allow delete: if auth() && request.auth.uid in [resource.data.from, resource.data.to];
+    }
+    match /friendReactions/{id} {
+      allow read: if auth() && request.auth.uid in [resource.data.from, resource.data.to];
+      allow create: if auth() && request.resource.data.from == request.auth.uid
+        && request.resource.data.emoji in ['👏','🔥','💛','👋'] && request.resource.data.message.size() <= 160;
+      allow delete: if auth() && request.auth.uid in [resource.data.from, resource.data.to]; allow update: if false;
+    }
+    match /friendships/{id} {
+      allow read: if auth() && request.auth.uid in resource.data.members;
+      allow create: if auth() && request.auth.uid in request.resource.data.members && request.resource.data.members.size() == 2;
+      allow delete: if auth() && request.auth.uid in resource.data.members; allow update: if false;
+    }
+    match /withdrawals/{id} {
+      allow read: if president() || (auth() && resource.data.uid == request.auth.uid);
+      allow create: if verified() && request.resource.data.uid == request.auth.uid
+        && request.resource.data.status == 'pending' && request.resource.data.coins is int
+        && request.resource.data.coins > 0
+        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.elycoins
+          == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.elycoins - request.resource.data.coins
+        && !(request.resource.data.type in ['paypal','partner'] && president());
+      allow update: if (auth() && resource.data.uid == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['userName','paypalEmail','deletedUser'])
+          && request.resource.data.userName == 'Compte supprimé' && request.resource.data.paypalEmail == null)
+        || (president() && resource.data.status == 'pending'
+        && request.resource.data.status in ['paid','rejected','received']
+        && (request.resource.data.status != 'received' || resource.data.type == 'donation')
+        && (request.resource.data.status != 'paid' || resource.data.type != 'donation')
+        && (request.resource.data.status != 'rejected' ||
+          getAfter(/databases/$(database)/documents/users/$(resource.data.uid)).data.elycoins
+            == get(/databases/$(database)/documents/users/$(resource.data.uid)).data.elycoins + resource.data.coins));
+      allow delete: if false;
+    }
+    match /activitySessions/{id} {
+      allow read: if auth() && (resource.data.uid == request.auth.uid || resource.data.visibility in ['friends','link']);
+      allow create: if verified() && request.resource.data.uid == request.auth.uid
+        && request.resource.data.type in ['walk','run'] && request.resource.data.status == 'active';
+      // pausedSec est exclu de durationSec (durée active) et borné à 24 h.
+      // title / note / weather : bornes alignées sur l'interface.
+      allow update: if verified() && resource.data.uid == request.auth.uid
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.points.size() <= 20000
+        && request.resource.data.distanceM is number
+        && request.resource.data.durationSec is number && request.resource.data.durationSec >= 0
+        && request.resource.data.status in ['active','completed']
+        && (!('pausedSec' in request.resource.data)
+          || (request.resource.data.pausedSec is number
+            && request.resource.data.pausedSec >= 0
+            && request.resource.data.pausedSec <= 86400))
+        && (!('title' in request.resource.data) || request.resource.data.title.size() <= 80)
+        && (!('note' in request.resource.data) || request.resource.data.note.size() <= 500)
+        && (!('weather' in request.resource.data)
+          || request.resource.data.weather in ['sunny','cloudy','rain','cold','wind','night']);
+      allow delete: if auth() && resource.data.uid == request.auth.uid;
+    }
+    match /partnerRequests/{id} {
+      allow read: if president() || (auth() && resource.data.uid == request.auth.uid);
+      allow create: if auth() && request.resource.data.uid == request.auth.uid;
+      allow update: if president() || (auth() && resource.data.uid == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['userName','contactEmail','message','deletedUser'])
+        && request.resource.data.userName == 'Compte supprimé'); allow delete: if false;
+    }
+    match /users/{uid}/badges/{badgeId} {
+      allow read: if auth();
+      allow create, update: if self(uid) && request.resource.data.badgeId == badgeId;
+      allow delete: if self(uid);
+    }
+    match /activityFeed/{id} {
+      allow read: if auth();
+      allow create: if auth() && request.resource.data.uid == request.auth.uid
+        && request.resource.data.createdAt is number
+        && request.resource.data.message.size() <= 300;
+      allow update, delete: if auth() && resource.data.uid == request.auth.uid;
+    }
+    match /friendChallenges/{id} {
+      allow read: if auth() && request.auth.uid in resource.data.participants;
+      allow create: if auth() && request.resource.data.creatorUid == request.auth.uid
+        && request.resource.data.participants.size() >= 2
+        && request.resource.data.participants.size() <= 6
+        && request.resource.data.target is number;
+      allow update: if auth() && request.auth.uid in resource.data.participants;
+      allow delete: if auth() && resource.data.creatorUid == request.auth.uid;
+    }
+    match /directMessages/{id} {
+      allow read: if auth() && request.auth.uid in [resource.data.from, resource.data.to];
+      allow create: if auth() && request.resource.data.from == request.auth.uid
+        && request.resource.data.text.size() <= 500;
+      allow update: if auth() && request.auth.uid == resource.data.to;
+      allow delete: if auth() && request.auth.uid in [resource.data.from, resource.data.to];
+    }
+    match /communityEvents/{id} {
+      allow read: if auth();
+      allow create: if auth() && request.resource.data.creatorUid == request.auth.uid;
+      allow update: if auth();
+      allow delete: if auth() && resource.data.creatorUid == request.auth.uid;
+    }
+    match /partnerOffers/{id} { allow read: if auth(); allow write: if president(); }
+    match /establishments/{id} { allow read: if auth(); allow write: if president(); }
+    match /{document=**} { allow read, write: if false; }
+  }
+}
