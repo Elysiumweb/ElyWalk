@@ -110,8 +110,8 @@ export default function HomePage() {
     const granted = await pedometer.requestPermission();
     if (granted) {
       setPerm('granted');
-      await pedometer.start();
-      toast('Comptage des pas activé !', 'success');
+      const started = await pedometer.start();
+      toast(started ? 'Comptage des pas activé !' : 'Impossible de démarrer le compteur. Réessayez lorsque l’application est ouverte.', started ? 'success' : 'error');
     } else {
       setPerm('denied');
       toast("Permission refusée. Activez « Activité physique » dans les paramètres de l'application.", 'error');

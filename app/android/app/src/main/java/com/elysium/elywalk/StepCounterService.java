@@ -14,6 +14,7 @@ import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.os.Build;
 import android.os.IBinder;
+import android.util.Log;
 
 import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
@@ -36,6 +37,7 @@ public class StepCounterService extends Service implements SensorEventListener {
     private SensorManager sensorManager;
     private Sensor stepSensor;
     private int lastNotifiedSteps = -1;
+    private boolean foregroundFailed = false;
 
     public static void start(Context ctx) {
         Intent i = new Intent(ctx.getApplicationContext(), StepCounterService.class);
@@ -46,16 +48,34 @@ public class StepCounterService extends Service implements SensorEventListener {
     public void onCreate() {
         super.onCreate();
         createChannel();
-        promoteToForeground();
+        if (!promoteSafely()) return;
         sensorManager = (SensorManager) getSystemService(SENSOR_SERVICE);
         if (sensorManager != null) {
             stepSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER);
             if (stepSensor != null) {
                 // SENSOR_DELAY_NORMAL : basse consommation, suffisant pour des pas.
-                sensorManager.registerListener(this, stepSensor, SensorManager.SENSOR_DELAY_NORMAL);
+                try {
+                    sensorManager.registerListener(this, stepSensor, SensorManager.SENSOR_DELAY_NORMAL);
+                } catch (SecurityException e) {
+                    Log.e("ElyWalkSteps", "Permission d'activité physique indisponible", e);
+                    stopSelf();
+                    return;
+                }
             }
         }
         updateNotification(StepStore.getTodaySteps(this));
+    }
+
+    private boolean promoteSafely() {
+        try {
+            promoteToForeground();
+            return true;
+        } catch (RuntimeException e) {
+            Log.e("ElyWalkSteps", "Impossible de démarrer le compteur de pas", e);
+            foregroundFailed = true;
+            stopSelf();
+            return false;
+        }
     }
 
     private void promoteToForeground() {
@@ -69,8 +89,8 @@ public class StepCounterService extends Service implements SensorEventListener {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        promoteToForeground();
-        return START_STICKY;
+        if (foregroundFailed) return START_NOT_STICKY;
+        return promoteSafely() ? START_STICKY : START_NOT_STICKY;
     }
 
     @Override
@@ -94,7 +114,9 @@ public class StepCounterService extends Service implements SensorEventListener {
         int today = StepStore.applySensorValue(this, value);
         StepsListener l = listener;
         if (l != null) {
-            l.onSteps(today);
+            try { l.onSteps(today); } catch (RuntimeException e) {
+                Log.w("ElyWalkSteps", "Écouteur de pas indisponible", e);
+            }
         }
         ElyWalkWidget.updateAll(this);
         if (lastNotifiedSteps < 0 || Math.abs(today - lastNotifiedSteps) >= 10) {

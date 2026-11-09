@@ -46,8 +46,7 @@ public class StepCounterPlugin extends Plugin {
             requestNeededPermissions(call, "onStartPerms");
             return;
         }
-        launchService();
-        resolveToday(call);
+        launchService(call);
     }
 
     @PermissionCallback
@@ -56,8 +55,7 @@ public class StepCounterPlugin extends Plugin {
             call.reject("Permission ACTIVITY_RECOGNITION refusée");
             return;
         }
-        launchService();
-        resolveToday(call);
+        launchService(call);
     }
 
     @PluginMethod
@@ -129,11 +127,12 @@ public class StepCounterPlugin extends Plugin {
         }
     }
 
-    private void launchService() {
+    private void launchService(PluginCall call) {
         try {
             StepCounterService.start(getContext());
-        } catch (Exception ignored) {
-            // Relancé au prochain onStart / boot.
+            resolveToday(call);
+        } catch (RuntimeException e) {
+            call.reject("Impossible de démarrer le compteur de pas. Réessayez lorsque l'application est ouverte.", e);
         }
     }
 

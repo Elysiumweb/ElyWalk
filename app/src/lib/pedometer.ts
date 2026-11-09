@@ -31,6 +31,7 @@ class PedometerService {
   private todaySteps = 0;
   private listeners = new Set<Listener>();
   private started = false;
+  private startPromise: Promise<boolean> | null = null;
   private nativeHandle: { remove: () => void } | null = null;
   private appHandle: { remove: () => void } | null = null;
 
@@ -71,8 +72,16 @@ class PedometerService {
   }
 
   /** Démarre le service natif (permission déjà accordée). */
-  async start(): Promise<void> {
-    if (!this.isNative() || this.started) return;
+  async start(): Promise<boolean> {
+    if (!this.isNative()) return false;
+    if (this.started) return true;
+    if (!this.startPromise) {
+      this.startPromise = this.startNative().finally(() => { this.startPromise = null; });
+    }
+    return this.startPromise;
+  }
+
+  private async startNative(): Promise<boolean> {
     try {
       if (!this.nativeHandle) {
         this.nativeHandle = await Native.addListener('steps', (d) => {
@@ -86,12 +95,18 @@ class PedometerService {
       this.notify();
       Native.requestBatteryExemption().catch(() => undefined);
       if (!this.appHandle) {
-        this.appHandle = await CapApp.addListener('appStateChange', ({ isActive }) => {
-          if (isActive) this.loadPersisted();
-        });
+        try {
+          this.appHandle = await CapApp.addListener('appStateChange', ({ isActive }) => {
+            if (isActive) this.loadPersisted();
+          });
+        } catch (e) {
+          console.warn('[Pedometer] app state listener', e);
+        }
       }
+      return true;
     } catch (e) {
       console.warn('[Pedometer] start error', e);
+      return false;
     }
   }
 

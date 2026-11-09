@@ -12,6 +12,7 @@ import android.content.pm.ServiceInfo;
 import android.location.Location;
 import android.os.Build;
 import android.os.IBinder;
+import android.util.Log;
 
 import androidx.annotation.NonNull;
 import androidx.core.app.NotificationCompat;
@@ -100,9 +101,14 @@ public class TrackingService extends Service {
             pausedMs = 0L;
             pauseStartedAt = 0L;
         }
-        persistClear(ctx);
         Intent i = new Intent(ctx.getApplicationContext(), TrackingService.class);
-        ContextCompat.startForegroundService(ctx.getApplicationContext(), i);
+        try {
+            ContextCompat.startForegroundService(ctx.getApplicationContext(), i);
+            persistClear(ctx);
+        } catch (RuntimeException e) {
+            synchronized (LOCK) { running = false; }
+            throw e;
+        }
     }
 
     /** Met la sortie en pause : GPS coupé, chronomètre actif gelé. */
@@ -131,7 +137,7 @@ public class TrackingService extends Service {
         synchronized (LOCK) {
             batterySaver = enabled;
         }
-        sendAction(ctx, ACTION_MODE);
+        if (isRunning()) sendAction(ctx, ACTION_MODE);
     }
 
     private static void sendAction(Context ctx, String action) {
@@ -224,7 +230,7 @@ public class TrackingService extends Service {
         createChannel();
         // Reprise après un éventuel kill du process (START_STICKY).
         restoreIfNeeded();
-        promoteToForeground(currentDistanceKm(), currentDurationMin(), isPaused());
+        if (!promoteSafely()) return;
         fusedClient = LocationServices.getFusedLocationProviderClient(this);
         locationCallback = new LocationCallback() {
             @Override
@@ -238,6 +244,10 @@ public class TrackingService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        if (!isRunning()) {
+            stopSelf();
+            return START_NOT_STICKY;
+        }
         String action = intent == null ? null : intent.getAction();
         if (ACTION_PAUSE.equals(action)) {
             removeLocationUpdates();
@@ -249,9 +259,9 @@ public class TrackingService extends Service {
             applyLocationState();
         }
         if (isRunning()) {
-            promoteToForeground(currentDistanceKm(), currentDurationMin(), isPaused());
+            if (!promoteSafely()) return START_NOT_STICKY;
         }
-        return START_STICKY;
+        return isRunning() ? START_STICKY : START_NOT_STICKY;
     }
 
     /** (Re)configure les mises à jour GPS selon l'état pause et le mode batterie. */
@@ -276,6 +286,10 @@ public class TrackingService extends Service {
         } catch (SecurityException se) {
             // Permission révoquée en cours de route : on stoppe proprement.
             stopSession(TrackingService.this);
+            SnapshotListener l = listener;
+            if (l != null) {
+                try { l.onSnapshot(snapshot()); } catch (Exception ignored) { }
+            }
         }
     }
 
@@ -291,6 +305,24 @@ public class TrackingService extends Service {
     private static boolean isBatterySaver() {
         synchronized (LOCK) {
             return batterySaver;
+        }
+    }
+
+    // Une permission révoquée ou une restriction Android peut provoquer une
+    // exception ici, après le retour de startForegroundService au plugin.
+    private boolean promoteSafely() {
+        try {
+            promoteToForeground(currentDistanceKm(), currentDurationMin(), isPaused());
+            return true;
+        } catch (RuntimeException e) {
+            Log.e("ElyWalkTracking", "Impossible de démarrer le service GPS", e);
+            synchronized (LOCK) { running = false; }
+            SnapshotListener l = listener;
+            if (l != null) {
+                try { l.onSnapshot(snapshot()); } catch (Exception ignored) { }
+            }
+            stopSelf();
+            return false;
         }
     }
 

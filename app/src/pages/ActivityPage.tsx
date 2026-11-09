@@ -10,6 +10,7 @@ import { useToast } from '../components/Toast';
 import {
   appendActivityPoint,
   createActivitySession,
+  deleteActivitySession,
   finishActivitySession,
   listActivitySessionsPage,
   type ActivityQueryCursor,
@@ -84,6 +85,8 @@ export default function ActivityPage() {
   const markerRef = useRef<L.CircleMarker | null>(null);
 
   const sessionRef = useRef<string | null>(null);
+  const startingRef = useRef(false);
+  const [starting, setStarting] = useState(false);
   const pointsRef = useRef<ActivityPoint[]>([]);
   const distanceRef = useRef(0);
   const startedAtRef = useRef<number | null>(null);
@@ -372,7 +375,13 @@ export default function ActivityPage() {
 
   async function attachListeners() {
     if (!trackHandleRef.current) {
-      trackHandleRef.current = await tracking.addListener((s) => { applySnapshot(s); void maybePersist(); });
+      trackHandleRef.current = await tracking.addListener((s) => {
+        applySnapshot(s);
+        if (!s.running) {
+          toast('Le GPS s’est arrêté. Vérifiez les autorisations puis terminez la sortie pour enregistrer les données.', 'error');
+        }
+        void maybePersist();
+      });
     }
     if (!appStateHandleRef.current) {
       appStateHandleRef.current = await CapApp.addListener('appStateChange', ({ isActive }) => {
@@ -457,7 +466,11 @@ export default function ActivityPage() {
   }
 
   async function start() {
-    if (!profile || running) return;
+    if (!profile || running || startingRef.current) return;
+    startingRef.current = true;
+    setStarting(true);
+    let createdId: string | null = null;
+    let nativeStarted = false;
     try {
       pointsRef.current = [];
       distanceRef.current = 0;
@@ -479,6 +492,7 @@ export default function ActivityPage() {
       lastSavedRef.current = now;
 
       const id = await createActivitySession(profile.uid, type);
+      createdId = id;
       sessionRef.current = id;
       try {
         await pedometer.loadPersisted();
@@ -488,11 +502,16 @@ export default function ActivityPage() {
 
       if (native) {
         const snap = await tracking.start(type, batterySaver);
+        nativeStarted = true;
+        if (!snap.running) throw new Error('Le service GPS n’a pas pu démarrer. Vérifiez la localisation et réessayez.');
         applySnapshot(snap);
         // Objectif déjà atteint avant la fermeture : ne pas renotifier.
         const persistedGoal = readStoredNumber(ACTIVITY_GOAL_KEY);
         if (goalProgress(snap.distanceM || 0, persistedGoal)?.reached) goalNotifiedRef.current = true;
         await attachListeners();
+        const current = await tracking.getSnapshot();
+        if (!current.running) throw new Error('Le service GPS n’a pas pu démarrer. Vérifiez la localisation et réessayez.');
+        applySnapshot(current);
       } else {
         await startWatch();
       }
@@ -504,7 +523,13 @@ export default function ActivityPage() {
       toast(type === 'run' ? 'Course démarrée. Bonne sortie !' : 'Marche démarrée. Bonne sortie !', 'success');
     } catch (e) {
       await cleanupAfterError();
-      toast((e as Error).message, 'error');
+      if (nativeStarted) await tracking.stop().catch(console.warn);
+      if (createdId) await deleteActivitySession(profile.uid, createdId).catch(console.warn);
+      sessionRef.current = null;
+      toast((e as Error).message || 'Impossible de démarrer la sortie.', 'error');
+    } finally {
+      startingRef.current = false;
+      setStarting(false);
     }
   }
 
@@ -749,7 +774,7 @@ export default function ActivityPage() {
             <button className="btn btn-danger" onClick={stop}>■ Terminer et enregistrer</button>
           </div>
         ) : (
-          <button className="btn btn-gold" onClick={start}>▶ Démarrer la sortie</button>
+          <button className="btn btn-gold" onClick={start} disabled={starting}>{starting ? 'Démarrage…' : '▶ Démarrer la sortie'}</button>
         )}
         <p className="activity-privacy">
           {native

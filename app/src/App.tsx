@@ -25,6 +25,7 @@ import ActivityPage from './pages/ActivityPage';
 import ActivityDetailPage from './pages/ActivityDetailPage';
 import EventsPage from './pages/EventsPage';
 import ProductStatus from './components/ProductStatus';
+import PageErrorBoundary from './components/PageErrorBoundary';
 import { setupNotifications } from './lib/notifications';
 
 function Shell() {
@@ -103,6 +104,7 @@ function Shell() {
 
   return (
     <div className="app-shell">
+      <PageErrorBoundary key={location.pathname}>
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/map" element={<MapPage />} />
@@ -122,6 +124,7 @@ function Shell() {
         <Route path="/legal/:doc" element={<LegalPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      </PageErrorBoundary>
       <ProductStatus />
       <TabBar />
     </div>
