@@ -10,7 +10,9 @@ import LevelBadge from '../components/LevelBadge';
 import { logout, updateAuthProfile, changePassword, changeEmail, deleteAuthAccount, reauthenticateAccount, frAuthError } from '../lib/auth-service';
 import { updateUserFields, setReferredBy, exportAccountData, deleteAccountData, listUserBadges, watchUserBadges, getReferralDashboard, updateActivityPrivacy } from '../lib/db';
 import { uploadAvatar, deleteAvatar } from '../lib/avatar';
-import { getNotificationSettings, setReminderEnabled, setPushEnabled, type NotificationSettings } from '../lib/notifications';
+import { getNotificationSettings, setReminderEnabled, setReminderSchedule, setPushEnabled, type NotificationSettings, type ReminderSchedule } from '../lib/notifications';
+import BlockedAccounts from '../components/BlockedAccounts';
+import { useI18n, type Locale } from '../context/LocaleContext';
 import { ACCOUNT_DELETION_URL, DATA_DELETION_URL, BADGE_DEFINITIONS } from '../lib/constants';
 import { openAdPrivacyOptions } from '../lib/ads';
 import { isPresidentUid } from '../lib/constants';
@@ -20,6 +22,7 @@ import type { UserBadge, BadgeDefinition } from '../lib/types';
 export default function ProfilePage() {
   const { profile } = useAuth();
   const { toast } = useToast();
+  const { locale, setLocale, t } = useI18n();
   const navigate = useNavigate();
 
   const [busy, setBusy] = useState(false);
@@ -171,6 +174,7 @@ export default function ProfilePage() {
   const onChangeEmail = async () => { if(!profile)return; setBusy(true); try { await changeEmail(emailPassword, nextEmail); await updateUserFields(profile.uid, { email: nextEmail.trim() }); toast('Adresse e-mail mise à jour.','success'); setEmailOpen(false); setEmailPassword(''); setNextEmail(''); } catch(e){toast(frAuthError(e),'error')} finally{setBusy(false)} };
   const onToggleReminder = async (v: boolean) => { await setReminderEnabled(v); setNotifSettings((s) => s ? { ...s, reminder: v } : s); };
   const onTogglePush = async (v: boolean) => { if(!profile)return; await setPushEnabled(profile.uid, v); setNotifSettings((s) => s ? { ...s, push: v } : s); };
+  const onScheduleChange = async (patch: Partial<ReminderSchedule>) => { if (!notifSettings) return; const schedule = { ...notifSettings.schedule, ...patch }; setNotifSettings({ ...notifSettings, schedule, reminder: schedule.enabled }); try { await setReminderSchedule(schedule); } catch (e) { toast((e as Error).message, 'error'); } };
   const onPrivacyOptions = async () => { openAdPrivacyOptions(); };
   const onExport = async () => { if(!profile)return; const data=await exportAccountData(profile.uid); const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'})); a.download=`elywalk-export-${profile.uid}.json`; a.click(); URL.revokeObjectURL(a.href); };
   const onDelete = async () => { if(!profile||!confirm('Suppression définitive : vos données et votre compte seront effacés. Continuer ?'))return; const pwd=prompt('Pour confirmer, saisissez votre mot de passe (laissez vide pour Google)')||undefined; setBusy(true); try { if(pwd) await reauthenticateAccount(pwd); await deleteAvatar(profile.uid); await deleteAccountData(profile.uid); await deleteAuthAccount(); } catch(e){toast(frAuthError(e),'error')} finally{setBusy(false)} };
@@ -347,14 +351,16 @@ export default function ProfilePage() {
         </div>
       </div>
 
+      <div className="card"><div className="field"><label>{t('settings.language')}</label><select className="input" value={locale} onChange={e=>void setLocale(e.target.value as Locale)} data-testid="language-select"><option value="fr">Français</option><option value="en">English</option></select><small className="card-help">Les libellés traduits, dates et nombres utilisent cette langue.</small></div></div>
+
       <div className="card">
         <div className="card-title">Notifications</div>
         {notifSettings && (
           <>
             <div className="list-row">
               <div className="row-main">
-                <div className="row-title" style={{ fontSize: 14 }}>Rappel quotidien (20 h)</div>
-                <div className="row-sub">Notification locale de validation des pas</div>
+                <div className="row-title" style={{ fontSize: 14 }}>Rappels de marche</div>
+                <div className="row-sub">{notifSettings.schedule.time} · {notifSettings.schedule.days.length} jour(s) par semaine</div>
               </div>
               <button
                 className={`btn btn-sm ${notifSettings.reminder ? 'btn-gold' : 'btn-ghost'}`}
@@ -364,6 +370,12 @@ export default function ProfilePage() {
                 {notifSettings.reminder ? 'Activé' : 'Désactivé'}
               </button>
             </div>
+            {notifSettings.reminder && <div className="reminder-settings">
+              <div className="chip-row" aria-label="Jours de rappel">{['D','L','M','M','J','V','S'].map((label, day) => <button key={day} className={`chip ${notifSettings.schedule.days.includes(day) ? 'chip-active' : ''}`} aria-pressed={notifSettings.schedule.days.includes(day)} onClick={() => onScheduleChange({ days: notifSettings.schedule.days.includes(day) ? notifSettings.schedule.days.filter(d => d !== day) : [...notifSettings.schedule.days, day].sort() })}>{label}</button>)}</div>
+              <div className="field"><label>Heure du rappel</label><input className="input" type="time" value={notifSettings.schedule.time} onChange={e => onScheduleChange({ time: e.target.value })} /></div>
+              <div className="two-col"><div className="field"><label>Silence à partir de</label><input className="input" type="time" value={notifSettings.schedule.quietStart} onChange={e => onScheduleChange({ quietStart: e.target.value })} /></div><div className="field"><label>Jusqu’à</label><input className="input" type="time" value={notifSettings.schedule.quietEnd} onChange={e => onScheduleChange({ quietEnd: e.target.value })} /></div></div>
+              <label className="check-row"><input type="checkbox" checked={notifSettings.schedule.goalAware} onChange={e => onScheduleChange({ goalAware: e.target.checked })} /> Adapter le message à mon objectif quotidien</label>
+            </div>}
             <div className="list-row">
               <div className="row-main">
                 <div className="row-title" style={{ fontSize: 14 }}>Notifications push</div>
@@ -380,6 +392,8 @@ export default function ProfilePage() {
           </>
         )}
       </div>
+
+      <BlockedAccounts />
 
       <div className="card"><div className="card-title">Compte & données</div>
         <button className="btn btn-ghost" onClick={()=>setSecurityOpen(true)}>Changer le mot de passe</button>

@@ -2,18 +2,19 @@ import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { watchIncomingRequests } from '../lib/db';
+import { useI18n, type TranslationKey } from '../context/LocaleContext';
 
-const tabs = [
-  { to: '/', label: 'Accueil', testId: 'tab-home', icon: HomeIcon },
-  { to: '/map', label: 'Carte', testId: 'tab-map', icon: MapIcon },
-  { to: '/friends', label: 'Amis', testId: 'tab-friends', icon: FriendsIcon },
-  { to: '/leaderboard', label: 'Classement', testId: 'tab-leaderboard', icon: TrophyIcon },
-  { to: '/wallet', label: 'Portefeuille', testId: 'tab-wallet', icon: WalletIcon },
-  { to: '/profile', label: 'Profil', testId: 'tab-profile', icon: ProfileIcon },
+const tabs: Array<{to:string;label:TranslationKey;testId:string;icon:()=>JSX.Element}> = [
+  { to: '/', label: 'nav.home', testId: 'tab-home', icon: HomeIcon },
+  { to: '/map', label: 'nav.map', testId: 'tab-map', icon: MapIcon },
+  { to: '/friends', label: 'nav.friends', testId: 'tab-friends', icon: FriendsIcon },
+  { to: '/leaderboard', label: 'nav.leaderboard', testId: 'tab-leaderboard', icon: TrophyIcon },
+  { to: '/wallet', label: 'nav.wallet', testId: 'tab-wallet', icon: WalletIcon },
+  { to: '/profile', label: 'nav.profile', testId: 'tab-profile', icon: ProfileIcon },
 ];
 
 export default function TabBar() {
-  const { profile } = useAuth(); const [pending,setPending]=useState(0);
+  const { profile } = useAuth(); const [pending,setPending]=useState(0); const { t: translate }=useI18n();
   useEffect(()=>profile?watchIncomingRequests(profile.uid,r=>setPending(r.length)):undefined,[profile?.uid]);
   return (
     <nav className="tabbar" data-testid="bottom-tab-bar">
@@ -24,10 +25,10 @@ export default function TabBar() {
           end={t.to === '/'}
           data-testid={t.testId}
           className={({ isActive }) => `tab ${isActive ? 'tab-active' : ''}`}
-          aria-label={t.label}
+          aria-label={translate(t.label)}
         >
           <span className="tab-icon" aria-hidden="true"><t.icon />{t.to==='/friends'&&pending>0&&<b className="tab-badge">{pending}</b>}</span>
-          <span className="tab-label">{t.label}</span>
+          <span className="tab-label">{translate(t.label)}</span>
         </NavLink>
       ))}
     </nav>

@@ -23,6 +23,7 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
+import { assertNotBlocked } from './safety';
 import { db } from './firebase';
 import {
   isPresidentUid,
@@ -450,9 +451,10 @@ export async function claimChallengeReward(uid: string, challenge: ChallengeDefi
 
 // ============ Sorties GPS ============
 
-export async function createActivitySession(uid: string, type: ActivitySession['type']): Promise<string> {
+export async function createActivitySession(uid: string, type: ActivitySession['type'], route?: { id: string; name: string }): Promise<string> {
   const ref = await addDoc(collection(db, 'activitySessions'), {
     uid, type, startedAt: Date.now(), durationSec: 0, distanceM: 0, calories: 0, points: [], status: 'active',
+    routeId: route?.id || null, routeName: route?.name || null,
   } satisfies ActivitySession);
   return ref.id;
 }
@@ -748,6 +750,7 @@ export async function findUserByCode(code: string): Promise<UserProfile | null> 
 
 export async function sendFriendRequest(me: UserProfile, target: UserProfile): Promise<void> {
   if (target.uid === me.uid) throw new Error('Vous ne pouvez pas vous ajouter vous-même.');
+  await assertNotBlocked(me.uid, target.uid);
   const existing = await getDocs(
     query(
       collection(db, 'friendRequests'),
@@ -839,6 +842,7 @@ export async function searchUsersByName(name: string): Promise<UserProfile[]> {
 }
 
 export async function sendFriendReaction(from: UserProfile, toUid: string, emoji: string, message = ''): Promise<void> {
+  await assertNotBlocked(from.uid, toUid);
   if (!['👏','🔥','💛','👋'].includes(emoji)) throw new Error('Réaction invalide.');
   await addDoc(collection(db, 'friendReactions'), { from: from.uid, fromName: from.displayName, to: toUid, emoji, message: message.slice(0, 160), createdAt: Date.now() });
 }
@@ -1054,6 +1058,7 @@ export async function createFriendChallenge(creator: UserProfile, opts: { title:
   const endDate = new Date(); endDate.setDate(endDate.getDate()+days);
   const end = dateStr(endDate);
   const allParticipants = Array.from(new Set([creator.uid, ...opts.participantUids]));
+  for (const participant of opts.participantUids) await assertNotBlocked(creator.uid, participant);
   // fetch names
   const profiles = await getProfiles(allParticipants);
   const names: Record<string,string> = {};
@@ -1170,6 +1175,7 @@ export function getFriendCodeShareUrl(code: string): string {
 export async function sendDirectMessage(from: UserProfile, toUid: string, text: string, activityId?: string): Promise<void> {
   const t = text.trim().slice(0,500);
   if (!t) throw new Error('Message vide');
+  await assertNotBlocked(from.uid, toUid);
   if (t.length<1) throw new Error('Message trop court');
   // vérifie amitié
   const friendships = await getDocs(query(collection(db,'friendships'), where('members','array-contains',from.uid)));
@@ -1215,7 +1221,7 @@ export function watchRecentMessages(uid:string, cb:(msgs:DirectMessage[])=>void)
 }
 
 // ============ Événements communautaires ============
-export async function createCommunityEvent(creator: UserProfile, data: { title:string; description:string; establishmentId?:string; establishmentName?:string; location?:string; lat?:number; lng?:number; date:string; time?:string; maxParticipants?:number }): Promise<string> {
+export async function createCommunityEvent(creator: UserProfile, data: { title:string; description:string; establishmentId?:string; establishmentName?:string; location?:string; lat?:number; lng?:number; date:string; time?:string; maxParticipants?:number | null }): Promise<string> {
   const ref = await addDoc(collection(db,'communityEvents'), {
     title: data.title.slice(0,80),
     description: data.description.slice(0,600),
@@ -1229,7 +1235,9 @@ export async function createCommunityEvent(creator: UserProfile, data: { title:s
     creatorUid: creator.uid,
     creatorName: creator.displayName,
     participants: [creator.uid],
-    maxParticipants: data.maxParticipants||null,
+    waitlist: [],
+    maxParticipants: data.maxParticipants ?? null,
+    status: 'scheduled',
     createdAt: Date.now(),
   } as unknown as CommunityEvent);
   await createFeedItem(creator,'friend',`a créé l’événement « ${data.title} »`, { eventId: ref.id }).catch(()=>undefined);
@@ -1242,21 +1250,53 @@ export async function listCommunityEvents(limitCount=20): Promise<CommunityEvent
 export function watchCommunityEvents(cb:(items:CommunityEvent[])=>void):Unsubscribe{
   return onSnapshot(query(collection(db,'communityEvents'), orderBy('date','asc'), limit(20)), snap=>cb(snap.docs.map(d=>({id:d.id,...(d.data() as CommunityEvent)}))));
 }
-export async function joinCommunityEvent(uid:string, eventId:string):Promise<void>{
+export async function joinCommunityEvent(uid:string, eventId:string):Promise<'joined'|'waitlisted'>{
   const ref=doc(db,'communityEvents',eventId);
-  const snap=await getDoc(ref);
-  if(!snap.exists()) throw new Error('Événement introuvable');
-  const ev=snap.data() as CommunityEvent;
-  if(ev.participants.includes(uid)) return;
-  if(ev.maxParticipants && ev.participants.length>=ev.maxParticipants) throw new Error('Complet');
-  await updateDoc(ref,{ participants: [...ev.participants, uid] });
+  return runTransaction(db, async tx => {
+    const snap=await tx.get(ref);
+    if(!snap.exists()) throw new Error('Événement introuvable');
+    const ev=snap.data() as CommunityEvent;
+    if(ev.status === 'cancelled') throw new Error('Cet événement est annulé.');
+    await assertNotBlocked(uid, ev.creatorUid);
+    if(ev.participants.includes(uid)) return 'joined' as const;
+    if((ev.waitlist || []).includes(uid)) return 'waitlisted' as const;
+    const full=!!ev.maxParticipants && ev.participants.length>=ev.maxParticipants;
+    if(full) tx.update(ref,{ waitlist: [...(ev.waitlist || []), uid] });
+    else tx.update(ref,{ participants: [...ev.participants, uid] });
+    return full ? 'waitlisted' as const : 'joined' as const;
+  });
 }
 export async function leaveCommunityEvent(uid:string, eventId:string):Promise<void>{
   const ref=doc(db,'communityEvents',eventId);
-  const snap=await getDoc(ref);
-  if(!snap.exists()) return;
-  const ev=snap.data() as CommunityEvent;
-  await updateDoc(ref,{ participants: ev.participants.filter(p=>p!==uid) });
+  await runTransaction(db, async tx => {
+    const snap=await tx.get(ref);
+    if(!snap.exists()) return;
+    const ev=snap.data() as CommunityEvent;
+    let waitlist=(ev.waitlist || []).filter(p=>p!==uid);
+    let participants=ev.participants.filter(p=>p!==uid);
+    // La première personne en attente est promue atomiquement dès qu'une place se libère.
+    if(ev.participants.includes(uid) && ev.participants.length===ev.maxParticipants && waitlist.length>0) {
+      participants=[...participants, waitlist[0]];
+      waitlist=waitlist.slice(1);
+    }
+    tx.update(ref,{ participants, waitlist });
+  });
+}
+
+export async function updateCommunityEvent(uid:string, eventId:string, changes:{title?:string;description?:string;location?:string;date?:string;time?:string;status?:'scheduled'|'cancelled';message?:string}):Promise<void>{
+  const ref=doc(db,'communityEvents',eventId);
+  const recipients=await runTransaction(db, async tx => {
+    const snap=await tx.get(ref);
+    if(!snap.exists()) throw new Error('Événement introuvable');
+    const ev=snap.data() as CommunityEvent;
+    if(ev.creatorUid!==uid) throw new Error('Seul l’organisateur peut modifier cet événement.');
+    const cancelled=changes.status==='cancelled';
+    const { message: _message, ...fields } = changes;
+    tx.update(ref,{...fields,lastChange:{type:cancelled?'cancelled':'updated',message:(changes.message||'Les informations de la sortie ont changé.').slice(0,300),createdAt:Date.now()},updatedAt:Date.now()});
+    return ev.participants.filter(p=>p!==uid);
+  });
+  // Documents consommés par le worker FCM ; aucun accès aux jetons depuis le client.
+  for(const toUid of recipients) await addDoc(collection(db,'eventNotifications'),{eventId,toUid,type:changes.status==='cancelled'?'cancelled':'updated',title:changes.status==='cancelled'?'Sortie annulée':'Sortie modifiée',body:changes.message||'Consultez les nouvelles informations de la sortie.',createdAt:Date.now(),notified:false});
 }
 
 // ============ Activité privacy settings ============

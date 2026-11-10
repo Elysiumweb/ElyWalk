@@ -512,6 +512,27 @@ async function processNotifications(sa: ServiceAccount): Promise<{ processed: nu
     await patchFields(sa, doc.name, { notified: fBool(true) });
     processed++;
   }
+  // 3) Modifications / annulations d'événements créées par l'organisateur.
+  // Les documents sont en écriture restreinte par les règles Firestore et ne
+  // contiennent aucun jeton : seul ce worker peut lire les jetons et marquer notified.
+  const eventNotifications = await runQuery(sa, {
+    from: [{ collectionId: 'eventNotifications' }],
+    where: { fieldFilter: { field: { fieldPath: 'notified' }, op: 'EQUAL', value: { booleanValue: false } } },
+    limit: 100,
+  });
+  for (const doc of eventNotifications) {
+    const uid = (doc.fields.toUid as { stringValue?: string })?.stringValue;
+    const title = (doc.fields.title as { stringValue?: string })?.stringValue || 'Sortie ElyWalk';
+    const bodyText = (doc.fields.body as { stringValue?: string })?.stringValue || 'Une sortie a été modifiée.';
+    const eventId = (doc.fields.eventId as { stringValue?: string })?.stringValue || '';
+    const type = (doc.fields.type as { stringValue?: string })?.stringValue || 'updated';
+    if (uid) {
+      const result = await sendToUser(sa, uid, title, bodyText, { type: 'event', eventId, change: type });
+      sent += result.sent;
+    }
+    await patchFields(sa, doc.name, { notified: fBool(true) });
+    processed++;
+  }
   return { processed, sent };
 }
 
@@ -613,5 +634,11 @@ export default {
     } catch (e) {
       return json({ ok: false, reason: (e as Error).message }, 500);
     }
+  },
+
+  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+    const sa = parseServiceAccount(env);
+    const job = event.cron === '0 * * * *' ? processPayouts(sa) : processNotifications(sa);
+    ctx.waitUntil(job.catch(error => console.error('[cron]', event.cron, error)));
   },
 };

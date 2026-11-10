@@ -7,6 +7,8 @@ import type { UserProfile, UserBadge } from '../lib/types';
 import Avatar from '../components/Avatar';
 import BadgeGrid from '../components/BadgeGrid';
 import LevelBadge from '../components/LevelBadge';
+import ReportDialog from '../components/ReportDialog';
+import { blockAccount } from '../lib/safety';
 import { fmtCoins, fmtNumber, dateStr, formatDistance } from '../lib/coins';
 
 export default function PublicProfilePage(){
@@ -17,6 +19,7 @@ export default function PublicProfilePage(){
   const [p,setP]=useState<UserProfile|null>(null);
   const [badges,setBadges]=useState<UserBadge[]>([]);
   const [busy,setBusy]=useState(false);
+  const [reportOpen,setReportOpen]=useState(false);
   useEffect(()=>{if(uid) getUserProfile(uid).then(setP)},[uid]);
   useEffect(()=>{if(uid) listUserBadges(uid).then(setBadges).catch(()=>undefined)},[uid]);
 
@@ -34,6 +37,11 @@ export default function PublicProfilePage(){
     setBusy(true);
     try{ await sendFriendReaction(me,p.uid,'👏',msg); toast('Encouragement envoyé ! 👏','success'); }
     catch(e){ toast((e as Error).message,'error'); } finally{setBusy(false);}
+  };
+
+  const onBlock=async()=>{
+    if(!me||!p||!confirm(`Bloquer ${p.displayName} ? Vous ne pourrez plus interagir ensemble.`)) return;
+    setBusy(true); try{await blockAccount(me,p);toast('Compte bloqué. Ses contenus et interactions sont masqués.','success');nav('/profile');}catch(e){toast((e as Error).message,'error')}finally{setBusy(false)}
   };
 
   if(!p) return <div className="screen"><div className="screen-header"><h1 className="screen-title">Profil public</h1><button className="btn btn-ghost btn-sm" onClick={()=>nav(-1)}>Retour</button></div><div className="empty-state">Profil introuvable.</div></div>;
@@ -95,7 +103,9 @@ export default function PublicProfilePage(){
       <div className="card">
         <div className="card-title">Actions</div>
         <p className="card-help">Ajoutez {p.displayName} pour comparer vos pas, défier et voir son fil d’activité.</p>
+        <div className="route-actions"><button className="btn btn-outline btn-sm" onClick={()=>setReportOpen(true)}>Signaler ce profil</button><button className="btn btn-danger btn-sm" onClick={onBlock} disabled={busy} data-testid="block-account">Bloquer ce compte</button></div>
       </div>
     )}
+    <ReportDialog open={reportOpen} onClose={()=>setReportOpen(false)} targetUid={p.uid} targetType="profile" targetId={p.uid} />
   </div>
 }

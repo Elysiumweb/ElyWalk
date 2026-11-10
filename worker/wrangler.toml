@@ -27,6 +27,6 @@ PACKAGE_NAME = "com.elysium.elywalk"
 # Tâches planifiées (gratuites, sans Cloud Functions)
 [triggers]
 crons = [
-  "*/5 * * * *", # file de notifications (demandes d'amis, retraits)
+  "*/5 * * * *", # amis, retraits et changements/annulations d'événements
   "0 * * * *",   # file de retraits
 ]

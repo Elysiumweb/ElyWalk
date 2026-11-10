@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import Sheet from '../components/Sheet';
+import ReportDialog from '../components/ReportDialog';
 import {
   findUserByCode,
   sendFriendRequest,
@@ -46,6 +47,7 @@ export default function FriendsPage() {
   const [msgText, setMsgText] = useState('');
   const [chatMessages, setChatMessages] = useState<DirectMessage[]>([]);
   const [msgBusy, setMsgBusy]=useState(false);
+  const [reportedMessage,setReportedMessage]=useState<DirectMessage|null>(null);
 
   useEffect(() => {
     if (!profile) return;
@@ -259,6 +261,7 @@ export default function FriendsPage() {
                 <div className="row-title" style={{fontSize:12}}>{m.from===profile?.uid?'Vous':m.fromName} <span style={{color:'var(--muted)', fontWeight:400}}>{new Date(m.createdAt).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}</span></div>
                 <div className="row-sub" style={{color:'var(--white)'}}>{m.text}</div>
               </div>
+              {m.from!==profile?.uid&&<button className="icon-danger" aria-label="Signaler ce message" onClick={()=>setReportedMessage(m)}>⚑</button>}
             </div>
           ))}
         </div>
@@ -268,6 +271,7 @@ export default function FriendsPage() {
         </div>
         <button className="btn btn-gold" onClick={sendMsg} disabled={msgBusy||!msgText.trim()} data-testid="send-message-button">{msgBusy?'Envoi...':'Envoyer'}</button>
       </Sheet>
+      {reportedMessage&&<ReportDialog open onClose={()=>setReportedMessage(null)} targetUid={reportedMessage.from} targetType="message" targetId={reportedMessage.id!} />}
     </div>
   );
 }

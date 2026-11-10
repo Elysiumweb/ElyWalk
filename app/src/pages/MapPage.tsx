@@ -33,7 +33,7 @@ export default function MapPage() {
     });
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
-      attribution: '© OpenStreetMap',
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
     }).addTo(map);
     L.control.zoom({ position: 'bottomright' }).addTo(map);
     map.on('click', () => setSelected(null));
@@ -130,7 +130,7 @@ export default function MapPage() {
           <h1 className="screen-title">Carte</h1>
           <div className="screen-sub">Partenaires autour de vous · vos sorties GPS dans Sortie</div>
         </div>
-        <div style={{display:'flex', gap:8}}><button className="btn btn-outline btn-sm" onClick={() => navigate('/events')}>👥 Événements</button><button className="btn btn-gold btn-sm" onClick={() => navigate('/activity')}>▶ Sortie</button></div>
+        <div style={{display:'flex', gap:8, flexWrap:'wrap'}}><button className="btn btn-outline btn-sm" onClick={() => navigate('/routes')}>🧭 Parcours</button><button className="btn btn-outline btn-sm" onClick={() => navigate('/events')}>👥 Événements</button><button className="btn btn-gold btn-sm" onClick={() => navigate('/activity')}>▶ Sortie</button></div>
       </div>
 
       <div className="map-search"><input className="input" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Rechercher un partenaire…"/><div className="nearby-list">{nearby.slice(0,5).map(e=><button key={e.id} onClick={()=>{setSelected(e);mapRef.current?.setView([e.lat,e.lng],16)}}><b>{e.name}</b><span>{distance(e)!==null?`${distance(e)!.toFixed(1)} km`:e.address}</span></button>)}</div></div>

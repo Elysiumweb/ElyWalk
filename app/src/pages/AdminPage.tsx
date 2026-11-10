@@ -19,9 +19,10 @@ import {
 } from '../lib/establishments';
 import { isPresidentUid } from '../lib/constants';
 import { fmtCoins, fmtEuros } from '../lib/coins';
-import type { PartnerRequest, Withdrawal } from '../lib/types';
+import type { ContentReport, PartnerRequest, ReportStatus, Withdrawal } from '../lib/types';
+import { reviewReport, watchReports } from '../lib/safety';
 
-type Tab = 'partners' | 'withdrawals' | 'establishments';
+type Tab = 'partners' | 'withdrawals' | 'establishments' | 'reports';
 
 export default function AdminPage() {
   const { profile } = useAuth();
@@ -34,6 +35,8 @@ export default function AdminPage() {
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
   const [establishments, setEstablishments] = useState<Establishment[]>([]);
   const [loading, setLoading] = useState(true);
+  const [reports,setReports]=useState<ContentReport[]>([]);
+  useEffect(()=>isPresidentUid(profile?.uid)?watchReports(setReports):undefined,[profile?.uid]);
 
   // Formulaire établissement
   const [estName, setEstName] = useState('');
@@ -79,6 +82,14 @@ export default function AdminPage() {
   const setWdStatus = async (id: string, status: Withdrawal['status']) => {
     await updateWithdrawalStatus(id, status);
     reload();
+  };
+
+  const moderate = async (report: ContentReport, status: ReportStatus) => {
+    if (!profile) return;
+    const note = prompt('Note d’action conservée dans l’historique', status === 'resolved' ? 'Contenu traité' : status === 'dismissed' ? 'Signalement non fondé' : 'Examen en cours');
+    if (note === null) return;
+    try { await reviewReport(report.id!, profile.uid, status, note); toast('Signalement mis à jour.', 'success'); }
+    catch (e) { toast((e as Error).message, 'error'); }
   };
 
   const onLogoFile = async (file: File | null) => {
@@ -160,6 +171,7 @@ export default function AdminPage() {
         >
           Retraits ({withdrawals.filter((w) => w.status === 'pending').length})
         </button>
+        <button className={`chip ${tab === 'reports' ? 'chip-active' : ''}`} onClick={() => setTab('reports')} data-testid="admin-tab-reports">Signalements ({reports.filter(r=>r.status==='open').length})</button>
         <button
           className={`chip ${tab === 'establishments' ? 'chip-active' : ''}`}
           onClick={() => setTab('establishments')}
@@ -246,6 +258,8 @@ export default function AdminPage() {
             ))
           )}
         </div>
+      ) : tab === 'reports' ? (
+        <div className="card" data-testid="moderation-queue"><div className="card-title">File de modération</div><p className="card-help">Chaque décision est datée et conservée dans l’historique du signalement.</p>{reports.length===0?<div className="empty-state">Aucun signalement.</div>:reports.map(report=><article key={report.id} style={{padding:'12px 0',borderBottom:'1px solid var(--gold-border)'}} data-testid="report-row"><div style={{display:'flex',justifyContent:'space-between',gap:8}}><strong>{report.targetType} · {report.reason}</strong><span className="badge">{report.status}</span></div><div className="row-sub">Contenu {report.targetId} · signalé le {new Date(report.createdAt).toLocaleString('fr-FR')}</div>{report.details&&<p>{report.details}</p>}<div className="route-actions">{report.status==='open'&&<button className="btn btn-outline btn-sm" onClick={()=>moderate(report,'reviewing')}>Prendre en charge</button>}<button className="btn btn-gold btn-sm" onClick={()=>moderate(report,'resolved')}>Résoudre</button><button className="btn btn-ghost btn-sm" onClick={()=>moderate(report,'dismissed')}>Classer sans suite</button></div>{report.history.length>0&&<div className="moderation-history">{report.history.map((action,index)=><div key={index}>{new Date(action.createdAt).toLocaleString('fr-FR')} · {action.status} · {action.note||'Sans note'}</div>)}</div>}</article>)}</div>
       ) : (
         <>
           <div className="card" data-testid="admin-establishment-form">

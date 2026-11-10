@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-route
 import { App as CapApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { LocaleProvider } from './context/LocaleContext';
 import { ToastProvider } from './components/Toast';
 import TabBar from './components/TabBar';
 import AdBanner from './components/AdBanner';
@@ -26,6 +27,7 @@ import ChallengesPage from './pages/ChallengesPage';
 import ActivityPage from './pages/ActivityPage';
 import ActivityDetailPage from './pages/ActivityDetailPage';
 import EventsPage from './pages/EventsPage';
+import RoutesPage from './pages/RoutesPage';
 import ProductStatus from './components/ProductStatus';
 import { setupNotifications } from './lib/notifications';
 
@@ -117,6 +119,7 @@ function Shell() {
         <Route path="/activity/:id" element={<ActivityDetailPage />} />
         <Route path="/user/:uid" element={<PublicProfilePage />} />
         <Route path="/events" element={<EventsPage />} />
+        <Route path="/routes" element={<RoutesPage />} />
         <Route path="/whats-new" element={<WhatsNewPage />} />
         <Route path="/legal/:doc" element={<LegalPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
@@ -132,11 +135,13 @@ function Shell() {
 export default function App() {
   return (
     <BrowserRouter>
+      <LocaleProvider>
       <ToastProvider>
         <AuthProvider>
           <Shell />
         </AuthProvider>
       </ToastProvider>
+      </LocaleProvider>
     </BrowserRouter>
   );
 }

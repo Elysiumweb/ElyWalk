@@ -131,6 +131,9 @@ export interface ActivitySession {
   note?: string;
   /** Météo ressentie pendant la sortie. */
   weather?: ActivityWeather;
+  /** Parcours préparé suivi pendant cette sortie. */
+  routeId?: string | null;
+  routeName?: string | null;
 }
 
 export interface PartnerOffer {
@@ -305,6 +308,58 @@ export interface DirectMessage {
 
 // ========== Événements communautaires ==========
 
+export type BlockedAccount = {
+  id?: string;
+  ownerUid: string;
+  blockedUid: string;
+  blockedName: string;
+  createdAt: number;
+};
+
+export type ReportStatus = 'open' | 'reviewing' | 'resolved' | 'dismissed';
+export type ReportTargetType = 'profile' | 'message' | 'activity' | 'event';
+export interface ModerationAction {
+  status: ReportStatus;
+  actorUid: string;
+  note: string;
+  createdAt: number;
+}
+export interface ContentReport {
+  id?: string;
+  reporterUid: string;
+  targetUid: string;
+  targetType: ReportTargetType;
+  targetId: string;
+  reason: 'harassment' | 'spam' | 'inappropriate' | 'safety' | 'other';
+  details: string;
+  status: ReportStatus;
+  history: ModerationAction[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface SavedRoute {
+  id?: string;
+  uid: string;
+  ownerName: string;
+  name: string;
+  description: string;
+  points: ActivityPoint[];
+  distanceM: number;
+  elevationGainM: number;
+  elevationLossM: number;
+  visibility: 'private' | 'public';
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type EventStatus = 'scheduled' | 'cancelled';
+export interface EventChange {
+  type: 'updated' | 'cancelled';
+  message: string;
+  createdAt: number;
+}
+
 export interface CommunityEvent {
   id?: string;
   title: string;
@@ -320,5 +375,20 @@ export interface CommunityEvent {
   creatorName: string;
   participants: string[];
   maxParticipants?: number | null;
+  waitlist?: string[];
+  status?: EventStatus;
+  updatedAt?: number;
+  lastChange?: EventChange;
   createdAt: number;
+}
+
+export interface EventNotification {
+  id?: string;
+  eventId: string;
+  toUid: string;
+  type: 'updated' | 'cancelled';
+  title: string;
+  body: string;
+  createdAt: number;
+  notified: boolean;
 }
