@@ -1,22 +1,36 @@
 // ===== ElyWalk — Constantes globales =====
 
-// --- Meta Audience Network (production) ---
-// Format des identifiants de placement : `<APP_ID>_<PLACEMENT_ID>`.
-// Ils sont créés dans Monetization Manager (business.facebook.com/audiencenetwork).
-export const META_APP_ID = '1712220190424595';
+// --- Unity LevelPlay (médiation publicitaire) ---
+// LevelPlay est la plateforme de médiation ; Meta Audience Network y participe
+// en in-app bidding (voir DEPLOYMENT.md § « Unity LevelPlay »). Les identifiants
+// ci-dessous sont des **ad units LevelPlay** (LevelPlay → Ad units), et non plus
+// des placements Meta : le SDK natif ne connaît que ces derniers.
+export const LEVELPLAY_APP_KEY = '29767936d';
 
-/** Bannière 320×50 (bas de page). */
-export const META_PLACEMENT_BANNER = '1712220190424595_1712220347091246';
+/** Bannière 320×50 (bas de page, toutes les pages). */
+export const LEVELPLAY_AD_UNIT_BANNER = 'g1zzk5uxi41cpcc2';
 /** Interstitiel plein écran (ouverture de l'app, validation des pas, fin de sortie). */
-export const META_PLACEMENT_INTERSTITIAL = '1712220190424595_1712220353757912';
-/** Medium rectangle 300×250 (retrait d'ElyCoins). */
-export const META_PLACEMENT_MEDIUM_RECTANGLE = '1712220190424595_1712220350424579';
-/** Natif (carte de fin de sortie). */
-export const META_PLACEMENT_NATIVE = '1712220190424595_1712220357091245';
-/** Native banner (bandeau compact des listes). */
-export const META_PLACEMENT_NATIVE_BANNER = '1712220190424595_1712220360424578';
-/** Interstitiel récompensé (vidéo → ElyCoins). */
-export const META_PLACEMENT_REWARDED_INTERSTITIAL = '1712220190424595_1712220367091244';
+export const LEVELPLAY_AD_UNIT_INTERSTITIAL = 's73ihk59x7y52d6v';
+/** Natif (bandeau compact des listes + carte de fin de sortie). */
+export const LEVELPLAY_AD_UNIT_NATIVE = 'kz81dz4wdl6v0kue';
+/** Vidéo récompensée (vidéo → ElyCoins). */
+export const LEVELPLAY_AD_UNIT_REWARDED = 'l9z2u3fws3nm1cfc';
+
+// Medium rectangle 300×250 et native banner n'ont pas d'ad unit dédiée dans le
+// compte LevelPlay :
+//  • un ad unit bannière accepte aussi la taille MEDIUM_RECTANGLE (MREC) ;
+//  • le format natif LevelPlay est piloté par un *placement* déclaré sur l'ad
+//    unit native, pas par un identifiant supplémentaire côté SDK.
+export const LEVELPLAY_AD_UNIT_MEDIUM_RECTANGLE = LEVELPLAY_AD_UNIT_BANNER;
+export const LEVELPLAY_AD_UNIT_NATIVE_BANNER = LEVELPLAY_AD_UNIT_NATIVE;
+
+/**
+ * Récompense déclarée sur l'ad unit récompensée LevelPlay :
+ * *Reward item name* `ElyCoin`, *Reward amount* `1`.
+ * 1 unité LevelPlay = 0,1 ElyCoin (voir AD_REWARD_COINS).
+ */
+export const LEVELPLAY_REWARD_NAME = 'ElyCoin';
+export const LEVELPLAY_REWARD_AMOUNT = 1;
 
 // Domaine de développeur déclaré sur la fiche Play Store : il doit servir
 // `https://<domaine>/app-ads.txt` (voir app/public/app-ads.txt).

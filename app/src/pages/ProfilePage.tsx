@@ -15,6 +15,8 @@ import BlockedAccounts from '../components/BlockedAccounts';
 import { useI18n, type Locale } from '../context/LocaleContext';
 import { ACCOUNT_DELETION_URL, DATA_DELETION_URL, BADGE_DEFINITIONS } from '../lib/constants';
 import { openAdPrivacyOptions } from '../lib/ads';
+import { useAppearance, APPEARANCE_OPTIONS } from '../lib/appearance';
+import { APP_VERSION_LABEL } from '../lib/version';
 import { isPresidentUid } from '../lib/constants';
 import { fmtCoins, fmtNumber, formatDistance } from '../lib/coins';
 import type { UserBadge, BadgeDefinition } from '../lib/types';
@@ -23,6 +25,8 @@ export default function ProfilePage() {
   const { profile } = useAuth();
   const { toast } = useToast();
   const { locale, setLocale, t } = useI18n();
+  // Audit § 2.7 — préférence d'affichage (Système / Sombre / Contraste renforcé).
+  const { appearance, setAppearance } = useAppearance();
   const navigate = useNavigate();
 
   const [busy, setBusy] = useState(false);
@@ -351,6 +355,27 @@ export default function ProfilePage() {
         </div>
       </div>
 
+      <div className="card">
+        <div className="card-title">Affichage</div>
+        <div className="appearance-options" role="radiogroup" aria-label="Thème d’affichage">
+          {APPEARANCE_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              role="radio"
+              aria-checked={appearance === option.value}
+              className={`appearance-option ${appearance === option.value ? 'appearance-option-active' : ''}`}
+              onClick={() => void setAppearance(option.value)}
+              data-testid={`appearance-${option.value}`}
+            >
+              <span className="appearance-option-label">{option.label}</span>
+              <span className="appearance-option-hint">{option.hint}</span>
+            </button>
+          ))}
+        </div>
+        <small className="card-help">La charte noir et or est conservée ; seul le confort de lecture change. Les réglages système de taille de texte restent respectés.</small>
+      </div>
+
       <div className="card"><div className="field"><label>{t('settings.language')}</label><select className="input" value={locale} onChange={e=>void setLocale(e.target.value as Locale)} data-testid="language-select"><option value="fr">Français</option><option value="en">English</option></select><small className="card-help">Les libellés traduits, dates et nombres utilisent cette langue.</small></div></div>
 
       <div className="card">
@@ -398,15 +423,15 @@ export default function ProfilePage() {
       <div className="card"><div className="card-title">Compte & données</div>
         <button className="btn btn-ghost" onClick={()=>setSecurityOpen(true)}>Changer le mot de passe</button>
         <button className="btn btn-ghost" onClick={()=>setEmailOpen(true)} data-testid="change-email-button">Changer l’adresse e-mail</button><div className="section-gap" />
-        <button className="btn btn-outline" onClick={onPrivacyOptions}>Confidentialité des annonces (Meta)</button><div className="section-gap" />
+        <button className="btn btn-outline" onClick={onPrivacyOptions}>Confidentialité des annonces (LevelPlay · Meta)</button><div className="section-gap" />
         <button className="btn btn-outline" onClick={onExport}>Exporter mes données (RGPD)</button><div className="section-gap" />
         <a className="btn btn-outline" href={DATA_DELETION_URL} target="_blank" rel="noopener noreferrer">Supprimer une partie de mes données</a><div className="section-gap" />
         <button className="btn btn-danger" onClick={onDelete} disabled={busy}>Supprimer définitivement mon compte</button>
-        <p style={{ color: 'var(--muted)', fontSize: 12, marginTop: 8, lineHeight: 1.5 }}>
+        <p className="muted-xs" style={{ marginTop: 'var(--space-2)' }}>
           Procédure détaillée, données supprimées et durées de conservation :{' '}
           <a href={ACCOUNT_DELETION_URL} target="_blank" rel="noopener noreferrer">{ACCOUNT_DELETION_URL}</a>
         </p>
-        <div className="legal-links"><a href="/legal/terms">CGU</a> · <a href="/legal/privacy">Confidentialité</a> · <a href="/legal/notices">Mentions légales</a> · <a href="mailto:contact@elysium-esport.fr?subject=Feedback%20ElyWalk">Donner mon avis</a> · <button className="text-button" style={{display:'inline',padding:0,width:'auto'}} onClick={()=>navigate('/whats-new')}>Nouveautés</button><br/>ElyWalk 2.0.0</div>
+        <div className="legal-links"><a href="/legal/terms">CGU</a> · <a href="/legal/privacy">Confidentialité</a> · <a href="/legal/notices">Mentions légales</a> · <a href="mailto:contact@elysium-esport.fr?subject=Feedback%20ElyWalk">Donner mon avis</a> · <button className="text-button inline-link" onClick={()=>navigate('/whats-new')}>Nouveautés</button><br/>{APP_VERSION_LABEL}</div>
       </div>
 
       {isAdmin && (

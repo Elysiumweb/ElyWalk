@@ -1,5 +1,62 @@
 # Changelog
 
+## 2.1.0 — 2026-11-11
+
+### Régie publicitaire : Unity LevelPlay en médiation, Meta Audience Network en bidding
+
+- **F30** Nouvelle plateforme de médiation : **Unity LevelPlay** (app key
+  `29767936d`) remplace l'appel direct au SDK Meta. Meta Audience Network y est
+  branché en **in-app bidding** via `com.unity3d.ads-mediation:facebook-adapter` :
+  LevelPlay arbitre les enchères, Meta n'est plus intégré à la main. Nouveau
+  plugin Capacitor maison `LevelPlayAdsPlugin.java` (suppression de
+  `MetaAdsPlugin.java` et des layouts `meta_ad_*.xml`) — il n'existe pas de
+  plugin Capacitor officiel pour LevelPlay.
+- **F31** Les quatre ad units produits sont branchés : bannière
+  `g1zzk5uxi41cpcc2` (toutes les pages), interstitiel `s73ihk59x7y52d6v`
+  (ouverture, validation des pas, fin de sortie), natif `kz81dz4wdl6v0kue`
+  (bandeau compact sur `/history` + carte de fin de sortie), vidéo récompensée
+  `l9z2u3fws3nm1cfc`. Le medium rectangle 300×250 réutilise l'ad unit bannière
+  (taille `MEDIUM_RECTANGLE`).
+- **F32** Récompense LevelPlay **ElyCoin × 1 = 0,1 ElyCoin** : conversion
+  centralisée (`rewardCoinsFrom`), récompense ignorée si le nom ou le montant
+  annoncés diffèrent, crédit toujours borné par le slot Firestore `adClaims`
+  (1 récompense par heure et par compte). L'UID est transmis à LevelPlay
+  (`setDynamicUserId`) pour préparer les callbacks serveur-à-serveur.
+- **F33** Consentement RGPD appliqué **avant** l'initialisation
+  (`LevelPlayPrivacySettings.setGDPRConsent`), donc transmis à chaque réseau
+  médié, et modifiable à chaud. Aucune annonce n'est demandée tant qu'aucun
+  choix n'a été exprimé. Le format natif retombe automatiquement sur la bannière
+  320×50 s'il n'y a pas de remplissage.
+- **F34** Version à source unique : `app/package.json` alimente `__APP_VERSION__`
+  (Vite) **et** `versionName` / `versionCode` Android (2.1.0 → 20100). Le Profil
+  et l'écran Nouveautés n'écrivent plus la version en dur ; Play Console exige un
+  `versionCode` supérieur à chaque publication.
+- Documentation : `DEPLOYMENT.md` § « Unity LevelPlay » (ad units, bidding Meta,
+  `app-ads.txt`, build Gradle), politique de confidentialité et page légale
+  mises à jour (LevelPlay comme plateforme de médiation).
+
+### Design et accessibilité
+
+- **D35** Libellés de navigation visibles sur téléphone : chaque onglet affiche
+  un libellé court (« Rangs » pour « Classement ») sous son icône, avec le
+  libellé complet en `aria-label` et des badges qui ne chevauchent plus le texte.
+- **D36** Hiérarchie de l'accueil : le compteur et « Valider mes pas » restent
+  dominants ; les cinq accès secondaires passent en grille compacte 2 colonnes,
+  repliable, et l'action publicitaire ne partage plus la ligne du barème.
+- **D37** Plancher de lisibilité : plus aucune information utile sous 12 px
+  (libellés de graphiques, métadonnées de défis, statistiques, calendrier) ;
+  le texte secondaire s'enroule au lieu d'être tronqué.
+- **D38** Jetons partagés (`--space-*`, `--text-*`) et classes utilitaires
+  (`.stack-sm`, `.row-between`, `.muted-text`, `.muted-xs`, `.title-sm`) en
+  remplacement des styles en ligne des pages retouchées.
+- **D39** Rencontres : date du jour calculée en heure locale (fini
+  `toISOString()`), fuseau de l'appareil affiché, `min` sur le champ date et
+  refus d'une sortie créée dans le passé.
+- **D40** Nouveau réglage « Affichage » : **Système / Sombre / Contraste
+  renforcé** (`appearance.ts` + `appearance.css`). Le mode contraste éclaircit
+  les textes discrets, renforce les bordures et rend les états désactivés
+  identifiables autrement que par l'opacité ; la charte noir/or est conservée.
+
 ## 1.9.0 — 2026-11-09
 
 ### Régie publicitaire : passage d'AdMob à Meta Audience Network

@@ -30,6 +30,7 @@ export default function HomePage() {
   const [steps, setSteps] = useState(0);
   const [perm, setPerm] = useState<PermState>('unavailable');
   const [showTiers, setShowTiers] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(true);
   const [busyValidate, setBusyValidate] = useState(false);
   const [busyAd, setBusyAd] = useState(false);
   const [celebration, setCelebration] = useState<string | null>(null);
@@ -143,12 +144,13 @@ export default function HomePage() {
         toast('Les publicités sont disponibles uniquement sur l’application Android.', 'error');
         return;
       }
-      const rewarded = await showRewardedAd();
-      if (rewarded) {
-        // Meta Audience Network n'expose pas de vérification serveur signée
-        // (pas d'équivalent AdMob SSV) : le crédit reste côté client, mais il
-        // est borné par la transaction Firestore `adClaims` (1 récompense par
-        // heure et par compte, règle `validAdCredit`).
+      const reward = await showRewardedAd(profile.uid);
+      if (reward.rewarded) {
+        // LevelPlay ne fournit pas de vérification serveur signée vers notre
+        // backend : le crédit reste côté client, mais il est borné par la
+        // transaction Firestore `adClaims` (1 récompense par heure et par
+        // compte, règle `validAdCredit`, montant fixé à 0,1 EC).
+        // L'ad unit récompensée déclare « ElyCoin » × 1 → 0,1 ElyCoin.
         await creditAdReward(profile.uid);
         toast(`+${fmtCoins(AD_REWARD_COINS)} ElyCoins !`, 'success');
       } else {
@@ -188,7 +190,7 @@ export default function HomePage() {
           <div className="goal-label">
             sur {fmtNumber(dailyGoal)} pas
           </div>
-          <div style={{ color: 'var(--gold)', fontSize: 13, marginTop: 6, fontFamily: 'var(--font-display)' }}>
+          <div className="hero-coins">
             ≈ {potentialCoins} EC
           </div>
           <div className="next-tier-note">{nextTier ? `Encore ${fmtNumber(nextTier.remaining)} pas pour le palier ${fmtNumber(nextTier.target)} · ${nextTier.coins} EC` : 'Palier ElyCoins maximum atteint'}</div>
@@ -223,7 +225,7 @@ export default function HomePage() {
       {isNative && perm !== 'granted' && (
         <div className="card" data-testid="permission-card">
           <div className="card-title">Activer le comptage des pas</div>
-          <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 12 }}>
+          <p className="muted-text" style={{ marginBottom: 'var(--space-3)' }}>
             ElyWalk utilise le capteur de pas de votre téléphone, même lorsque
             l’application est fermée. Autorisez « Activité physique » — une
             notification discrète restera visible pour continuer à compter.
@@ -246,19 +248,39 @@ export default function HomePage() {
           {alreadyValidated ? 'Pas validés aujourd’hui ✓' : busyValidate ? 'Validation...' : `Valider mes pas (+${potentialCoins} EC)`}
         </button>
         <div className="secondary-actions">
+          {/* Action publicitaire volontairement discrète : elle complète la
+              marche, elle ne la concurrence pas visuellement (audit § 2.2). */}
           <button type="button" className="text-button" onClick={onWatchAd} disabled={busyAd || !adAvailable} data-testid="watch-ad-button">
             {busyAd ? 'Chargement...' : adAvailable ? `Voir une pub · +${fmtCoins(AD_REWARD_COINS)} EC` : `Prochaine pub dans ${adCountdown}`}
           </button>
-          <button type="button" className="text-button" onClick={() => setShowTiers(true)} data-testid="show-tiers-button">Barème des gains</button>
         </div>
       </section>
-      <div className="home-actions">
-        <button type="button" className="btn btn-ghost" onClick={() => navigate('/history')}>Historique, santé & calendrier</button>
-        <button type="button" className="btn btn-outline" onClick={() => navigate('/challenges')}>🏆 Ouvrir les défis datés</button>
-        <button type="button" className="btn btn-outline" onClick={() => navigate('/events')}>👥 Marcher ensemble · événements</button>
-        <button type="button" className="btn btn-outline" onClick={() => navigate('/activity')}>▶ Commencer une sortie</button>
-        <button type="button" className="btn btn-outline" onClick={async () => { if (!profile) return; try { const result = await shareDailyStats(profile, steps, formatDistance(distanceMeters, unitSystem), calories); toast(result === 'shared' ? 'Carte partagée !' : 'Carte enregistrée dans vos téléchargements.', 'success'); } catch (e) { if ((e as Error).name !== 'AbortError') toast((e as Error).message, 'error'); } }}>Partager mes pas du jour</button>
-      </div>
+      {/* Audit § 2.2 — les destinations secondaires ne rivalisent plus avec la
+          validation : grille compacte (2 colonnes) et repliable, sous un seul
+          en-tête. Le compteur et « Valider mes pas » restent dominants. */}
+      <section className="home-shortcuts" aria-label="Raccourcis">
+        <button
+          type="button"
+          className="home-shortcuts-head"
+          aria-expanded={showShortcuts}
+          aria-controls="home-shortcuts-grid"
+          onClick={() => setShowShortcuts((v) => !v)}
+          data-testid="toggle-shortcuts-button"
+        >
+          <span>Raccourcis</span>
+          <span aria-hidden="true">{showShortcuts ? '▾' : '▸'}</span>
+        </button>
+        {showShortcuts && (
+          <div className="home-shortcuts-grid" id="home-shortcuts-grid">
+            <button type="button" className="btn btn-ghost" onClick={() => navigate('/history')}>📊 Historique</button>
+            <button type="button" className="btn btn-outline" onClick={() => navigate('/challenges')}>🏆 Défis</button>
+            <button type="button" className="btn btn-outline" onClick={() => navigate('/events')}>👥 Rencontres</button>
+            <button type="button" className="btn btn-outline" onClick={() => navigate('/activity')}>▶ Sortie GPS</button>
+            <button type="button" className="btn btn-outline" onClick={async () => { if (!profile) return; try { const result = await shareDailyStats(profile, steps, formatDistance(distanceMeters, unitSystem), calories); toast(result === 'shared' ? 'Carte partagée !' : 'Carte enregistrée dans vos téléchargements.', 'success'); } catch (e) { if ((e as Error).name !== 'AbortError') toast((e as Error).message, 'error'); } }}>📤 Partager</button>
+            <button type="button" className="btn btn-outline" onClick={() => setShowTiers(true)}>💰 Barème</button>
+          </div>
+        )}
+      </section>
       {profile && <LevelBadge totalSteps={profile.totalSteps} />}
       <div className="card streak-freeze-card"><div className="card-title">Série protégée</div><div className="freeze-count">🧊 {profile?.streakFreezes ?? 1} gel disponible</div><p>Une journée manquée peut être rattrapée automatiquement le lendemain. Votre série ne repart plus forcément à 1.</p></div>
 

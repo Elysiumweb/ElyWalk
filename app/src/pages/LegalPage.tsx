@@ -122,10 +122,12 @@ const content: Record<string, LegalDoc> = {
             dans l’application).</li>
         </ul>
 
-        <h2>4. Publicité (Meta Audience Network) et consentement</h2>
+        <h2>4. Publicité (Unity LevelPlay, Meta Audience Network) et consentement</h2>
         <p>
-          Les annonces sont diffusées par <strong>Meta Audience Network</strong> (Meta Platforms
-          Ireland Ltd). Aucune annonce n’est demandée tant que vous n’avez pas exprimé de choix :
+          Les annonces sont diffusées par <strong>Unity LevelPlay</strong> (Unity Technologies /
+          ironSource), plateforme de médiation publicitaire, à laquelle participent des réseaux
+          partenaires, dont <strong>Meta Audience Network</strong> (Meta Platforms Ireland Ltd) en
+          in-app bidding. Aucune annonce n’est demandée tant que vous n’avez pas exprimé de choix :
           un écran de consentement s’affiche au premier lancement et reste accessible à tout
           moment depuis Profil → « Confidentialité des annonces ». Vous pouvez accepter les
           annonces personnalisées ou opter pour des annonces non personnalisées ; ce choix est
@@ -140,12 +142,12 @@ const content: Record<string, LegalDoc> = {
         <h2>5. Destinataires</h2>
         <p>
           Google Firebase (hébergement, base de données, authentification, notifications),
-          Meta Audience Network (publicité), Cloudflare (backend de confiance : attestation d’intégrité,
+          Unity LevelPlay / ironSource et Meta Audience Network (publicité), Cloudflare (backend de confiance : attestation d’intégrité,
           vérification serveur des récompenses, envoi des notifications, file de retraits),
           PayPal (exécution des retraits) et les services publics d’affichage d’adresse IP
           (anti-fraude au parrainage) agissent en qualité de sous-traitants. Aucune donnée
           de santé n’est vendue ni cédée à des tiers à des fins commerciales, et aucune donnée
-          d’activité physique n’est transmise aux régies publicitaires.
+          d’activité physique n’est transmise aux plateformes de médiation et régies publicitaires.
         </p>
 
         <h2>6. Durées de conservation</h2>

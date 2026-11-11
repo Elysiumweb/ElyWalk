@@ -1,5 +1,28 @@
 apply plugin: 'com.android.application'
 
+// ---------------------------------------------------------------------------
+// Version de l'application : une seule source de vérité, `app/package.json`.
+// Play Console refuse une mise à jour dont le `versionCode` n'a pas augmenté :
+// le code est donc dérivé automatiquement de la version sémantique
+// (2.1.0 -> 20100) au lieu d'être saisi deux fois.
+// ---------------------------------------------------------------------------
+def packageJsonFile = new File(rootProject.projectDir, '../../package.json')
+def appVersionName = '2.1.0'
+def appVersionCode = 20100
+try {
+    def pkg = new groovy.json.JsonSlurper().parse(packageJsonFile)
+    if (pkg.version) {
+        def parts = pkg.version.toString().tokenize('.-')
+        def major = parts.size() > 0 ? parts[0].toInteger() : 0
+        def minor = parts.size() > 1 ? parts[1].toInteger() : 0
+        def patch = parts.size() > 2 ? parts[2].toInteger() : 0
+        appVersionName = pkg.version.toString()
+        appVersionCode = major * 10000 + minor * 100 + patch
+    }
+} catch (Exception e) {
+    logger.warn("package.json illisible, version Android par défaut ${appVersionName} (${appVersionCode}) : ${e.message}")
+}
+
 android {
     namespace = "com.elysium.elywalk"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,8 +30,8 @@ android {
         applicationId "com.elysium.elywalk"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 200
-        versionName "2.0.0"
+        versionCode appVersionCode
+        versionName appVersionName
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -28,6 +51,8 @@ repositories {
     flatDir{
         dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
     }
+    // Unity LevelPlay et ses adaptateurs sont publiés sur Maven Central.
+    mavenCentral()
 }
 
 dependencies {
@@ -38,12 +63,21 @@ dependencies {
     implementation project(':capacitor-android')
     // Localisation fusionnée pour la sortie GPS en arrière-plan (service natif).
     implementation 'com.google.android.gms:play-services-location:21.3.0'
-    // Meta Audience Network : suivre la version stable indiquée dans la doc Meta.
-    // 6.22.0 corrige notamment les métadonnées Maven de play-services-basement.
-    implementation 'androidx.annotation:annotation:1.0.0'
-    implementation 'com.facebook.android:audience-network-sdk:6.22.0'
-    // Identifiant publicitaire (AAID) : requis par le SDK Meta.
+
+    // --- Unity LevelPlay (médiation) -------------------------------------
+    // LevelPlay arbitre les enchères ; Meta Audience Network y participe en
+    // in-app bidding via `facebook-adapter`. Suivre les versions recommandées
+    // dans la doc LevelPlay (SDK Android + tableau « Mediation networks »).
+    //   https://docs.unity.com/en-us/grow/levelplay/sdk/android/sdk-integration
+    //   https://docs.unity.com/en-us/grow/levelplay/sdk/android/networks/guides/meta-audience-network
+    implementation 'com.unity3d.ads-mediation:mediation-sdk:9.5.0'
+    // L'adaptateur Meta embarque le SDK Audience Network (>= 5.6.0) : inutile de
+    // le déclarer séparément, la version est pilotée par l'adaptateur.
+    implementation 'com.unity3d.ads-mediation:facebook-adapter:5.7.0'
+    // Identifiants publicitaires lus par LevelPlay (GAID + App Set ID).
+    implementation 'com.google.android.gms:play-services-appset:16.0.0'
     implementation 'com.google.android.gms:play-services-ads-identifier:18.2.0'
+
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"

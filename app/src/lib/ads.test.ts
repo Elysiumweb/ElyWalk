@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isAppOpenAllowed } from './ads';
+import { isAppOpenAllowed, rewardCoinsFrom } from './ads';
 
 /** Minuit UTC + quelques heures : évite tout effet de fuseau. */
 const at = (iso: string, hour = 10) => new Date(`${iso}T${String(hour).padStart(2, '0')}:00:00.000Z`).getTime();
@@ -27,5 +27,22 @@ describe('isAppOpenAllowed — garde-fous de l’interstitiel d’ouverture', ()
   it('réautorise le lendemain même après le plafond', () => {
     const now = at('2026-11-10', 8);
     expect(isAppOpenAllowed({ date: '2026-11-09', count: 99, lastShownAt: at('2026-11-09', 23) }, now)).toBe(true);
+  });
+});
+
+describe('rewardCoinsFrom — conversion de la récompense LevelPlay', () => {
+  it('convertit « ElyCoin » × 1 en 0,1 ElyCoin', () => {
+    expect(rewardCoinsFrom({ rewardName: 'ElyCoin', rewardAmount: 1 })).toBeCloseTo(0.1, 10);
+  });
+
+  it('respecte le montant déclaré dans LevelPlay', () => {
+    expect(rewardCoinsFrom({ rewardName: 'elycoin ', rewardAmount: 3 })).toBeCloseTo(0.3, 10);
+  });
+
+  it('ne crédite rien pour une récompense non configurée', () => {
+    expect(rewardCoinsFrom({ rewardName: 'Gems', rewardAmount: 1 })).toBe(0);
+    expect(rewardCoinsFrom({ rewardName: 'ElyCoin', rewardAmount: 0 })).toBe(0);
+    expect(rewardCoinsFrom({})).toBe(0);
+    expect(rewardCoinsFrom({ rewardName: 'ElyCoin', rewardAmount: Number.NaN })).toBe(0);
   });
 });

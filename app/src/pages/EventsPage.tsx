@@ -10,6 +10,28 @@ import { listEstablishments, type Establishment } from '../lib/establishments';
 import { eventDate, getEventReminder, rescheduleEventReminders, setEventReminder } from '../lib/eventReminders';
 import type { CommunityEvent, UserProfile } from '../lib/types';
 
+/**
+ * Date du jour au format `YYYY-MM-DD` **en heure locale**.
+ * `toISOString()` renvoie la date UTC : à Paris, une création d'événement après
+ * minuit (ou le matin en heure d'été avancée) pouvait proposer la veille
+ * (audit § 2.6).
+ */
+function todayLocalInput(now = new Date()): string {
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+/** Fuseau de l'appareil, affiché à côté de l'heure pour lever toute ambiguïté. */
+const LOCAL_TIME_ZONE = (() => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone;
+  } catch {
+    return undefined;
+  }
+})();
+
 export default function EventsPage() {
   const { profile } = useAuth();
   const { toast } = useToast();
@@ -20,7 +42,7 @@ export default function EventsPage() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<CommunityEvent | null>(null);
   const [title, setTitle] = useState(''); const [desc, setDesc] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10)); const [time, setTime] = useState('10:00');
+  const [date, setDate] = useState(todayLocalInput()); const [time, setTime] = useState('10:00');
   const [estId, setEstId] = useState(''); const [address, setAddress] = useState(''); const [capacity, setCapacity] = useState('');
   const [busy, setBusy] = useState(false);
   const [participants, setParticipants] = useState<UserProfile[]>([]);
@@ -31,11 +53,20 @@ export default function EventsPage() {
   useEffect(() => watchCommunityEvents(items => { setEvents(items); void rescheduleEventReminders(items); }), []);
   useEffect(() => { listEstablishments().then(setEstablishments).catch(() => undefined); }, []);
 
-  const reset = () => { setTitle(''); setDesc(''); setAddress(''); setCapacity(''); setEstId(''); setEditing(null); };
+  const reset = () => { setTitle(''); setDesc(''); setAddress(''); setCapacity(''); setEstId(''); setEditing(null); setDate(todayLocalInput()); };
   const openEdit = (ev: CommunityEvent) => { setEditing(ev); setTitle(ev.title); setDesc(ev.description); setAddress(ev.location || ''); setCapacity(ev.maxParticipants?.toString() || ''); setDate(ev.date); setTime(ev.time || '10:00'); setOpen(true); };
   const submit = async () => {
     if (!profile) return;
     if (!title.trim() || !date || !time) { toast('Titre, date et heure sont requis.', 'error'); return; }
+    // Date et heure sont saisies en heure locale (aucun passage par UTC) :
+    // une sortie ne peut pas être créée dans le passé (audit § 2.6).
+    const startsAt = new Date(`${date}T${time}`);
+    if (Number.isNaN(startsAt.getTime())) { toast('Date ou heure invalide.', 'error'); return; }
+    const dateChanged = !editing || editing.date !== date || (editing.time || '') !== time;
+    if (dateChanged && startsAt.getTime() < Date.now() - 60 * 1000) {
+      toast('Choisissez une date et une heure à venir.', 'error');
+      return;
+    }
     const max = capacity ? Number(capacity) : null;
     if (max != null && (!Number.isInteger(max) || max < 2 || max > 500)) { toast('La capacité doit être comprise entre 2 et 500.', 'error'); return; }
     setBusy(true);
@@ -64,15 +95,16 @@ export default function EventsPage() {
     {events.length === 0 ? <div className="card empty-state"><div className="display">Aucun événement</div>Soyez le premier à proposer une marche ensemble !</div> : events.map(ev => {
       const mine = profile?.uid === ev.creatorUid; const joined = !!profile && ev.participants.includes(profile.uid); const waiting = !!profile && (ev.waitlist || []).includes(profile.uid); const full = !!ev.maxParticipants && ev.participants.length >= ev.maxParticipants;
       return <div key={ev.id} className={`card ${ev.status === 'cancelled' ? 'event-cancelled' : ''}`} data-testid="event-card">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}><div><div style={{ fontWeight: 700 }}>{ev.title}</div><div className="row-sub">📅 {formatDate(eventDate(ev), { dateStyle: 'full', timeStyle: 'short' })}</div><div className="row-sub">📍 {ev.location || ev.establishmentName || 'Lieu à préciser'}</div></div><button className="badge" onClick={() => void showParticipants(ev)}>{ev.participants.length}{ev.maxParticipants ? ` / ${ev.maxParticipants}` : ''} inscrits</button></div>
+        <div className="row-between"><div><div className="title-sm">{ev.title}</div><div className="row-sub">📅 {formatDate(eventDate(ev), { dateStyle: 'full', timeStyle: 'short' })}</div><div className="row-sub">📍 {ev.location || ev.establishmentName || 'Lieu à préciser'}</div></div><button className="badge" onClick={() => void showParticipants(ev)}>{ev.participants.length}{ev.maxParticipants ? ` / ${ev.maxParticipants}` : ''} inscrits</button></div>
         {ev.status === 'cancelled' && <span className="badge badge-danger">Annulé</span>}{full && ev.status !== 'cancelled' && <span className="badge">Complet · {(ev.waitlist || []).length} en attente</span>}
-        <p style={{ color: 'var(--muted)', fontSize: 13 }}>{ev.description}</p>{ev.lastChange && <p className="event-change">{ev.lastChange.type === 'cancelled' ? '⛔' : '🔔'} {ev.lastChange.message}</p>}
+        <p className="muted-text">{ev.description}</p>{ev.lastChange && <p className="event-change">{ev.lastChange.type === 'cancelled' ? '⛔' : '🔔'} {ev.lastChange.message}</p>}
         <div className="route-actions">{(joined || waiting) && ev.status !== 'cancelled' && <button className="btn btn-danger btn-sm" onClick={() => void toggleJoin(ev)}>Se désinscrire{waiting ? ' de l’attente' : ''}</button>}{!joined && !waiting && ev.status !== 'cancelled' && !mine && <button className="btn btn-gold btn-sm" onClick={() => void toggleJoin(ev)}>{full ? 'Rejoindre la liste d’attente' : 'Rejoindre'}</button>}{(joined || mine) && ev.status !== 'cancelled' && <button className="btn btn-outline btn-sm" onClick={() => void openReminder(ev)}>🔔 Rappel</button>}<button className="btn btn-outline btn-sm" onClick={() => directions(ev)}>Itinéraire</button>{mine && ev.status !== 'cancelled' && <><button className="btn btn-ghost btn-sm" onClick={() => openEdit(ev)}>Modifier</button><button className="btn btn-danger btn-sm" onClick={() => void cancel(ev)}>Annuler</button></>}</div>
-        <small style={{ color: 'var(--muted)', display: 'block', marginTop: 6 }}>Créé par {ev.creatorName}</small>
+        <small className="muted-xs" style={{ display: 'block', marginTop: 'var(--space-1)' }}>Créé par {ev.creatorName}</small>
       </div>;
     })}
     <Sheet open={open} onClose={() => setOpen(false)} title={editing ? 'Modifier la sortie' : 'Nouvel événement'}>
-      <div className="field"><label>Titre</label><input className="input" value={title} onChange={e => setTitle(e.target.value)} maxLength={80} /></div><div className="field"><label>Description</label><textarea className="input" value={desc} onChange={e => setDesc(e.target.value)} maxLength={600} rows={3} /></div><div className="two-col"><div className="field"><label>Date</label><input className="input" type="date" value={date} onChange={e => setDate(e.target.value)} /></div><div className="field"><label>Heure locale</label><input className="input" type="time" value={time} onChange={e => setTime(e.target.value)} /></div></div>
+      <div className="field"><label>Titre</label><input className="input" value={title} onChange={e => setTitle(e.target.value)} maxLength={80} /></div><div className="field"><label>Description</label><textarea className="input" value={desc} onChange={e => setDesc(e.target.value)} maxLength={600} rows={3} /></div><div className="two-col"><div className="field"><label>Date</label><input className="input" type="date" value={date} min={todayLocalInput()} onChange={e => setDate(e.target.value)} /></div><div className="field"><label>Heure locale</label><input className="input" type="time" value={time} onChange={e => setTime(e.target.value)} /></div></div>
+      <small className="field-help">Heure du fuseau de votre appareil{LOCAL_TIME_ZONE ? ` (${LOCAL_TIME_ZONE})` : ''} — la date et l’heure s’affichent ensuite selon la langue choisie.</small>
       {!editing && <div className="field"><label>Établissement partenaire (optionnel)</label><select className="input" value={estId} onChange={e => setEstId(e.target.value)}><option value="">Aucun — lieu libre</option>{establishments.map(est => <option key={est.id} value={est.id}>{est.name}</option>)}</select></div>}
       <div className="field"><label>Adresse / point de rendez-vous</label><input className="input" value={address} onChange={e => setAddress(e.target.value)} maxLength={200} placeholder="Ex. Entrée principale du parc" /></div>{!editing && <div className="field"><label>Capacité maximale (vide = illimitée)</label><input className="input" type="number" min={2} max={500} value={capacity} onChange={e => setCapacity(e.target.value)} placeholder="Ex. 20" /></div>}
       <button className="btn btn-gold" onClick={submit} disabled={busy}>{busy ? 'Enregistrement…' : editing ? 'Enregistrer et prévenir' : 'Créer'}</button>

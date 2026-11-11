@@ -3,3 +3,18 @@
 .referral-code { width: 100%; margin-bottom: 10px; padding: 15px; border: 1px solid var(--gold-border); border-radius: var(--radius-sm); color: var(--white); background: radial-gradient(circle at 80% 0,rgba(216,202,130,.15),transparent 45%),var(--surface-2); text-align: left; cursor: copy; }
 .referral-code span, .referral-code small { display: block; color: var(--muted); font: 11px var(--font-body); }
 .referral-code strong { display: block; margin: 4px 0; color: var(--gold); font: 22px var(--font-display); letter-spacing: .18em; }
+
+/* Audit § 2.7 — sélecteur d'apparence (Système / Sombre / Contraste renforcé).
+   Chaque option expose un état sélectionné visible sans dépendre uniquement de
+   la couleur (bordure + coche). */
+.appearance-options { display: grid; gap: 8px; margin-bottom: 10px; }
+.appearance-option {
+  display: grid; gap: 2px; width: 100%; min-height: 52px;
+  padding: 10px 12px; text-align: left; cursor: pointer;
+  border: 1px solid var(--gold-border); border-radius: var(--radius-sm);
+  background: var(--surface-2); color: var(--white); font-family: var(--font-body);
+}
+.appearance-option-label { font-size: var(--text-sm); font-weight: 600; }
+.appearance-option-hint { color: var(--muted); font-size: var(--text-xs); line-height: 1.35; }
+.appearance-option-active { border: 2px solid var(--gold); background: var(--gold-dim); }
+.appearance-option-active .appearance-option-label::after { content: ' ✓'; color: var(--gold); }

@@ -9,7 +9,8 @@ import {
 import { PRIVACY_POLICY_URL } from '../lib/constants';
 
 /**
- * Écran de consentement publicitaire (RGPD) — Meta Audience Network.
+ * Écran de consentement publicitaire (RGPD) — Unity LevelPlay (médiation),
+ * avec Meta Audience Network parmi les réseaux en in-app bidding.
  *
  * S'affiche au premier lancement tant qu'aucun choix n'a été exprimé (aucune
  * annonce n'est demandée d'ici là), puis reste accessible depuis
@@ -50,7 +51,9 @@ export default function AdConsentSheet() {
       testId="ad-consent-sheet"
     >
       <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-        ElyWalk est financé par la publicité, diffusée par <strong>Meta Audience Network</strong>.
+        ElyWalk est financé par la publicité. Les annonces sont diffusées par <strong>Unity LevelPlay</strong>,
+        notre plateforme de médiation, à laquelle participent des réseaux partenaires dont{' '}
+        <strong>Meta Audience Network</strong>.
         Nous ne transmettons <strong>jamais</strong> vos pas, vos sorties ou vos données de santé :
         seuls l’identifiant publicitaire de votre appareil et des données techniques sont utilisés.
       </p>
