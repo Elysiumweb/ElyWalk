@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { App as CapApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
@@ -61,33 +61,39 @@ function Shell() {
     initAds(profile?.uid).catch(console.warn);
   }, [profile?.uid]);
 
+  const appOpenInitializedRef = useRef(false);
+
   // Annonce à l'ouverture + au retour sur l'application (interstitiel #2).
   // Garde-fous : exemptée tant que l'onboarding n'est pas terminé, plafonnée
   // quotidiennement et espacée d'un cooldown (voir ads.ts).
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
     if (!profile?.onboardingDone) return;
-    let firstLoad = true;
+    if (appOpenInitializedRef.current) return;
+    appOpenInitializedRef.current = true;
+
+    let mounted = true;
     (async () => {
       await initAds(profile?.uid);
       await loadAppOpenAd();
+      if (!mounted) return;
       // Affiche l'annonce d'ouverture peu après le lancement.
       setTimeout(() => {
-        if (firstLoad) {
-          firstLoad = false;
+        if (mounted) {
           showAppOpenAdIfReady();
         }
       }, 3500);
     })();
     const sub = CapApp.addListener('appStateChange', ({ isActive }) => {
-      if (isActive && !firstLoad) {
+      if (isActive) {
         showAppOpenAdIfReady();
       }
     });
     return () => {
+      mounted = false;
       sub.then((h) => h.remove());
     };
-  }, [profile?.onboardingDone]);
+  }, [profile?.onboardingDone, profile?.uid]);
 
   if (loading) {
     return (
