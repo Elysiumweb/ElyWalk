@@ -568,9 +568,6 @@ button, .tab, .chip { user-select: none; }
 .map-card-name { font-size: 15px; color: var(--gold); overflow-wrap: anywhere; }
 .map-card-desc { font-size: 13.5px; margin-top: 10px; color: var(--white); line-height: 1.5; }
 .avatar-lg { width: 52px; height: 52px; font-size: 20px; }
-.profile-hero-main { flex: 1; min-width: 0; }
-.profile-name { font-family: var(--font-display); font-size: 17px; overflow-wrap: anywhere; }
-.profile-bio { color: #d8d2c2; font-size: 12px; margin-top: 4px; line-height: 1.4; overflow-wrap: anywhere; }
 
 /* --------------------------------------------------------------------------
    16. Composants transverses : niveau, QR, consentement, splash
