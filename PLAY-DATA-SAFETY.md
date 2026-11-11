@@ -36,6 +36,25 @@ Puis **Enregistrer** → onglet *Vue d'ensemble* → **Publier la version** (le
 formulaire est global au package `com.elysium.elywalk` et couvre toutes les
 versions publiées, y compris la 20103 refusée).
 
+## 2 bis. Parcours écran par écran (ordre réel du formulaire FR)
+
+1. « Ces données sont-elles collectées, partagées ou les deux ? » →
+   cocher **Collectées** *et* **Partagées**.
+2. « Ces données sont-elles traitées de manière éphémère ? » → **Non**.
+3. « Ces données sont-elles requises pour votre appli ? » → **La collecte de
+   données est requise** (elle a lieu même en annonces non personnalisées).
+4. « Pourquoi ces données utilisateur sont-elles collectées ? » →
+   **Publicité ou marketing** + **Prévention des fraudes, sécurité et
+   conformité**.
+5. « Pourquoi ces données utilisateur sont-elles partagées ? » → **les deux
+   mêmes finalités** (le formulaire exige la cohérence entre collecte et
+   partage).
+6. Chiffrement en transit → **Oui**. Suppression à la demande → **Non**.
+
+À ne pas cocher : *Analyse* (concerne l'analyse de l'app, pas la sélection
+publicitaire), *Fonctionnement de l'appli* (aucune fonctionnalité n'en dépend),
+*Personnalisation* (réservée au contenu recommandé dans l'app).
+
 ## 3. Réponse à l'écran de refus (si un champ « Répondre » est proposé)
 
 > Bonjour,
