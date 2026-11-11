@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Capacitor } from '@capacitor/core';
@@ -46,6 +46,8 @@ import {
 } from '../lib/activity';
 import { notifyActivityGoal } from '../lib/notifications';
 import { showEndOfActivityAd } from '../lib/ads';
+import { distanceToRoute, getRoute } from '../lib/routes';
+import type { SavedRoute } from '../lib/types';
 
 const FALLBACK_CENTER: [number, number] = [46.6, 2.4];
 const PAGE_SIZE = 20;
@@ -76,10 +78,15 @@ export default function ActivityPage() {
   const { profile } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
+  const location = useLocation();
+  const requestedRouteId = (location.state as { routeId?: string } | null)?.routeId;
+  const [plannedRoute, setPlannedRoute] = useState<SavedRoute | null>(null);
+  const [routeDistance, setRouteDistance] = useState<number | null>(null);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const lineRef = useRef<L.Polyline | null>(null);
+  const plannedLineRef = useRef<L.Polyline | null>(null);
   const historyLinesRef = useRef<L.Polyline[]>([]);
   const markerRef = useRef<L.CircleMarker | null>(null);
 
@@ -229,11 +236,33 @@ export default function ActivityPage() {
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
     const map = L.map(containerRef.current, { center: FALLBACK_CENTER, zoom: 6, zoomControl: false });
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap', maxZoom: 19 }).addTo(map);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>', maxZoom: 19 }).addTo(map);
     L.control.zoom({ position: 'bottomright' }).addTo(map);
     mapRef.current = map;
     return () => { map.remove(); mapRef.current = null; };
   }, []);
+
+  // Parcours préparé : affiché seulement à la demande, sans géolocalisation automatique.
+  useEffect(() => {
+    if (!requestedRouteId) return;
+    let cancelled = false;
+    getRoute(requestedRouteId).then(route => {
+      if (!route || cancelled) { if (!cancelled) toast('Parcours introuvable ou privé.', 'error'); return; }
+      setPlannedRoute(route);
+      const map = mapRef.current;
+      if (map) {
+        plannedLineRef.current?.remove();
+        plannedLineRef.current = L.polyline(route.points.map(p => [p.lat, p.lng] as [number, number]), { color: '#73b9e6', weight: 5, opacity: 0.85 }).addTo(map);
+        map.fitBounds(plannedLineRef.current.getBounds(), { padding: [25, 25] });
+      }
+    }).catch(e => toast((e as Error).message, 'error'));
+    return () => { cancelled = true; plannedLineRef.current?.remove(); plannedLineRef.current = null; };
+  }, [requestedRouteId]);
+
+  useEffect(() => {
+    if (!running || paused || !plannedRoute || points.length === 0) { setRouteDistance(null); return; }
+    setRouteDistance(Math.round(distanceToRoute(points[points.length - 1], plannedRoute.points)));
+  }, [points, running, paused, plannedRoute]);
 
   // Parcours chargés en fond
   useEffect(() => {
@@ -478,7 +507,7 @@ export default function ActivityPage() {
       setElapsed(0);
       lastSavedRef.current = now;
 
-      const id = await createActivitySession(profile.uid, type);
+      const id = await createActivitySession(profile.uid, type, plannedRoute?.id ? { id: plannedRoute.id, name: plannedRoute.name } : undefined);
       sessionRef.current = id;
       try {
         await pedometer.loadPersisted();
@@ -651,6 +680,7 @@ export default function ActivityPage() {
       </div>
       <div className="activity-map" ref={containerRef} />
       <div className="activity-panel">
+        {plannedRoute && <div className="planned-route-banner" data-testid="planned-route"><div><strong>🧭 {plannedRoute.name}</strong><span>{formatDistance(plannedRoute.distanceM, unitSystem)} · {plannedRoute.elevationGainM} m D+</span></div><button className="btn btn-ghost btn-sm" disabled={running} onClick={() => { setPlannedRoute(null); plannedLineRef.current?.remove(); }}>Quitter</button>{routeDistance != null && <p role="status">{routeDistance <= 50 ? 'Vous êtes sur le tracé.' : `À ${routeDistance} m du tracé le plus proche.`}</p>}</div>}
         <div className="activity-types">
           <button className={type === 'walk' ? 'selected' : ''} disabled={running} onClick={() => setType('walk')}>🚶 Marche</button>
           <button className={type === 'run' ? 'selected' : ''} disabled={running} onClick={() => setType('run')}>🏃 Course</button>

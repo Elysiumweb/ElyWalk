@@ -6,6 +6,37 @@ service cloud.firestore {
     function verified() { return auth() && request.auth.token.email_verified == true; }
     function president() { return auth() && request.auth.uid in ['BZ333LlhuJMoD4rXIquGE0zzjX43','7XLpqYMKEMX5kLrQtts6NG3zRB32']; }
     function numberBetween(value, low, high) { return value is number && value >= low && value <= high; }
+    function blockPath(owner, target) { return /databases/$(database)/documents/blockedAccounts/$(owner + '_' + target); }
+    function blocked(a, b) { return exists(blockPath(a, b)) || exists(blockPath(b, a)); }
+    function canInteract(a, b) { return a != b && !blocked(a, b); }
+    function participantsAllowed(p) {
+      // Le créateur est toujours p[0] dans le service. Limite volontaire à six
+      // participants pour rester sous le quota de lectures des règles.
+      return canInteract(p[0], p[1])
+        && (p.size() < 3 || canInteract(p[0], p[2]))
+        && (p.size() < 4 || canInteract(p[0], p[3]))
+        && (p.size() < 5 || canInteract(p[0], p[4]))
+        && (p.size() < 6 || canInteract(p[0], p[5]));
+    }
+    function validEventMembership(before, after, uid) {
+      let oldWaitlist = before.keys().hasAny(['waitlist']) ? before.waitlist : [];
+      let addedP = after.participants.toSet().difference(before.participants.toSet());
+      let removedP = before.participants.toSet().difference(after.participants.toSet());
+      let addedW = after.waitlist.toSet().difference(oldWaitlist.toSet());
+      let removedW = oldWaitlist.toSet().difference(after.waitlist.toSet());
+      let ownChange = addedP.hasOnly([uid]) && removedP.hasOnly([uid]) && addedW.hasOnly([uid]) && removedW.hasOnly([uid])
+        && addedP.size() <= 1 && removedP.size() <= 1 && addedW.size() <= 1 && removedW.size() <= 1;
+      let promotion = removedP == [uid].toSet() && addedP.size() == 1 && addedW.size() == 0
+        && addedP == removedW && removedW.size() == 1
+        && after.participants.size() == before.participants.size();
+      let unique = after.participants.size() == after.participants.toSet().size()
+        && after.waitlist.size() == after.waitlist.toSet().size()
+        && after.participants.toSet().intersection(after.waitlist.toSet()).size() == 0;
+      let withinCapacity = !before.keys().hasAny(['maxParticipants']) || before.maxParticipants == null
+        || after.participants.size() <= before.maxParticipants;
+      let waitlistOnlyWhenFull = addedW.size() == 0 || (before.keys().hasAny(['maxParticipants']) && before.maxParticipants != null && before.participants.size() >= before.maxParticipants);
+      return unique && withinCapacity && waitlistOnlyWhenFull && (ownChange || promotion);
+    }
     function economyUnchanged() {
       return request.resource.data.elycoins == resource.data.elycoins
         && request.resource.data.totalSteps == resource.data.totalSteps
@@ -75,8 +106,33 @@ service cloud.firestore {
         && request.resource.data.totalCalories == resource.data.totalCalories;
     }
 
+    match /blockedAccounts/{id} {
+      allow read: if auth() && (resource.data.ownerUid == request.auth.uid || resource.data.blockedUid == request.auth.uid || president());
+      allow create: if auth() && id == request.auth.uid + '_' + request.resource.data.blockedUid
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.blockedUid != request.auth.uid
+        && request.resource.data.blockedName.size() <= 80;
+      allow delete: if auth() && resource.data.ownerUid == request.auth.uid;
+      allow update: if false;
+    }
+    match /reports/{id} {
+      allow read: if president() || (auth() && resource.data.reporterUid == request.auth.uid);
+      allow create: if auth() && request.resource.data.reporterUid == request.auth.uid
+        && request.resource.data.targetUid != request.auth.uid
+        && request.resource.data.targetType in ['profile','message','activity','event']
+        && request.resource.data.reason in ['harassment','spam','inappropriate','safety','other']
+        && request.resource.data.details.size() <= 1000
+        && request.resource.data.status == 'open'
+        && request.resource.data.history == [];
+      allow update: if president()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','history','updatedAt'])
+        && request.resource.data.status in ['open','reviewing','resolved','dismissed']
+        && request.resource.data.history.size() <= 100;
+      allow delete: if false;
+    }
+
     match /users/{uid} {
-      allow read: if auth();
+      allow read: if auth() && (self(uid) || !blocked(request.auth.uid, uid));
       allow create: if self(uid) && request.resource.data.uid == uid
         && request.resource.data.elycoins == 0 && request.resource.data.totalSteps == 0;
       allow update: if president() || (self(uid) && (safeProfileEdit() || safePublicSync() || validStepCredit(uid) || validAdCredit(uid) || validReferralCredit(uid) || validChallengeCredit(uid) || validDebit()));
@@ -128,20 +184,25 @@ service cloud.firestore {
       allow delete: if auth() && (referredUid == request.auth.uid || resource.data.sponsorUid == request.auth.uid);
     }
     match /friendRequests/{id} {
-      allow read: if auth() && (resource.data.from == request.auth.uid || resource.data.to == request.auth.uid);
-      allow create: if auth() && request.resource.data.from == request.auth.uid && request.resource.data.status == 'pending';
-      allow update: if auth() && resource.data.to == request.auth.uid;
+      allow read: if auth() && (resource.data.from == request.auth.uid || resource.data.to == request.auth.uid)
+        && !blocked(resource.data.from, resource.data.to);
+      allow create: if auth() && request.resource.data.from == request.auth.uid
+        && canInteract(request.resource.data.from, request.resource.data.to)
+        && request.resource.data.status == 'pending';
+      allow update: if auth() && resource.data.to == request.auth.uid && !blocked(resource.data.from, resource.data.to);
       allow delete: if auth() && request.auth.uid in [resource.data.from, resource.data.to];
     }
     match /friendReactions/{id} {
-      allow read: if auth() && request.auth.uid in [resource.data.from, resource.data.to];
+      allow read: if auth() && request.auth.uid in [resource.data.from, resource.data.to] && !blocked(resource.data.from, resource.data.to);
       allow create: if auth() && request.resource.data.from == request.auth.uid
+        && canInteract(request.resource.data.from, request.resource.data.to)
         && request.resource.data.emoji in ['👏','🔥','💛','👋'] && request.resource.data.message.size() <= 160;
       allow delete: if auth() && request.auth.uid in [resource.data.from, resource.data.to]; allow update: if false;
     }
     match /friendships/{id} {
-      allow read: if auth() && request.auth.uid in resource.data.members;
-      allow create: if auth() && request.auth.uid in request.resource.data.members && request.resource.data.members.size() == 2;
+      allow read: if auth() && request.auth.uid in resource.data.members && !blocked(resource.data.members[0], resource.data.members[1]);
+      allow create: if auth() && request.auth.uid in request.resource.data.members && request.resource.data.members.size() == 2
+        && canInteract(request.resource.data.members[0], request.resource.data.members[1]);
       allow delete: if auth() && request.auth.uid in resource.data.members; allow update: if false;
     }
     match /withdrawals/{id} {
@@ -165,7 +226,7 @@ service cloud.firestore {
       allow delete: if false;
     }
     match /activitySessions/{id} {
-      allow read: if auth() && (resource.data.uid == request.auth.uid || resource.data.visibility in ['friends','link']);
+      allow read: if auth() && (resource.data.uid == request.auth.uid || (resource.data.visibility in ['friends','link'] && !blocked(request.auth.uid, resource.data.uid)));
       allow create: if verified() && request.resource.data.uid == request.auth.uid
         && request.resource.data.type in ['walk','run'] && request.resource.data.status == 'active';
       // pausedSec est exclu de durationSec (durée active) et borné à 24 h.
@@ -199,33 +260,74 @@ service cloud.firestore {
       allow delete: if self(uid);
     }
     match /activityFeed/{id} {
-      allow read: if auth();
+      allow read: if auth() && !blocked(request.auth.uid, resource.data.uid);
       allow create: if auth() && request.resource.data.uid == request.auth.uid
         && request.resource.data.createdAt is number
         && request.resource.data.message.size() <= 300;
       allow update, delete: if auth() && resource.data.uid == request.auth.uid;
     }
     match /friendChallenges/{id} {
-      allow read: if auth() && request.auth.uid in resource.data.participants;
+      allow read: if auth() && request.auth.uid in resource.data.participants && !blocked(request.auth.uid, resource.data.creatorUid);
       allow create: if auth() && request.resource.data.creatorUid == request.auth.uid
+        && request.resource.data.participants[0] == request.auth.uid
         && request.resource.data.participants.size() >= 2
         && request.resource.data.participants.size() <= 6
+        && participantsAllowed(request.resource.data.participants)
         && request.resource.data.target is number;
       allow update: if auth() && request.auth.uid in resource.data.participants;
       allow delete: if auth() && resource.data.creatorUid == request.auth.uid;
     }
     match /directMessages/{id} {
-      allow read: if auth() && request.auth.uid in [resource.data.from, resource.data.to];
+      allow read: if auth() && request.auth.uid in [resource.data.from, resource.data.to] && !blocked(resource.data.from, resource.data.to);
       allow create: if auth() && request.resource.data.from == request.auth.uid
-        && request.resource.data.text.size() <= 500;
+        && canInteract(request.resource.data.from, request.resource.data.to)
+        && request.resource.data.text.size() > 0 && request.resource.data.text.size() <= 500;
       allow update: if auth() && request.auth.uid == resource.data.to;
       allow delete: if auth() && request.auth.uid in [resource.data.from, resource.data.to];
     }
     match /communityEvents/{id} {
       allow read: if auth();
-      allow create: if auth() && request.resource.data.creatorUid == request.auth.uid;
-      allow update: if auth();
+      allow create: if auth() && request.resource.data.creatorUid == request.auth.uid
+        && request.resource.data.participants == [request.auth.uid]
+        && request.resource.data.title.size() > 0 && request.resource.data.title.size() <= 80
+        && request.resource.data.description.size() <= 600
+        && (!('maxParticipants' in request.resource.data) || request.resource.data.maxParticipants == null
+          || (request.resource.data.maxParticipants is int && request.resource.data.maxParticipants >= 2 && request.resource.data.maxParticipants <= 500));
+      allow update: if auth() && (
+        (resource.data.creatorUid == request.auth.uid
+          && request.resource.data.creatorUid == resource.data.creatorUid
+          && request.resource.data.participants == resource.data.participants
+          && request.resource.data.status in ['scheduled','cancelled'])
+        || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['participants','waitlist'])
+          && request.resource.data.creatorUid == resource.data.creatorUid
+          && canInteract(request.auth.uid, resource.data.creatorUid)
+          && validEventMembership(resource.data, request.resource.data, request.auth.uid)
+          && request.resource.data.participants.size() <= 500
+          && request.resource.data.waitlist.size() <= 500
+          && (!resource.data.keys().hasAny(['status']) || request.resource.data.status != 'cancelled')
+        ));
       allow delete: if auth() && resource.data.creatorUid == request.auth.uid;
+    }
+    match /eventNotifications/{id} {
+      allow read: if auth() && resource.data.toUid == request.auth.uid;
+      allow create: if auth()
+        && get(/databases/$(database)/documents/communityEvents/$(request.resource.data.eventId)).data.creatorUid == request.auth.uid
+        && request.resource.data.toUid in get(/databases/$(database)/documents/communityEvents/$(request.resource.data.eventId)).data.participants
+        && request.resource.data.type in ['updated','cancelled'] && request.resource.data.notified == false;
+      allow update, delete: if false;
+    }
+    match /savedRoutes/{id} {
+      allow read: if auth() && (resource.data.uid == request.auth.uid || (resource.data.visibility == 'public' && !blocked(request.auth.uid, resource.data.uid)));
+      allow create: if auth() && request.resource.data.uid == request.auth.uid
+        && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 80
+        && request.resource.data.description.size() <= 500
+        && request.resource.data.points.size() >= 2 && request.resource.data.points.size() <= 5000
+        && request.resource.data.visibility in ['private','public'];
+      allow update: if auth() && resource.data.uid == request.auth.uid
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.points.size() <= 5000
+        && request.resource.data.visibility in ['private','public'];
+      allow delete: if auth() && resource.data.uid == request.auth.uid;
     }
     match /partnerOffers/{id} { allow read: if auth(); allow write: if president(); }
     match /establishments/{id} { allow read: if auth(); allow write: if president(); }

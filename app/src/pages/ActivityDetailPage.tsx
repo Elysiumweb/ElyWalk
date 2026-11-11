@@ -5,6 +5,7 @@ import 'leaflet/dist/leaflet.css';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import Sheet from '../components/Sheet';
+import ReportDialog from '../components/ReportDialog';
 import {
   getActivitySession,
   deleteActivitySession,
@@ -14,6 +15,7 @@ import {
 } from '../lib/db';
 import { shareActivity } from '../lib/share';
 import { exportActivitiesCsv, exportActivityGpx } from '../lib/export';
+import { saveRoute } from '../lib/routes';
 import type { ActivitySession, ActivityWeather } from '../lib/types';
 import { fmtNumber, formatDistance } from '../lib/coins';
 import {
@@ -42,6 +44,7 @@ export default function ActivityDetailPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [visibility, setVisibility] = useState<'private' | 'friends' | 'link'>('private');
+  const [reportOpen, setReportOpen] = useState(false);
 
   // Édition : titre, note, météo ressentie
   const [editing, setEditing] = useState(false);
@@ -70,7 +73,7 @@ export default function ActivityDetailPage() {
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
     const map = L.map(containerRef.current, { zoomControl: false });
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap', maxZoom: 19 }).addTo(map);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>', maxZoom: 19 }).addTo(map);
     L.control.zoom({ position: 'bottomright' }).addTo(map);
     mapRef.current = map;
     return () => { map.remove(); mapRef.current = null; drawnRef.current = false; };
@@ -121,6 +124,18 @@ export default function ActivityDetailPage() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const onSaveRoute = async () => {
+    if (!profile || !session || session.points.length < 2) return;
+    setBusy(true);
+    try {
+      const step = Math.max(1, Math.ceil(session.points.length / 5000));
+      const points = session.points.filter((_, index) => index % step === 0 || index === session.points.length - 1).slice(0, 5000);
+      await saveRoute(profile, { name: session.title || `Parcours du ${new Date(session.startedAt).toLocaleDateString()}`, description: session.note, points, visibility: 'private' });
+      toast('Parcours privé enregistré.', 'success'); navigate('/routes');
+    } catch (e) { toast((e as Error).message, 'error'); }
+    finally { setBusy(false); }
   };
 
   const onExportCsv = async () => {
@@ -299,6 +314,7 @@ export default function ActivityDetailPage() {
             <button className="btn btn-outline btn-sm" style={{ flex: 1 }} onClick={() => onReactOnActivity('👏')}>👏 Bravo</button>
             <button className="btn btn-outline btn-sm" style={{ flex: 1 }} onClick={() => onReactOnActivity('🔥')}>🔥</button>
             <button className="btn btn-outline btn-sm" style={{ flex: 1 }} onClick={() => onReactOnActivity('💛')}>💛</button>
+            <button className="btn btn-danger btn-sm" onClick={() => setReportOpen(true)} aria-label="Signaler cette sortie">⚑</button>
           </div>
         )}
 
@@ -325,6 +341,7 @@ export default function ActivityDetailPage() {
           {busy ? 'Préparation…' : `📤 Partager cette sortie (${mapStyleLabel(mapStyle)})`}
         </button>
 
+        {isOwner && session.points.length >= 2 && <button className="btn btn-gold" style={{ marginTop: 12, width: '100%' }} onClick={onSaveRoute} disabled={busy} data-testid="save-activity-route">Enregistrer comme parcours privé</button>}
         <div className="activity-export-row">
           <button className="btn btn-outline" onClick={onExportGpx} disabled={busy}>🧭 Export GPX</button>
           <button className="btn btn-outline" onClick={onExportCsv} disabled={busy}>📄 Export CSV</button>
@@ -379,6 +396,7 @@ export default function ActivityDetailPage() {
         </div>
         <button className="btn btn-gold" onClick={saveEdit} disabled={busy}>{busy ? 'Enregistrement…' : 'Enregistrer'}</button>
       </Sheet>
+      <ReportDialog open={reportOpen} onClose={() => setReportOpen(false)} targetUid={session.uid} targetType="activity" targetId={session.id!} />
     </div>
   );
 }

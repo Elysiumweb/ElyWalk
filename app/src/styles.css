@@ -900,3 +900,20 @@ img.podium-avatar {
 /* Fix for message incoming */
 .list-row.incoming{ border:1px solid var(--gold-border); }
 
+
+/* Parcours préparés et sécurité sociale */
+.route-preview { height: 170px; margin: -4px -4px 14px; border-radius: 12px; overflow: hidden; background: var(--surface-2); }
+.route-preview .leaflet-control-attribution { font-size: 9px; }
+.route-card h2 { margin: 0; font-size: 18px; }
+.route-card-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.route-card-head p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+.route-stats { display: flex; flex-wrap: wrap; gap: 12px; margin: 12px 0; color: var(--gold); font-size: 13px; }
+.route-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.planned-route-banner { border: 1px solid #73b9e6; background: rgba(115,185,230,.1); border-radius: 12px; padding: 12px; margin-bottom: 12px; }
+.planned-route-banner > div { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.planned-route-banner span, .planned-route-banner p { color: var(--muted); font-size: 12px; }
+.check-row { display: flex; gap: 10px; align-items: flex-start; margin: 14px 0; font-size: 13px; }
+.moderation-history { border-left: 2px solid var(--gold-border); margin: 8px 0; padding-left: 10px; color: var(--muted); font-size: 12px; }
+.event-cancelled { opacity: .72; }
+.event-change { padding: 8px; border-radius: 8px; background: rgba(232,131,122,.1); font-size: 12px; }
+@media (max-width: 480px) { .route-preview { height: 145px; } }

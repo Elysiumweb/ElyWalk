@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -12,6 +13,9 @@ export default defineConfig({
     hmr: process.env.EXPO_PACKAGER_PROXY_URL
       ? { clientPort: 443, protocol: 'wss' }
       : undefined,
+  },
+  test: {
+    exclude: ['node_modules/**', 'dist/**', 'rules-tests/**'],
   },
   build: {
     outDir: 'dist',
