@@ -18,3 +18,62 @@
 .appearance-option-hint { color: var(--muted); font-size: var(--text-xs); line-height: 1.35; }
 .appearance-option-active { border: 2px solid var(--gold); background: var(--gold-dim); }
 .appearance-option-active .appearance-option-label::after { content: ' ✓'; color: var(--gold); }
+
+/* Photo de profil : état de préparation (compression locale avant Firestore). */
+.photo-ready { color: var(--gold); font-size: var(--text-xs); }
+
+/* ---- Écran carte : en-tête en flux (recherche + accès) ----
+   L'en-tête ne recouvre plus la carte : la recherche et les boutons
+   « Parcours / Événements / Sortie » occupent leur propre bande, donc plus de
+   chevauchement. La carte garde le reste de l'écran, entre cet en-tête et la
+   barre d'onglets/la bannière publicitaire. */
+.map-screen {
+  height: calc(100vh - var(--tabbar-h) - var(--ad-banner-h, 0px) - env(safe-area-inset-bottom, 0px));
+  height: calc(100dvh - var(--tabbar-h) - var(--ad-banner-h, 0px) - env(safe-area-inset-bottom, 0px));
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.map-header {
+  position: relative;
+  z-index: 20;
+  flex: 0 0 auto;
+  padding: calc(env(safe-area-inset-top, 0px) + 12px) 16px 10px;
+  background: linear-gradient(180deg, rgba(11, 11, 12, 0.98), rgba(11, 11, 12, 0.94));
+  border-bottom: 1px solid var(--gold-border);
+  /* La règle d'origine neutralisait les clics (surimpression décorative) :
+     l'en-tête porte désormais de vrais boutons, il doit être interactif. */
+  pointer-events: auto;
+}
+.map-header::after { display: none; }
+.map-header-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.map-quick-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.map-quick-actions .btn { flex: 1 1 0; min-width: 96px; }
+.map-search { position: static; display: grid; gap: 8px; margin-top: 10px; }
+.map-search .input { background: var(--surface-2); }
+.nearby-list { max-height: 132px; }
+.map-stage { position: relative; flex: 1 1 auto; min-height: 0; }
+.map-container { position: absolute; inset: 0; }
+
+/* Bouton de localisation et fiche partenaire : calés DANS la zone carte.
+   La barre d'onglets et la bannière publicitaire sont déjà exclues de la
+   hauteur de `.map-screen`, donc plus aucun recouvrement. */
+.map-locate-btn { bottom: 14px; right: 12px; }
+.map-card {
+  left: 10px; right: 10px; bottom: 12px;
+  max-height: 52%;
+  overflow-y: auto;
+}
+.map-container .leaflet-control-zoom { margin-bottom: 14px !important; }
+.map-container .leaflet-bottom { bottom: 0; }
+
+@media (min-width: 760px) {
+  /* Aperçu desktop : la carte reste dans la « coque » arrondie (les 50 px
+     correspondent au cadre `#root`). */
+  .map-screen {
+    height: calc(100vh - 50px - var(--tabbar-h) - var(--ad-banner-h, 0px) - env(safe-area-inset-bottom, 0px));
+    height: calc(100dvh - 50px - var(--tabbar-h) - var(--ad-banner-h, 0px) - env(safe-area-inset-bottom, 0px));
+  }
+}
+.directions-credits { color: var(--muted); line-height: 1.4; }
+.directions-credits a { color: var(--gold); }

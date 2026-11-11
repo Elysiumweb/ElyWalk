@@ -157,6 +157,21 @@ composites `activitySessions` sont nécessaires (`uid` + `startedAt` desc, et
 `firestore.indexes.json` ; sans ce déploiement, la liste des sorties renvoie
 une erreur « index requis ».
 
+**2.1.3 — correctif « The query requires an index » :** la pagination triait
+aussi explicitement par identifiant de document (`orderBy(documentId(), 'desc')`),
+ce qui exigeait un index à quatre champs différent selon le filtre de type
+choisi. Le client ne trie plus que par `startedAt` (Firestore ajoute `__name__`
+automatiquement pour la pagination) ; les index à quatre champs restent déclarés
+pour les versions déjà installées. Après une mise à jour du fichier :
+
+```bash
+firebase deploy --only firestore:indexes
+firebase firestore:indexes   # vérifie l'état de construction
+```
+
+Les index manquants peuvent aussi être générés depuis les liens affichés par
+l'application au moment de l'erreur.
+
 ## Backend de confiance — Cloudflare Workers (F05/F06/F11, 100 % gratuit)
 
 Les Cloud Functions Firebase exigent le plan payant **Blaze**. ElyWalk utilise

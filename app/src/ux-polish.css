@@ -89,8 +89,6 @@ button, .tab, .chip { user-select: none; }
 
 .sheet-close { position: absolute; top: 10px; right: 12px; width: 40px; height: 40px; border: 0; border-radius: 50%; background: var(--surface-2); color: var(--muted); cursor: pointer; }
 .map-container .leaflet-tile-pane { filter: none; }
-.map-card { bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
-.map-locate-btn { bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
 .map-empty { position: absolute; z-index: 15; top: 50%; left: 50%; transform: translate(-50%,-50%); width: min(82%,340px); padding: 18px; text-align: center; border: 1px solid var(--gold-border); border-radius: var(--radius); background: rgba(17,17,17,.92); box-shadow: 0 10px 30px #0008; pointer-events: none; }
 .map-empty strong, .map-empty span { display: block; }
 .map-empty strong { color: var(--gold); font-family: var(--font-display); font-size: 13px; }
@@ -114,7 +112,6 @@ button, .tab, .chip { user-select: none; }
   .app-shell { min-height: calc(100vh - 50px); position: relative; }
   .tabbar { left: 50%; right: auto; width: 578px; transform: translateX(-50%); border-radius: 0 0 27px 27px; }
   .tab-label { font-size: var(--text-sm); }
-  .map-screen { height: calc(100vh - 50px - var(--tabbar-h) - var(--ad-banner-h, 0px)); }
 }
 
 @media (prefers-reduced-motion: reduce) {

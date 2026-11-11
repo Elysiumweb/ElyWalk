@@ -1,5 +1,53 @@
 # Changelog
 
+## 2.1.3 — 2026-11-11
+
+### Correctifs de saisie, de photo de profil et de sorties
+
+- **B01** Saisie qui « sautait » à chaque lettre : le focus du composant
+  `Sheet` (feuilles Profil, Rencontres, Parcours…) était rejoué à chaque rendu
+  du parent et renvoyait le curseur sur la croix de fermeture. L'effet ne dépend
+  plus que de l'ouverture, le focus initial est donné à la feuille elle-même, et
+  il n'est jamais volé à un champ déjà actif. Le focus est rendu au déclencheur à
+  la fermeture (test de régression : `components/Sheet.test.tsx`, vérifié en
+  échec sur l'ancien code et au vert sur le nouveau).
+- **B02** Photo de profil qui chargeait à l'infini : l'application tentait un
+  envoi Firebase Storage (bucket inexistant) dont l'attente n'aboutissait jamais.
+  La photo est désormais **recadrée et compressée localement** puis stockée en
+  **base64 dans le document Firestore** `users/{uid}.photoURL` (paliers 192 → 96
+  px, cible < 60 Ko, une seule écriture Firestore, plus aucun appel réseau
+  externe). L'aperçu affiche « Photo prête (x Ko) » avant l'enregistrement, et
+  les anciennes photos trop lourdes sont recompressées une fois au chargement du
+  profil.
+- **B03** « The query requires an index » sur les sorties : la pagination
+  triait explicitement par `documentId()`, ce qui réclamait un index composite
+  différent pour chaque filtre. Le tri secondaire est laissé à Firestore
+  (`__name__` implicite) ; `firestore.indexes.json` déclare désormais les index
+  `activitySessions`, `savedRoutes` et `eventNotifications` réellement utilisés
+  (les anciens index à quatre champs restent pour les versions installées).
+- **B04** Rencontres : « Rejoindre » n'inscrit plus l'organisateur en liste
+  d'attente quand sa sortie est complète, quitter sa propre sortie ne produit
+  plus d'erreur de permission, et un badge « Vous organisez cette sortie »
+  remplace les actions impossibles.
+
+### Carte et itinéraires
+
+- **F35** Carte réorganisée : la recherche ne recouvre plus les accès
+  « Parcours / Événements / Sortie » (en-tête en flux), et le bouton de
+  localisation, le zoom et la fiche partenaire sont calés **dans la zone carte**,
+  au-dessus de la bannière publicitaire et de la barre d'onglets.
+- **F36** Itinéraire intégré à l'application : nouvelle feuille plein écran
+  (carte, établissements et Rencontres) avec **adresse réelle** de départ et
+  d'arrivée (Nominatim), point de départ = position actuelle ou adresse saisie,
+  et itinéraire calculé pour **à pied, à vélo, en voiture** (OSRM) et en
+  **transports en commun** (OpenTripPlanner Île-de-France Mobilités : lignes,
+  direction, correspondances, durée). Tracé dessiné sur la carte, consignes
+  étape par étape, durée et distance ; « Ouvrir dans Google Maps » reste un
+  bouton de secours explicite. Politique de confidentialité complétée
+  (§ destinataires + § 5.1).
+- **F37** Version 2.1.3 (versionCode **20103**) pour que Play Console accepte la
+  publication.
+
 ## 2.1.0 — 2026-11-11
 
 ### Régie publicitaire : Unity LevelPlay en médiation, Meta Audience Network en bidding

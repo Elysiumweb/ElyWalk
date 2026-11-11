@@ -18,7 +18,6 @@ import {
   deleteField,
   writeBatch,
   startAfter,
-  documentId,
   type QueryConstraint,
   type Unsubscribe,
 } from 'firebase/firestore';
@@ -556,12 +555,16 @@ export interface ActivityPageResult {
 /**
  * Liste paginée des sorties (« Mes sorties »).
  *
- * La pagination s'appuie sur orderBy(startedAt desc, __name__ desc) et
- * startAfter(cursor) : pas de saut, pas de doublon. Le filtre de distance
- * minimale est appliqué côté client (Firestore n'autorise qu'une seule
- * inégalité par requête, déjà utilisée pour la période).
+ * La pagination s'appuie sur orderBy(startedAt desc) + startAfter(startedAt, id) :
+ * pas de saut, pas de doublon. Le filtre de distance minimale est appliqué côté
+ * client (Firestore n'autorise qu'une seule inégalité par requête, déjà utilisée
+ * pour la période).
  *
- * Index composites requis : (uid, startedAt desc) et (uid, type, startedAt desc).
+ * Index composites requis (firestore.indexes.json) :
+ *   activitySessions (uid ASC, startedAt DESC)
+ *   activitySessions (uid ASC, type ASC, startedAt DESC)
+ *   activitySessions (uid ASC, startedAt DESC, __name__ DESC) — ancienne version
+ *   conservée pour les clients déjà installés qui triaient par documentId().
  */
 export async function listActivitySessionsPage(uid: string, filters: ActivityQueryFilters = {}): Promise<ActivityPageResult> {
   const pageSize = Math.min(50, Math.max(1, Math.floor(filters.pageSize || 20)));
@@ -570,7 +573,12 @@ export async function listActivitySessionsPage(uid: string, filters: ActivityQue
   if (typeof filters.from === 'number') constraints.push(where('startedAt', '>=', filters.from));
   if (typeof filters.to === 'number') constraints.push(where('startedAt', '<', filters.to));
   constraints.push(orderBy('startedAt', 'desc'));
-  constraints.push(orderBy(documentId(), 'desc'));
+  // Le tri secondaire par identifiant (pagination stable) n'a pas besoin d'un
+  // index composite : Firestore l'ajoute automatiquement à tout index de
+  // collection. `documentId()` explicite, lui, exigeait un index dédié par
+  // combinaison de filtres — d'où les « The query requires an index » sur
+  // « Mes sorties ». Le curseur est construit avec le même couple
+  // (startedAt, __name__), donc la pagination reste sans doublon ni saut.
   if (filters.cursor) constraints.push(startAfter(filters.cursor.startedAt, filters.cursor.id));
   constraints.push(limit(pageSize + 1));
 
@@ -1257,6 +1265,9 @@ export async function joinCommunityEvent(uid:string, eventId:string):Promise<'jo
     if(!snap.exists()) throw new Error('Événement introuvable');
     const ev=snap.data() as CommunityEvent;
     if(ev.status === 'cancelled') throw new Error('Cet événement est annulé.');
+    // L'organisateur participe toujours à sa propre sortie (règle Firestore) :
+    // une nouvelle inscription ne doit pas le mettre en liste d'attente.
+    if(ev.creatorUid === uid) return 'joined' as const;
     await assertNotBlocked(uid, ev.creatorUid);
     if(ev.participants.includes(uid)) return 'joined' as const;
     if((ev.waitlist || []).includes(uid)) return 'waitlisted' as const;
@@ -1272,6 +1283,9 @@ export async function leaveCommunityEvent(uid:string, eventId:string):Promise<vo
     const snap=await tx.get(ref);
     if(!snap.exists()) return;
     const ev=snap.data() as CommunityEvent;
+    // L'organisateur ne peut pas quitter sa propre sortie (il en est le
+    // premier participant) : l'interface ne lui propose d'ailleurs pas.
+    if (ev.creatorUid === uid) return;
     let waitlist=(ev.waitlist || []).filter(p=>p!==uid);
     let participants=ev.participants.filter(p=>p!==uid);
     // La première personne en attente est promue atomiquement dès qu'une place se libère.

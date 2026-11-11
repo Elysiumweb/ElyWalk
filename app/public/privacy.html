@@ -150,8 +150,15 @@
   <tr><td><strong>Cloudflare, Inc.</strong></td><td>Backend de confiance (attestation d’intégrité Play Integrity, anti-fraude sur les récompenses publicitaires, envoi des notifications, file de retraits)</td><td>Identifiant de compte, jetons d’intégrité, horodatages de récompense</td></tr>
   <tr><td><strong>PayPal</strong></td><td>Exécution des retraits</td><td>Adresse PayPal, montant — uniquement si vous demandez un retrait</td></tr>
   <tr><td><strong>ipify / ipapi.co</strong></td><td>Obtention de l’adresse IP publique (anti-fraude parrainage)</td><td>Adresse IP</td></tr>
+  <tr><td><strong>OpenStreetMap</strong> (Fondation OSM, serveurs OSRM et Nominatim) et <strong>Île-de-France Mobilités</strong> (OpenTripPlanner)</td><td>Affichage de la carte, adresses réelles et calcul des itinéraires à pied, à vélo, en voiture et en transports en commun</td><td>Coordonnées du point de départ et de la destination, adresse recherchée — aucune donnée de compte</td></tr>
 </table>
 <p><strong>Aucune donnée n’est vendue, louée ou cédée à des tiers à des fins commerciales.</strong> Aucune donnée de santé n’est monétisée, y compris sous forme agrégée ou anonymisée vendue à un tiers. Vos données ne sont pas utilisées pour prendre des décisions automatisées produisant des effets juridiques vous concernant.</p>
+
+<h3>5.1 Itinéraires et cartes (OpenStreetMap / Île-de-France Mobilités)</h3>
+<p>Lorsque vous demandez un itinéraire, les <strong>coordonnées du départ et de l’arrivée</strong> (ou l’adresse que vous saisissez) sont envoyées au service de calcul d’itinéraire utilisé : OSRM et Nominatim (OpenStreetMap) pour la marche, le vélo et la voiture, OpenTripPlanner d’Île-de-France Mobilités pour les transports en commun. Ces services ne reçoivent ni votre nom, ni votre identifiant de compte, ni votre historique de sorties : uniquement les deux points du trajet, le temps de calcul.</p>
+<div class="note">
+  <strong>Le calcul est facultatif :</strong> si vous ne demandez pas d’itinéraire, aucune coordonnée n’est transmise à ces services. Les tuiles de la carte, elles, sont chargées depuis OpenStreetMap pour afficher le plan.
+</div>
 
 <h2>6. Transferts hors Union européenne</h2>
 <p>Certains de nos sous-traitants (Google, Cloudflare, PayPal) peuvent traiter des données en dehors de l’Union européenne, notamment aux États-Unis. Ces transferts sont encadrés par les clauses contractuelles types de la Commission européenne et, le cas échéant, par les garanties complémentaires prévues par le RGPD.</p>

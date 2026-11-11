@@ -9,7 +9,7 @@ import QRCode, { shareFriendCode } from '../components/QRCode';
 import LevelBadge from '../components/LevelBadge';
 import { logout, updateAuthProfile, changePassword, changeEmail, deleteAuthAccount, reauthenticateAccount, frAuthError } from '../lib/auth-service';
 import { updateUserFields, setReferredBy, exportAccountData, deleteAccountData, listUserBadges, watchUserBadges, getReferralDashboard, updateActivityPrivacy } from '../lib/db';
-import { uploadAvatar, deleteAvatar } from '../lib/avatar';
+import { toFirestoreAvatarDataUrl, deleteAvatar, shrinkStoredAvatar } from '../lib/avatar';
 import { getNotificationSettings, setReminderEnabled, setReminderSchedule, setPushEnabled, type NotificationSettings, type ReminderSchedule } from '../lib/notifications';
 import BlockedAccounts from '../components/BlockedAccounts';
 import { useI18n, type Locale } from '../context/LocaleContext';
@@ -19,7 +19,7 @@ import { useAppearance, APPEARANCE_OPTIONS } from '../lib/appearance';
 import { APP_VERSION_LABEL } from '../lib/version';
 import { isPresidentUid } from '../lib/constants';
 import { fmtCoins, fmtNumber, formatDistance } from '../lib/coins';
-import type { UserBadge, BadgeDefinition } from '../lib/types';
+import type { UserBadge, BadgeDefinition, UserProfile } from '../lib/types';
 
 export default function ProfilePage() {
   const { profile } = useAuth();
@@ -54,8 +54,39 @@ export default function ProfilePage() {
   const [editName, setEditName] = useState(profile?.displayName || '');
   const [editBio, setEditBio] = useState(profile?.bio || '');
   const [editPreview, setEditPreview] = useState<string | null>(null);
-  const [editFile, setEditFile] = useState<File | null>(null);
+  const [editPhotoDataUrl, setEditPhotoDataUrl] = useState<string | null>(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Photo héritée trop lourde (> 60 Ko) : recompressée une seule fois, en
+  // tâche de fond. Le drapeau local évite toute boucle d'écriture si la
+  // recompression échoue.
+  const shrunkRef = useRef(false);
+  useEffect(() => {
+    const photo = profile?.photoURL;
+    if (!profile || !photo || shrunkRef.current) return;
+    shrunkRef.current = true;
+    void shrinkStoredAvatar(photo)
+      .then((next) => (next ? updateUserFields(profile.uid, { photoURL: next }) : undefined))
+      .catch(() => undefined);
+  }, [profile?.uid, profile?.photoURL]);
+
+  /** Supprime la photo de profil (repasse sur l'initiale du pseudo). */
+  const removePhoto = async () => {
+    if (!profile) return;
+    setBusy(true);
+    try {
+      await updateUserFields(profile.uid, { photoURL: null });
+      await deleteAvatar(profile.uid).catch(() => undefined);
+      setEditPhotoDataUrl(null);
+      setEditPreview(null);
+      toast('Photo de profil supprimée.', 'info');
+    } catch (e) {
+      toast((e as Error).message || 'Suppression impossible.', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   // Badges
   const [badges, setBadges] = useState<UserBadge[]>([]);
@@ -112,26 +143,39 @@ export default function ProfilePage() {
     setEditName(profile?.displayName || '');
     setEditBio(profile?.bio || '');
     setEditPreview(null);
-    setEditFile(null);
+    setEditPhotoDataUrl(null);
     setEditOpen(true);
   };
 
-  const onPickPhoto = (file: File | undefined) => {
+  /**
+   * La photo est compressée **tout de suite** (recadrage carré + paliers de
+   * qualité) pour donner un aperçu fidèle et pour ne plus jamais bloquer
+   * l'enregistrement : la data-URL prête pour Firestore est mémorisée ici.
+   */
+  const onPickPhoto = async (file: File | undefined) => {
     if (!file) return;
     if (!file.type.startsWith('image/')) {
       toast('Choisissez une image (JPG, PNG, WEBP…).', 'error');
       return;
     }
-    if (file.size > 8 * 1024 * 1024) {
-      toast('Image trop lourde (8 Mo max).', 'error');
+    if (file.size > 12 * 1024 * 1024) {
+      toast('Image trop lourde (12 Mo max).', 'error');
       return;
     }
-    setEditFile(file);
-    const url = URL.createObjectURL(file);
-    setEditPreview((prev) => {
-      if (prev) URL.revokeObjectURL(prev);
-      return url;
-    });
+    setPhotoBusy(true);
+    try {
+      const dataUrl = await toFirestoreAvatarDataUrl(file);
+      setEditPhotoDataUrl(dataUrl);
+      setEditPreview((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return dataUrl;
+      });
+    } catch (e) {
+      toast((e as Error).message || 'Impossible de traiter cette image.', 'error');
+    } finally {
+      setPhotoBusy(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
   };
 
   const saveProfile = async () => {
@@ -152,20 +196,23 @@ export default function ProfilePage() {
     }
     setBusy(true);
     try {
-      const fields: Record<string, unknown> = { displayName: name, bio: bio || null };
-      if (editFile) {
-        fields.photoURL = await uploadAvatar(profile.uid, editFile);
-      }
-      await updateUserFields(profile.uid, fields as any);
-      await updateAuthProfile({
+      // Une seule écriture Firestore : pseudo, bio et photo (base64) partent
+      // ensemble. Aucun Storage, donc aucun risque de chargement infini.
+      const fields: Record<string, unknown> = {
         displayName: name,
-        ...(fields.photoURL && String(fields.photoURL).startsWith('http') ? { photoURL: String(fields.photoURL) } : {}),
-      }).catch(() => undefined);
-      toast('Profil mis à jour.', 'success');
+        // `null` efface explicitement la bio quand le champ est vidé.
+        bio: bio || null,
+      };
+      if (editPhotoDataUrl) fields.photoURL = editPhotoDataUrl;
+      await updateUserFields(profile.uid, fields as Partial<UserProfile>);
+      // Firebase Auth ne stocke que des URL http(s) : une data-URL y serait
+      // rejetée, on ne synchronise donc que le pseudo.
+      await updateAuthProfile({ displayName: name }).catch(() => undefined);
+      toast(editPhotoDataUrl ? 'Profil et photo mis à jour.' : 'Profil mis à jour.', 'success');
       setEditOpen(false);
       if (editPreview) URL.revokeObjectURL(editPreview);
       setEditPreview(null);
-      setEditFile(null);
+      setEditPhotoDataUrl(null);
     } catch (e) {
       toast((e as Error).message || 'Impossible d’enregistrer le profil.', 'error');
     } finally {
@@ -475,10 +522,27 @@ export default function ProfilePage() {
             type="button"
             className="btn btn-ghost btn-sm"
             onClick={() => fileRef.current?.click()}
+            disabled={photoBusy}
             data-testid="change-photo-button"
           >
-            Changer la photo
+            {photoBusy ? 'Préparation de la photo…' : 'Choisir une photo'}
           </button>
+          {editPhotoDataUrl && !photoBusy && (
+            <span className="photo-ready" role="status" data-testid="photo-ready">
+              ✓ Photo prête ({Math.round(editPhotoDataUrl.length / 1024)} Ko)
+            </span>
+          )}
+          {profile.photoURL && !photoBusy && (
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => void removePhoto()}
+              disabled={busy}
+              data-testid="remove-photo-button"
+            >
+              Supprimer la photo
+            </button>
+          )}
           <input
             ref={fileRef}
             type="file"
@@ -524,8 +588,13 @@ export default function ProfilePage() {
             </div>
           </div>
         )}
-        <button className="btn btn-gold" onClick={saveProfile} disabled={busy} data-testid="save-profile-button">
-          {busy ? '...' : 'Enregistrer'}
+        <button
+          className="btn btn-gold"
+          onClick={saveProfile}
+          disabled={busy || photoBusy}
+          data-testid="save-profile-button"
+        >
+          {busy ? 'Enregistrement…' : photoBusy ? 'Photo en cours…' : 'Enregistrer'}
         </button>
       </Sheet>
 
