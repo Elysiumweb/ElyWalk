@@ -235,7 +235,9 @@ recueilli **dans l'application** (`src/lib/adConsent.ts` + `components/AdConsent
   demandée** : ni bannière, ni interstitiel, ni vidéo récompensée.
 - Le choix est persisté (`Preferences`, clé `ads.consent.v1`), transmis au SDK
   natif **avant l'initialisation** via `LevelPlayAds.initialize({ personalized })`
-  → `LevelPlayPrivacySettings.setGDPRConsent(boolean)`, puis modifiable à chaud
+  → `LevelPlayPrivacySettings.setGDPRConsent(boolean)`, complété par
+  `setCCPA(!personalized)` (refus de la vente/partage) et `setCOPPA(false)`,
+  puis modifiable à chaud
   (`LevelPlayAds.setConsent`) depuis Profil → *Confidentialité des annonces*.
 - LevelPlay relaie ce consentement à chaque réseau médié : Meta Audience Network
   applique son mode *Limited Data Use* en cas de refus.
@@ -245,6 +247,75 @@ recueilli **dans l'application** (`src/lib/adConsent.ts` + `components/AdConsent
 > (Didomi, Axeptio, Google UMP + adaptateur) qui écrit la chaîne `IABTCF_*` lue
 > par LevelPlay, et vérifier dans le tableau de bord LevelPlay que la
 > réglementation GDPR est activée pour l'app.
+
+## Sécurité des données Play — « Applis installées »
+
+Google Play a refusé la version **20103** avec le motif
+« Sécurité des données (Applis installées : non déclaré) ». Le formulaire doit
+correspondre au comportement réel de l'app **et de ses SDK**.
+
+### Pourquoi la fonctionnalité ne peut pas être « supprimée »
+
+Le code de l'application ne fait aucune énumération de paquets : ni
+`QUERY_ALL_PACKAGES`, ni bloc `<queries>`, ni `getInstalledPackages` /
+`getInstalledApplications` / `queryIntentActivities` dans `android/app` ni dans
+les plugins Capacitor. La lecture vient du SDK de médiation :
+
+- Unity documente `PackageManager.getInstalledApplications(0)` dans LevelPlay,
+  avec un correctif « Google Play upload blocker » en **9.4.3** ; le SDK
+  embarqué est la **9.7.0** (`android/app/build.gradle`), et des usages de
+  `getPackagesForUid` subsistent. Meta Audience Network, appelé en *bidding* via
+  l'adaptateur `facebook-adapter`, figure aussi parmi les réseaux.
+- La permission `com.google.android.gms.permission.AD_ID` (manifeste) confirme
+  la présence d'identifiants publicitaires à usage de mesure.
+
+Conclusion : **Option 1** (déclarer) est la seule voie viable sans supprimer la
+régie publicitaire, donc l'économie d'ElyCoins.
+
+### Réponses exactes à saisir dans Play Console
+
+App → **Sécurité des données** → *Activité dans les applis* → **Applis installées** :
+
+| Champ | Réponse |
+| --- | --- |
+| Collecté ? | **Oui** |
+| Partagé ? | **Oui** |
+| Traitement éphémère ? | Non |
+| Obligatoire ? | Oui (non facultatif) |
+| Finalités | **Publicité ou marketing** (+ *Prévention des fraudes, sécurité et conformité*) |
+| Chiffré en transit ? | **Oui** (HTTPS uniquement) |
+| Suppression possible à la demande ? | Non |
+
+Puis enregistrer et **resoumettre la version pour examen**. Ce formulaire est
+global au package `com.elysium.elywalk` : il couvre toutes les versions publiées,
+y compris la 20103 refusée.
+
+### Ce que le dépôt apporte comme preuve
+
+- `AndroidManifest.xml` — commentaire d'en-tête rappelant l'absence de
+  permission de visibilité des paquets et l'origine SDK du traitement.
+- `public/privacy.html` — sections **4.1** (applications installées : données,
+  destinataires, finalité, caractère obligatoire, chiffrement, pas de
+  `QUERY_ALL_PACKAGES`) et **4.2** (désinstallation, réinitialisation de
+  l'identifiant publicitaire).
+- `components/AdConsentSheet.tsx` — mention explicite de la liste des
+  applications installées dans l'écran de consentement, y compris en annonces
+  non personnalisées.
+- `LevelPlayAdsPlugin.java` — `setGDPRConsent` + `setCCPA(!personalized)` +
+  `setCOPPA(false)` appliqués avant `LevelPlay.init`.
+
+### Vérification technique (si Play demande un justificatif)
+
+```bash
+# 1. Le manifeste fusionné ne doit contenir ni QUERY_ALL_PACKAGES ni <queries>
+bundletool dump manifest --bundle ElyWalk.aab | grep -E "QUERY_ALL_PACKAGES|<queries"
+# 2. Le code de l'app ne doit rien énumérer
+grep -rn "getInstalledApplications\|getInstalledPackages\|queryIntentActivities" \
+  android/app/src app/node_modules/@capacitor* 2>/dev/null
+```
+
+Les deux commandes doivent revenir **vides** ; c'est la démonstration que la
+collecte provient exclusivement du SDK publicitaire, déjà déclaré.
 
 ## Unity LevelPlay (médiation publicitaire depuis 2.1.0)
 

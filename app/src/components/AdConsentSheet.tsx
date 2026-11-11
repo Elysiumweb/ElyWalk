@@ -57,6 +57,18 @@ export default function AdConsentSheet() {
         Nous ne transmettons <strong>jamais</strong> vos pas, vos sorties ou vos données de santé :
         seuls l’identifiant publicitaire de votre appareil et des données techniques sont utilisés.
       </p>
+      <p
+        style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}
+        data-testid="ad-consent-installed-apps"
+      >
+        Pour éviter de vous montrer la publicité d’une application que vous avez déjà, le SDK publicitaire
+        consulte aussi la <strong>liste des applications installées</strong> sur votre appareil — y compris
+        si vous choisissez les annonces non personnalisées. Android filtre cette liste et ElyWalk ne
+        demande aucune permission d’accès global. Détail au § 4.1 de la{' '}
+        <a href={`${PRIVACY_POLICY_URL}#applis-installees`} target="_blank" rel="noreferrer">
+          politique de confidentialité
+        </a>.
+      </p>
       <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
         Vous pouvez choisir des annonces personnalisées (plus rémunératrices pour l’application)
         ou non personnalisées. Ce choix est révocable à tout moment depuis votre profil.

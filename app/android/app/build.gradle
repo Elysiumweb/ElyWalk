@@ -4,11 +4,11 @@ apply plugin: 'com.android.application'
 // Version de l'application : une seule source de vérité, `app/package.json`.
 // Play Console refuse une mise à jour dont le `versionCode` n'a pas augmenté :
 // le code est donc dérivé automatiquement de la version sémantique
-// (2.1.3 -> 20103) au lieu d'être saisi deux fois.
+// (2.1.4 -> 20104) au lieu d'être saisi deux fois.
 // ---------------------------------------------------------------------------
 def packageJsonFile = new File(rootProject.projectDir, '../../package.json')
-def appVersionName = '2.1.3'
-def appVersionCode = 20103
+def appVersionName = '2.1.4'
+def appVersionCode = 20104
 try {
     def pkg = new groovy.json.JsonSlurper().parse(packageJsonFile)
     if (pkg.version) {

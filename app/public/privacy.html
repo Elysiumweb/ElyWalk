@@ -68,7 +68,7 @@
     </div>
   </div>
   <p class="meta">Éditeur : l’association Elysium — association loi 1901, RNA W772011943, 22 Avenue Lamartine, 77380 Combs-la-Ville, France.</p>
-  <p class="meta">Dernière mise à jour : <strong>14 octobre 2026</strong> — entrée en vigueur immédiate.</p>
+  <p class="meta">Dernière mise à jour : <strong>11 novembre 2026</strong> — entrée en vigueur immédiate.<br />Version 2.1.4 : ajout de la section 4.2 « Applications installées ».</p>
 </header>
 
 <p>Cette politique explique, de manière exhaustive, quelles données l’application mobile <strong>ElyWalk</strong> collecte, pourquoi elle les collecte, avec qui elles sont partagées, combien de temps elles sont conservées et quels sont vos droits. Elle est propre à l’application ElyWalk et ne couvre aucun autre service de l’association Elysium.</p>
@@ -101,6 +101,11 @@
     <td><strong>Données techniques et appareil</strong></td>
     <td>Adresse IP publique, identifiant d’appareil (HWID), jeton de notification (Firebase Cloud Messaging), identifiant publicitaire (soumis à consentement), modèle et système d’exploitation</td>
     <td>À l’inscription, à la connexion et lors de l’activation des notifications</td>
+  </tr>
+  <tr>
+    <td><strong>Applications installées</strong><br /><span class="pill">via le SDK publicitaire</span></td>
+    <td>Liste des applications installées sur l’appareil, telle que le système Android l’expose à l’application (nom des applications, identifiant de paquet)</td>
+    <td>Uniquement lors de l’initialisation du SDK publicitaire Unity LevelPlay et de la diffusion d’annonces — voir la section 4.2</td>
   </tr>
   <tr>
     <td><strong>Relations sociales</strong></td>
@@ -141,21 +146,36 @@
   <strong>Aucune donnée d’activité physique (pas, distance, calories, position) n’est transmise à Meta Audience Network ou à une quelconque régie publicitaire.</strong> Vos données de santé ne sont jamais utilisées à des fins publicitaires.
 </div>
 
+<h3 id="applis-installees">4.1 Applications installées sur votre appareil</h3>
+<p>Pour choisir la publicité qu’elle affiche et éviter de vous montrer une annonce pour une application que vous possédez déjà, la plateforme de médiation <strong>Unity LevelPlay</strong> consulte la liste des applications installées sur votre appareil (<em>« Applis installées »</em> au sens du formulaire « Sécurité des données » de Google Play, rubrique <em>Activité dans les applis</em>).</p>
+<p>Ce traitement a lieu <strong>même si vous avez choisi des annonces non personnalisées</strong> : il conditionne la sélection et l’anti-fraude publicitaire, pas la personnalisation. Il ne dépend pas de la permission « Activité physique » ni de la localisation.</p>
+<ul>
+  <li><strong>Données concernées :</strong> nom des applications installées et identifiant de paquet, tels qu’Android les expose (depuis Android 11, la liste est filtrée par le système et ElyWalk ne demande <em>aucune</em> permission d’accès global aux applications : <code>QUERY_ALL_PACKAGES</code> n’est pas déclarée).</li>
+  <li><strong>Destinataires :</strong> Unity LevelPlay (Unity Technologies) et, lorsque Meta Audience Network remporte l’enchère, Meta Platforms Ireland Ltd.</li>
+  <li><strong>Finalité :</strong> publicité et marketing, prévention de la fraude.</li>
+  <li><strong>Caractère obligatoire :</strong> ce traitement fait partie du fonctionnement de la régie publicitaire qui finance l’application ; il ne peut pas être désactivé séparément, mais vous pouvez refuser les annonces personnalisées depuis <em>Profil → Confidentialité des annonces</em>.</li>
+  <li><strong>Chiffrement :</strong> les échanges avec les réseaux publicitaires se font exclusivement en HTTPS.</li>
+  <li><strong>Aucun accès au contenu de vos autres applications</strong> : ni leurs données, ni vos comptes, ni votre usage ne sont lus — seule la liste des applications présentes est consultable.</li>
+</ul>
+
+<h3 id="desinstallation">4.2 Publicités et applications désinstallées</h3>
+<p>Si vous désinstallez ElyWalk, le SDK publicitaire cesse immédiatement tout traitement. Les identifiants publicitaires peuvent être réinitialisés ou supprimés à tout moment depuis <em>Paramètres Android → Confidentialité → Annonces</em> : cette action s’applique à toutes les applications de votre appareil, y compris ElyWalk.</p>
+
 <h2>5. Destinataires de vos données</h2>
 <p>Vos données sont hébergées et traitées par les sous-traitants suivants, uniquement pour notre compte et sur nos instructions :</p>
 <table>
   <tr><th>Destinataire</th><th>Rôle</th><th>Données concernées</th></tr>
   <tr><td><strong>Google Firebase</strong> (Google Ireland Limited)</td><td>Hébergement, base de données, authentification, stockage, notifications push</td><td>Compte, activité physique, localisation, jetons de notification, opérations</td></tr>
-  <tr><td><strong>Unity LevelPlay</strong> (Unity Technologies) et <strong>Meta Audience Network</strong> (Meta Platforms Ireland Ltd)</td><td>Diffusion des annonces</td><td>Identifiant publicitaire, données techniques et d’interaction publicitaire — aucune donnée d’activité physique</td></tr>
+  <tr><td><strong>Unity LevelPlay</strong> (Unity Technologies) et <strong>Meta Audience Network</strong> (Meta Platforms Ireland Ltd)</td><td>Diffusion des annonces</td><td>Identifiant publicitaire, données techniques et d’interaction publicitaire, <strong>liste des applications installées</strong> (voir 4.2) — aucune donnée d’activité physique</td></tr>
   <tr><td><strong>Cloudflare, Inc.</strong></td><td>Backend de confiance (attestation d’intégrité Play Integrity, anti-fraude sur les récompenses publicitaires, envoi des notifications, file de retraits)</td><td>Identifiant de compte, jetons d’intégrité, horodatages de récompense</td></tr>
   <tr><td><strong>PayPal</strong></td><td>Exécution des retraits</td><td>Adresse PayPal, montant — uniquement si vous demandez un retrait</td></tr>
   <tr><td><strong>ipify / ipapi.co</strong></td><td>Obtention de l’adresse IP publique (anti-fraude parrainage)</td><td>Adresse IP</td></tr>
-  <tr><td><strong>OpenStreetMap</strong> (Fondation OSM, serveurs OSRM et Nominatim) et <strong>Île-de-France Mobilités</strong> (OpenTripPlanner)</td><td>Affichage de la carte, adresses réelles et calcul des itinéraires à pied, à vélo, en voiture et en transports en commun</td><td>Coordonnées du point de départ et de la destination, adresse recherchée — aucune donnée de compte</td></tr>
+  <tr><td><strong>OpenStreetMap</strong> (Fondation OSM : Nominatim ; serveur OSRM de démonstration ; service de routage Valhalla FOSSGIS) et <strong>Île-de-France Mobilités</strong> (OpenTripPlanner), <strong>Transitous</strong> (MOTIS)</td><td>Affichage de la carte, adresses réelles et calcul des itinéraires à pied, à vélo, en voiture et en transports en commun</td><td>Coordonnées du point de départ et de la destination, adresse recherchée — aucune donnée de compte</td></tr>
 </table>
 <p><strong>Aucune donnée n’est vendue, louée ou cédée à des tiers à des fins commerciales.</strong> Aucune donnée de santé n’est monétisée, y compris sous forme agrégée ou anonymisée vendue à un tiers. Vos données ne sont pas utilisées pour prendre des décisions automatisées produisant des effets juridiques vous concernant.</p>
 
 <h3>5.1 Itinéraires et cartes (OpenStreetMap / Île-de-France Mobilités)</h3>
-<p>Lorsque vous demandez un itinéraire, les <strong>coordonnées du départ et de l’arrivée</strong> (ou l’adresse que vous saisissez) sont envoyées au service de calcul d’itinéraire utilisé : OSRM et Nominatim (OpenStreetMap) pour la marche, le vélo et la voiture, OpenTripPlanner d’Île-de-France Mobilités pour les transports en commun. Ces services ne reçoivent ni votre nom, ni votre identifiant de compte, ni votre historique de sorties : uniquement les deux points du trajet, le temps de calcul.</p>
+<p>Lorsque vous demandez un itinéraire, les <strong>coordonnées du départ et de l’arrivée</strong> (ou l’adresse que vous saisissez) sont envoyées au service de calcul d’itinéraire utilisé : <strong>Valhalla</strong> (FOSSGIS, sur données OpenStreetMap) pour la marche, le vélo et la voiture — avec repli sur OSRM —, <strong>Nominatim</strong> pour retrouver l’adresse réelle d’un point, <strong>OpenTripPlanner d’Île-de-France Mobilités</strong> puis <strong>Transitous</strong> pour les transports en commun. Ces services ne reçoivent ni votre nom, ni votre identifiant de compte, ni votre historique de sorties : uniquement les deux points du trajet, le temps de calcul.</p>
 <div class="note">
   <strong>Le calcul est facultatif :</strong> si vous ne demandez pas d’itinéraire, aucune coordonnée n’est transmise à ces services. Les tuiles de la carte, elles, sont chargées depuis OpenStreetMap pour afficher le plan.
 </div>
