@@ -1,7 +1,7 @@
 {
   "name": "elywalk",
   "private": true,
-  "version": "2.1.0",
+  "version": "2.1.2",
   "description": "ElyWalk - Application de comptage de pas récompensée en ElyCoins (Elysium)",
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 3000",
@@ -14,6 +14,7 @@
     "test:rules": "firebase emulators:exec --config ../firebase.json --only firestore --project elywalk-security-tests 'vitest run --config vitest.rules.config.ts'"
   },
   "dependencies": {
+    "@capacitor-community/play-integrity": "^8.0.0",
     "@capacitor-firebase/authentication": "^8.4.0",
     "@capacitor/android": "^8.0.0",
     "@capacitor/app": "^8.0.0",
@@ -47,3 +48,4 @@
     "vitest": "^3.2.7"
   }
 }
+
