@@ -4,13 +4,13 @@ import { useAuth } from '../context/AuthContext';
 import { watchIncomingRequests } from '../lib/db';
 import { useI18n, type TranslationKey } from '../context/LocaleContext';
 
-const tabs: Array<{to:string;label:TranslationKey;testId:string;icon:()=>JSX.Element}> = [
-  { to: '/', label: 'nav.home', testId: 'tab-home', icon: HomeIcon },
-  { to: '/map', label: 'nav.map', testId: 'tab-map', icon: MapIcon },
-  { to: '/friends', label: 'nav.friends', testId: 'tab-friends', icon: FriendsIcon },
-  { to: '/leaderboard', label: 'nav.leaderboard', testId: 'tab-leaderboard', icon: TrophyIcon },
-  { to: '/wallet', label: 'nav.wallet', testId: 'tab-wallet', icon: WalletIcon },
-  { to: '/profile', label: 'nav.profile', testId: 'tab-profile', icon: ProfileIcon },
+const tabs: Array<{to:string;label:TranslationKey;short:TranslationKey;testId:string;icon:()=>JSX.Element}> = [
+  { to: '/', label: 'nav.home', short: 'nav.home.short', testId: 'tab-home', icon: HomeIcon },
+  { to: '/map', label: 'nav.map', short: 'nav.map.short', testId: 'tab-map', icon: MapIcon },
+  { to: '/friends', label: 'nav.friends', short: 'nav.friends.short', testId: 'tab-friends', icon: FriendsIcon },
+  { to: '/leaderboard', label: 'nav.leaderboard', short: 'nav.leaderboard.short', testId: 'tab-leaderboard', icon: TrophyIcon },
+  { to: '/wallet', label: 'nav.wallet', short: 'nav.wallet.short', testId: 'tab-wallet', icon: WalletIcon },
+  { to: '/profile', label: 'nav.profile', short: 'nav.profile.short', testId: 'tab-profile', icon: ProfileIcon },
 ];
 
 export default function TabBar() {
@@ -28,7 +28,9 @@ export default function TabBar() {
           aria-label={translate(t.label)}
         >
           <span className="tab-icon" aria-hidden="true"><t.icon />{t.to==='/friends'&&pending>0&&<b className="tab-badge">{pending}</b>}</span>
-          <span className="tab-label">{translate(t.label)}</span>
+          {/* Libellé court visible sur téléphone ; le libellé complet reste
+              porté par `aria-label` pour les lecteurs d'écran. */}
+          <span className="tab-label">{translate(t.short)}</span>
         </NavLink>
       ))}
     </nav>

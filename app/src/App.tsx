@@ -52,13 +52,14 @@ function Shell() {
   useEffect(() => { if (user) setupNotifications(user.uid).catch(console.warn); }, [user?.uid]);
   useEffect(() => { const open=(raw:string)=>{const url=new URL(raw);const ref=url.searchParams.get('ref')||(url.protocol==='elywalk:'?url.searchParams.get('code'):null);if(ref)setPendingReferralCode(ref.toUpperCase())}; CapApp.getLaunchUrl().then(r=>r?.url&&open(r.url));const sub=CapApp.addListener('appUrlOpen',e=>open(e.url));return()=>{sub.then(h=>h.remove())}; }, [setPendingReferralCode]);
 
-  // Initialisation du SDK Meta Audience Network dès le lancement, AVANT toute
-  // publicité. Le SDK natif n'est alimenté en annonces qu'après un choix de
-  // consentement explicite (voir components/AdConsentSheet + lib/adConsent).
+  // Initialisation du SDK Unity LevelPlay dès le lancement, AVANT toute
+  // publicité. Meta Audience Network participe aux enchères LevelPlay ; le SDK
+  // n'est alimenté en annonces qu'après un choix de consentement explicite
+  // (voir components/AdConsentSheet + lib/adConsent).
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
-    initAds().catch(console.warn);
-  }, []);
+    initAds(profile?.uid).catch(console.warn);
+  }, [profile?.uid]);
 
   // Annonce à l'ouverture + au retour sur l'application (interstitiel #2).
   // Garde-fous : exemptée tant que l'onboarding n'est pas terminé, plafonnée
@@ -68,7 +69,7 @@ function Shell() {
     if (!profile?.onboardingDone) return;
     let firstLoad = true;
     (async () => {
-      await initAds();
+      await initAds(profile?.uid);
       await loadAppOpenAd();
       // Affiche l'annonce d'ouverture peu après le lancement.
       setTimeout(() => {

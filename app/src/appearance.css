@@ -1,0 +1,67 @@
+/* ============================================================================
+   ElyWalk — Apparence (choix Système / Sombre / Contraste renforcé)
+   Chargé en dernier : ces règles surchargent la charte sans la remplacer.
+   Le thème effectif est publié par src/lib/appearance.ts sur <html data-theme>.
+   ========================================================================== */
+
+/* ---- Thème clair (choix « Système » sur un téléphone en mode clair) ------
+   L'identité reste noir/or : l'or est assombri pour rester lisible sur fond
+   clair, et le noir devient un ivoire chaud. */
+:root[data-theme='light'] {
+  --black: #f6f2e6;
+  --black-2: #ece6d6;
+  --surface: #fffdf6;
+  --surface-2: #f1ecdd;
+  --white: #1a1915;
+  --muted: #5b5647;
+  --gold: #7c6a1e;
+  --gold-dim: rgba(124, 106, 30, 0.13);
+  --gold-border: rgba(124, 106, 30, 0.32);
+  --danger: #a83a2e;
+  --success: #2c6f36;
+}
+
+[data-theme='light'] .tabbar {
+  background: rgba(255, 253, 246, 0.98);
+  box-shadow: 0 -8px 24px rgba(52, 44, 18, 0.14);
+}
+[data-theme='light'] .btn-gold { color: #fffdf6; }
+[data-theme='light'] .btn-ghost { background: var(--surface-2); color: var(--white); }
+[data-theme='light'] .gold-hero .stat { background: rgba(255, 255, 255, 0.66); }
+[data-theme='light'] .gold-hero { background: radial-gradient(ellipse 100% 70% at 50% -10%, rgba(124, 106, 30, 0.12), transparent), var(--surface); }
+[data-theme='light'] .sheet-overlay { background: rgba(30, 26, 14, 0.45); }
+[data-theme='light'] .map-empty,
+[data-theme='light'] .nearby-list { background: rgba(255, 253, 246, 0.96); color: var(--white); }
+[data-theme='light'] .skeleton-row > span,
+[data-theme='light'] .skeleton-row b,
+[data-theme='light'] .skeleton-row small { background: linear-gradient(90deg, var(--surface-2), #ded7c4, var(--surface-2)); background-size: 200% 100%; }
+[data-theme='light'] .offline-banner,
+[data-theme='light'] .verification-banner { color: #fff; }
+[data-theme='light'] .map-container .leaflet-tile-pane { filter: saturate(0.85) brightness(1.02); }
+[data-theme='light'] .leaflet-container { background: #e9e4d5; }
+
+/* ---- Contraste renforcé -------------------------------------------------
+   Même charte sombre, mais textes discrets éclaircis, bordures franches et
+   états désactivés qui restent identifiables autrement que par l'opacité. */
+:root[data-theme='contrast'] {
+  --muted: #d9d4c5;
+  --gold-dim: rgba(216, 202, 130, 0.24);
+  --gold-border: rgba(216, 202, 130, 0.55);
+}
+
+[data-theme='contrast'] .btn:disabled {
+  opacity: 1;
+  color: var(--muted);
+  background: #26262c;
+  border: 1px dashed var(--gold-border);
+}
+[data-theme='contrast'] .text-button:disabled { opacity: 1; color: var(--muted); text-decoration: line-through; }
+[data-theme='contrast'] :where(button, a, input, textarea, select, [tabindex]):focus-visible { outline-width: 4px; outline-color: #ffe9a8; }
+[data-theme='contrast'] .card,
+[data-theme='contrast'] .input,
+[data-theme='contrast'] .chip { border-width: 2px; }
+[data-theme='contrast'] .chart-column div { outline: 1px solid rgba(255, 255, 255, 0.35); }
+[data-theme='contrast'] .badge { border-width: 2px; }
+[data-theme='contrast'] .stat-label,
+[data-theme='contrast'] .chart-column span,
+[data-theme='contrast'] .chart-column small { color: var(--muted); }

@@ -10,8 +10,9 @@ L'`applicationId` / `appId` est désormais **`com.elysium.elywalk`** (fini
    empreinte SHA-1 (le keystore n'a pas changé), puis **retélécharger
    `google-services.json`** et remplacer `app/google-services.json` **et**
    `app/android/app/google-services.json`.
-2. **Meta Audience Network** : dans Monetization Manager, ajouter l'application
-   Android `com.elysium.elywalk` (voir § « Meta Audience Network » plus bas).
+2. **Unity LevelPlay** : ajouter l'application Android `com.elysium.elywalk`
+   (app key `29767936d`), créer les ad units et brancher Meta Audience Network
+   en bidding (voir § « Unity LevelPlay » plus bas).
 3. **Play Console** : créer la fiche de l'app avec `com.elysium.elywalk`.
 
 Les réglages suivants ont déjà été propagés dans le code :
@@ -202,7 +203,11 @@ npx cap sync android
 npx cap open android
 ```
 
-La version Android est `190 / 1.9.0`.
+La version Android n'est plus écrite en dur : `android/app/build.gradle` lit
+`app/package.json` (une seule source) et en déduit `versionName` **et**
+`versionCode` (`2.1.0` → `20100`). Il suffit donc d'incrémenter la version dans
+`app/package.json` avant `npm run build && npx cap sync android` — Play Console
+refuse un APK/AAB dont le `versionCode` n'a pas augmenté.
 
 ## Consentement publicitaire RGPD (F03)
 
@@ -214,48 +219,80 @@ recueilli **dans l'application** (`src/lib/adConsent.ts` + `components/AdConsent
 - Tant qu'aucun choix n'est exprimé (`unknown`), **aucune annonce n'est
   demandée** : ni bannière, ni interstitiel, ni vidéo récompensée.
 - Le choix est persisté (`Preferences`, clé `ads.consent.v1`), transmis au SDK
-  natif via `MetaAds.setConsent({ personalized })` puis révocable à tout moment
-  depuis Profil → *Confidentialité des annonces*.
+  natif **avant l'initialisation** via `LevelPlayAds.initialize({ personalized })`
+  → `LevelPlayPrivacySettings.setGDPRConsent(boolean)`, puis modifiable à chaud
+  (`LevelPlayAds.setConsent`) depuis Profil → *Confidentialité des annonces*.
+- LevelPlay relaie ce consentement à chaque réseau médié : Meta Audience Network
+  applique son mode *Limited Data Use* en cas de refus.
 
 > ⚠️ **EEE / Royaume-Uni** : ce garde-fou applicatif ne remplace pas une CMP
 > enregistrée IAB TCF v2. Pour une mise en production conforme, brancher une CMP
-> (Didomi, Axeptio, Google UMP + adaptateur, ou le consentement natif Meta) qui
-> écrit la chaîne `IABTCF_*` lue par le SDK Audience Network, et vérifier dans
-> Monetization Manager → *Data processing options* que le mode `LDU` est bien
-> appliqué en cas de refus.
+> (Didomi, Axeptio, Google UMP + adaptateur) qui écrit la chaîne `IABTCF_*` lue
+> par LevelPlay, et vérifier dans le tableau de bord LevelPlay que la
+> réglementation GDPR est activée pour l'app.
 
-## Meta Audience Network (régie publicitaire depuis 1.9.0)
+## Unity LevelPlay (médiation publicitaire depuis 2.1.0)
+
+Depuis la 2.1.0, l'application passe par **Unity LevelPlay** comme plateforme de
+médiation. **Meta Audience Network** y est branché en *in-app bidding* : le SDK
+Meta n'est plus appelé directement par l'application, c'est LevelPlay qui
+arbitre les enchères et sert l'annonce gagnante.
 
 ### Identifiants
 
-| Rôle | Constante (`app/src/lib/constants.ts`) | Placement |
+| Rôle | Constante (`app/src/lib/constants.ts`) | Ad unit LevelPlay |
 | --- | --- | --- |
-| Bannière 320×50 (toutes les pages) | `META_PLACEMENT_BANNER` | `1712220190424595_1712220347091246` |
-| Interstitiel (ouverture, validation des pas, fin de sortie) | `META_PLACEMENT_INTERSTITIAL` | `1712220190424595_1712220353757912` |
-| Medium rectangle 300×250 (retrait) | `META_PLACEMENT_MEDIUM_RECTANGLE` | `1712220190424595_1712220350424579` |
-| Natif (carte de fin de sortie) | `META_PLACEMENT_NATIVE` | `1712220190424595_1712220357091245` |
-| Native banner (bandeau des listes) | `META_PLACEMENT_NATIVE_BANNER` | `1712220190424595_1712220360424578` |
-| Interstitiel récompensé (vidéo → ElyCoins) | `META_PLACEMENT_REWARDED_INTERSTITIAL` | `1712220190424595_1712220367091244` |
+| App key | `LEVELPLAY_APP_KEY` | `29767936d` |
+| Bannière 320×50 (toutes les pages) | `LEVELPLAY_AD_UNIT_BANNER` | `g1zzk5uxi41cpcc2` |
+| Interstitiel (ouverture, validation des pas, fin de sortie) | `LEVELPLAY_AD_UNIT_INTERSTITIAL` | `s73ihk59x7y52d6v` |
+| Natif (bandeau des listes + carte de fin de sortie) | `LEVELPLAY_AD_UNIT_NATIVE` | `kz81dz4wdl6v0kue` |
+| Vidéo récompensée (vidéo → ElyCoins) | `LEVELPLAY_AD_UNIT_REWARDED` | `l9z2u3fws3nm1cfc` |
+| Medium rectangle 300×250 (retrait) | `LEVELPLAY_AD_UNIT_MEDIUM_RECTANGLE` | réutilise l'ad unit bannière (taille `MEDIUM_RECTANGLE`) |
 
-App ID : `1712220190424595`.
+**Récompense** — ad unit récompensée configurée avec *Reward item name*
+`ElyCoin` et *Reward amount* `1`. Côté application, 1 unité LevelPlay = **0,1
+ElyCoin** (`AD_REWARD_COINS`) : la conversion est faite par
+`rewardCoinsFrom()` dans `src/lib/ads.ts`, et la récompense est ignorée si le
+nom ou le montant annoncés par le réseau ne correspondent pas. Le montant
+crédité reste borné à 0,1 EC par heure par la règle Firestore `validAdCredit`.
+
+### Côté tableau de bord LevelPlay
+
+1. **Ad units** : les quatre ad units ci-dessus existent (bannière,
+   interstitiel, natif, récompensée).
+2. **Meta Audience Network en bidding** : *Mediation management* → ajouter Meta
+   Audience Network, saisir l'**App ID** Meta (`1712220190424595`), l'*access
+   token* et les placements Meta, puis activer le bidding sur chaque groupe de
+   médiation. Formats biddables chez Meta : bannière, interstitiel, medium
+   rectangle, vidéo récompensée — **pas le natif** (le natif reste servi en
+   médiation classique ; sans *fill*, l'app retombe automatiquement sur la
+   bannière 320×50).
+3. **app-ads.txt** : copier la ligne `ironsrc.com, <PUBLISHER_ID>, DIRECT`
+   affichée dans *LevelPlay → Compte → app-ads.txt* et la décommenter dans
+   `app/public/app-ads.txt`.
+4. **Test suite** : `LevelPlay.setMetaData("is_test_suite", "enable")` avant
+   l'init, puis `LevelPlay.launchTestSuite(context)` (à retirer en production).
 
 ### `app-ads.txt` (obligatoire)
 
 Le fichier `app/public/app-ads.txt` est copié à la racine de `dist/` par
-`npm run build`, donc servi par Firebase Hosting :
+`npm run build`, donc servi par Firebase Hosting. Il contient la ligne Meta
+(réseau en bidding) et un emplacement pour la ligne de l'éditeur LevelPlay :
 
 ```
 facebook.com, 1598870752271390, DIRECT, c3e20eee3f780d68
+# ironsrc.com, <PUBLISHER_ID>, DIRECT      ← à décommenter avec votre Publisher ID
+# unity.com, <PUBLISHER_ID>, DIRECT        ← si LevelPlay affiche aussi cette ligne
 ```
 
 - URL à déclarer dans Play Console (champ *Site web* de la fiche) :
   `https://elywalk-2f7ba.web.app` — c'est ce domaine qui est exploré pour
   trouver `app-ads.txt`.
 - Vérification : `curl https://elywalk-2f7ba.web.app/app-ads.txt` doit renvoyer
-  la ligne ci-dessus en `text/plain` (les rewrites SPA ne s'appliquent pas aux
-  fichiers existants).
-- Après modification, forcer la relecture dans Monetization Manager →
-  *app-ads.txt* (le crawl Meta peut prendre 24 à 48 h).
+  les lignes en `text/plain` (les rewrites SPA ne s'appliquent pas aux fichiers
+  existants).
+- Après modification, forcer la relecture dans le tableau de bord LevelPlay et
+  dans Monetization Manager (le crawl peut prendre 24 à 48 h).
 
 ### Formats et emplacements
 
@@ -263,15 +300,17 @@ facebook.com, 1598870752271390, DIRECT, c3e20eee3f780d68
 | --- | --- | --- |
 | Ouverture / retour dans l'app | Interstitiel, plafonné à 2/jour et espacé de 10 min | `src/App.tsx` + `lib/ads.ts` |
 | Validation des pas | Interstitiel | `src/pages/HomePage.tsx` |
-| Vidéo récompensée (ElyCoins) | Interstitiel récompensé | `src/pages/HomePage.tsx` |
+| Vidéo récompensée (ElyCoins) | Vidéo récompensée | `src/pages/HomePage.tsx` |
 | Retrait ElyCoins | Medium rectangle 300×250 | `src/pages/WalletPage.tsx` |
-| Toutes les pages | Bannière 320×50 (+ native banner sur `/history`) | `src/components/AdBanner.tsx` |
+| Toutes les pages | Bannière 320×50 (+ natif compact sur `/history`) | `src/components/AdBanner.tsx` |
 | Fin de sortie GPS | Carte native | `src/pages/ActivityPage.tsx` |
 
 Le rendu natif est assuré par un **plugin Capacitor maison** :
-`android/app/src/main/java/com/elysium/elywalk/MetaAdsPlugin.java`
-(layouts `res/layout/meta_ad_*.xml`). Il n'existe pas de plugin Capacitor officiel
-pour Meta Audience Network, d'où cette implémentation directe du SDK.
+`android/app/src/main/java/com/elysium/elywalk/LevelPlayAdsPlugin.java`. Il
+n'existe pas de plugin Capacitor officiel pour LevelPlay, d'où cette
+implémentation directe du SDK ; les vues natives (bandeau, carte) sont
+construites par programme aux couleurs d'ElyWalk, avec le badge « Publicité »
+exigé par les règles Play.
 
 ### Build Android
 
@@ -283,23 +322,30 @@ npm run build && npx cap sync android
 Le SDK est déclaré dans `android/app/build.gradle` :
 
 ```gradle
-implementation 'com.facebook.android:audience-network-sdk:6.21.0'
+implementation 'com.unity3d.ads-mediation:mediation-sdk:9.5.0'
+implementation 'com.unity3d.ads-mediation:facebook-adapter:5.7.0' // embarque le SDK Meta
+implementation 'com.google.android.gms:play-services-appset:16.0.0'
 implementation 'com.google.android.gms:play-services-ads-identifier:18.2.0'
 ```
 
-Vérifier la dernière version publiée :
-<https://central.sonatype.com/artifact/com.facebook.android/audience-network-sdk>.
+Vérifier les versions recommandées :
+<https://docs.unity.com/en-us/grow/levelplay/sdk/android/mediation-networks>
+(la version de l'adaptateur Meta fixe la version du SDK Audience Network
+embarquée — l'adaptateur 5.7.0 s'appuie sur le SDK Meta 6.22.0).
 
-`minSdkVersion` doit rester ≥ 21 (ElyWalk est à 24) et
+`minSdkVersion` doit rester ≥ 21 (ElyWalk est à 24), le SDK LevelPlay exige
+Kotlin ≥ 1.7 (fourni par Gradle/Maven Central) et
 `android:hardwareAccelerated="true"` est activé dans le manifeste (vidéos).
+L'activité et le provider du SDK (`ControllerActivity`, `IronsourceLifecycleProvider`)
+sont fusionnés depuis l'AAR : rien à déclarer à la main.
 
 ### Test des annonces
 
-- Meta Audience Network fonctionne en **bidding uniquement** : sans campagne
-  active, `onError` renvoie un *no fill* — c'est normal, l'application continue
-  de fonctionner (toutes les fonctions publicitaires résolvent sans bloquer).
-- Pour tester un remplissage, créer un placement de test dans Monetization
-  Manager ou ajouter l'appareil de test via `AdSettings.addTestDevice(...)`.
+- Sans réseau configuré ou sans campagne active, LevelPlay renvoie un *no fill*
+  (`onAdLoadFailed`) — c'est normal, l'application continue de fonctionner
+  (toutes les fonctions publicitaires résolvent sans bloquer).
+- Pour tester un remplissage : activer les *test mode* des ad units dans le
+  tableau de bord LevelPlay, ou passer par l'Integration Test Suite.
 - Sur la version web (`npm run dev`), les publicités sont **inertes** : les
   fonctions de `lib/ads.ts` résolvent immédiatement.
 
@@ -313,7 +359,8 @@ Aucune permission n'est demandée de façon inconditionnelle.
 
 - Les mentions légales (`LegalPage.tsx`) sont complètes (CGU, confidentialité,
   mentions légales). Mettre à jour la **fiche Play « Sécurité des données »** en
-  cohérence : publicité (AdMob), géolocalisation, activité physique/santé, âge
+  cohérence : publicité (Unity LevelPlay + Meta Audience Network),
+  géolocalisation, activité physique/santé, âge
   minimum 15 ans.
 - Configurer `contact@elysium-esport.fr` comme adresse d'assistance Play Store.
 - Vérifier les modèles d'e-mails Firebase Authentication (vérification,
@@ -324,7 +371,12 @@ Aucune permission n'est demandée de façon inconditionnelle.
 ## Limite de sécurité résiduelle
 
 Firestore borne toujours les montants (validation quotidienne ≤ 60 000 pas,
-récompense publicitaire ≤ 1/h, débits atomiques). Le Worker apporte l'attestation
-forte manquante (Play Integrity + AdMob SSV) : sans jeton vérifié côté serveur,
-le client ne peut pas créditer son solde sur une preuve externe. Reste à brancher
-un prestataire de paiement réel (PayPal Payouts) pour l'exécution des retraits.
+récompense publicitaire ≤ 1/h et 0,1 EC, débits atomiques). Le Worker apporte
+l'attestation forte manquante (Play Integrity). En revanche, ni Meta Audience
+Network ni LevelPlay ne fournissent de vérification serveur signée pour les
+récompenses (pas d'équivalent AdMob SSV) : la récompense vidéo reste donc
+créditée côté client, bornée par le slot `adClaims` (1 par heure et par compte). Pour une
+preuve externe, brancher les *server-to-server callbacks* LevelPlay (ad unit
+récompensée) vers un endpoint du Worker, en transmettant l'UID via
+`setDynamicUserId`. Reste à brancher un prestataire de paiement réel (PayPal
+Payouts) pour l'exécution des retraits.

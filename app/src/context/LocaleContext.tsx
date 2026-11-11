@@ -5,6 +5,9 @@ export type Locale = 'fr' | 'en';
 const dictionaries = {
   fr: {
     'nav.home': 'Accueil', 'nav.map': 'Carte', 'nav.friends': 'Amis', 'nav.leaderboard': 'Classement', 'nav.wallet': 'Coffre', 'nav.profile': 'Profil',
+    // Libellés courts affichés sous les icônes de la barre d'onglets (mobile) :
+    // les six destinations restent lisibles sans masquer le texte (audit § 2.1).
+    'nav.home.short': 'Accueil', 'nav.map.short': 'Carte', 'nav.friends.short': 'Amis', 'nav.leaderboard.short': 'Rangs', 'nav.wallet.short': 'Coffre', 'nav.profile.short': 'Profil',
     'common.back': 'Retour', 'common.cancel': 'Annuler', 'common.save': 'Enregistrer', 'common.loading': 'Chargement…',
     'settings.language': 'Langue / Language', 'settings.french': 'Français', 'settings.english': 'English',
     'routes.title': 'Parcours', 'routes.subtitle': 'Préparez, retrouvez et suivez vos traces', 'routes.import': 'Importer un fichier GPX', 'routes.search': 'Rechercher un parcours ou un créateur…', 'routes.follow': 'Suivre ce parcours', 'routes.none': 'Aucun parcours', 'routes.private': 'Privé', 'routes.public': 'Public',
@@ -13,6 +16,7 @@ const dictionaries = {
   },
   en: {
     'nav.home': 'Home', 'nav.map': 'Map', 'nav.friends': 'Friends', 'nav.leaderboard': 'Leaderboard', 'nav.wallet': 'Wallet', 'nav.profile': 'Profile',
+    'nav.home.short': 'Home', 'nav.map.short': 'Map', 'nav.friends.short': 'Friends', 'nav.leaderboard.short': 'Ranks', 'nav.wallet.short': 'Wallet', 'nav.profile.short': 'Profile',
     'common.back': 'Back', 'common.cancel': 'Cancel', 'common.save': 'Save', 'common.loading': 'Loading…',
     'settings.language': 'Language / Langue', 'settings.french': 'Français', 'settings.english': 'English',
     'routes.title': 'Routes', 'routes.subtitle': 'Plan, find and follow your tracks', 'routes.import': 'Import a GPX file', 'routes.search': 'Search for a route or creator…', 'routes.follow': 'Follow this route', 'routes.none': 'No routes', 'routes.private': 'Private', 'routes.public': 'Public',
