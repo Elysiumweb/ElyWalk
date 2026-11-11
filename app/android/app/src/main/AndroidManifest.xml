@@ -1,6 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!--
+        Sécurité des données : « Applis installées » (refus Play du build 20103).
+        Cette application ne déclare AUCUNE permission d'accès global aux
+        applications installées (ni 'QUERY_ALL_PACKAGES', ni bloc '<queries>') :
+        la liste est fournie par le SDK publicitaire fusionné depuis l'AAR
+        'com.unity3d.ads-mediation:mediation-sdk' (LevelPlay / ironSource), qui
+        appelle 'PackageManager.getInstalledApplications'. Ce comportement est
+        déclaré dans Play Console (« Activité dans les applis → Applis
+        installées ») et décrit au § 4.1 de 'public/privacy.html', affiché dans
+        l'écran de consentement publicitaire. Toute réintroduction d'une
+        permission de visibilité des paquets doit être justifiée ici.
+    -->
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -13,7 +26,7 @@
         <!-- Rendu matériel (vidéos) requis par les SDK publicitaires servis par
              LevelPlay (dont Meta Audience Network) : activé sur l'application
              entière, pas seulement sur l'activité. Les activités et le provider
-             du SDK LevelPlay sont fusionnés depuis l'AAR `mediation-sdk`. -->
+             du SDK LevelPlay sont fusionnés depuis l'AAR 'mediation-sdk'. -->
 
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"

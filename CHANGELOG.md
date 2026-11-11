@@ -1,5 +1,45 @@
 # Changelog
 
+## 2.1.4 — 2026-11-11
+
+### Conformité « Sécurité des données » (refus Play du build 20103)
+
+- **D01 — Cause du refus identifiée.** Google Play a refusé la version 20103 :
+  « Sécurité des données (Applis installées : non déclaré) ». Le code de
+  l'application ne contient **aucun** appel d'énumération de paquets —
+  vérification sur `app/android` (Java + manifeste) **et** sur les manifestes de
+  tous les plugins Capacitor : zéro occurrence de `QUERY_ALL_PACKAGES`,
+  `<queries>`, `getInstalledPackages`, `queryIntentActivities`. La source est le
+  SDK de médiation : Unity documente que LevelPlay appelait
+  `PackageManager.getInstalledApplications(0)` (correctif 9.4.3) et
+  `getPackagesForUid`, et le SDK 9.7.0 embarqué en conserve des usages. La
+  déclaration doit donc couvrir le SDK tiers, pas seulement notre code.
+- **D02 — Réponse à Play : conserver la fonctionnalité et déclarer.** Option 1
+  retenue : « Activité dans les applis → Applis installées » = collecté **et**
+  partagé, finalité *Publicité ou marketing*, obligatoire, chiffré en transit,
+  sans suppression à la demande, non éphémère. Le formulaire décrit le
+  comportement réel du SDK : le retirer de nos sources n'empêcherait pas l'appel.
+- **D03 — Divulgation renforcée dans l'application.** L'écran de consentement
+  publicitaire mentionne explicitement la consultation de la liste des
+  applications installées, y compris en annonces non personnalisées
+  (`AdConsentSheet`, `data-testid="ad-consent-installed-apps"`).
+- **D04 — Politique de confidentialité.** Nouvelles sections **4.1** (« Applications
+  installées » : données, destinataires, finalité, caractère obligatoire,
+  chiffrement, absence de `QUERY_ALL_PACKAGES`) et **4.2** (désinstallation,
+  réinitialisation de l'identifiant publicitaire), ligne dédiée au tableau des
+  données et mise à jour de la liste des destinataires.
+- **D05 — Confidentialité LevelPlay complétée.** En plus de
+  `setGDPRConsent`, le pont natif applique `setCCPA(!personalized)` et
+  `setCOPPA(false)` avant toute initialisation (`LevelPlayAdsPlugin`).
+- **D06 — Itinéraires marche / vélo / voiture corrigés.** Le serveur OSRM de
+  démonstration ignore le profil demandé (`/foot` et `/bike` renvoient le même
+  trajet voiture) : le calcul passe désormais par **Valhalla** (FOSSGIS, données
+  OpenStreetMap), qui applique réellement le coût `pedestrian` / `bicycle` /
+  `auto` et renvoie des consignes en français. OSRM reste en secours, avec durée
+  recalculée (4,8 km/h à pied, 15 km/h à vélo). Trois tests ajoutés.
+- **D07 — Version 2.1.4 (versionCode 20104)** : le build 20103 refusé ne peut
+  pas être réutilisé.
+
 ## 2.1.3 — 2026-11-11
 
 ### Correctifs de saisie, de photo de profil et de sorties

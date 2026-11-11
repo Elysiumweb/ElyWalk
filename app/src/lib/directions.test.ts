@@ -5,6 +5,7 @@ import {
   externalMapsUrl,
   pointLabel,
   tidyAddress,
+  routeOnFootBikeOrCar,
   type TravelMode,
 } from './directions';
 import { haversineM } from './geo';
@@ -205,5 +206,103 @@ describe('inIleDeFrance', () => {
 
   it('rejette un trajet hors région', () => {
     expect(inIleDeFrance({ lat: 48.8566, lng: 2.3522 }, { lat: 45.764, lng: 4.8357 })).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Modes marche / vélo / voiture — Valhalla d'abord, OSRM en secours
+// ---------------------------------------------------------------------------
+
+describe('routeOnFootBikeOrCar', () => {
+  const from = { lat: 48.85, lng: 2.35 };
+  const to = { lat: 48.87, lng: 2.29 };
+
+  it('interroge Valhalla avec le coût correspondant au mode', async () => {
+    const calls: string[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (input: any) => {
+      calls.push(String(input));
+      return {
+        ok: true,
+        json: async () => ({
+          routes: [
+            {
+              distance: 6100,
+              duration: 1200,
+              geometry: '_p~iF~ps|U_ulLnnqC_mqNvxq`@',
+              legs: [
+                {
+                  steps: [
+                    {
+                      distance: 300,
+                      duration: 200,
+                      name: 'Rue de Rivoli',
+                      maneuver: { type: 'turn', modifier: 'left', instruction: 'Tournez à gauche dans Rue de Rivoli.' },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        }),
+      } as any;
+    }) as any;
+    try {
+      const plan = await routeOnFootBikeOrCar(from, to, 'bike');
+      expect(calls[0]).toContain('valhalla');
+      expect(decodeURIComponent(calls[0])).toContain('"costing":"bicycle"');
+      expect(plan.mode).toBe('bike');
+      expect(plan.provider).toContain('Valhalla');
+      // Valhalla fournit la phrase française : elle est reprise telle quelle.
+      expect(plan.steps[0].instruction).toBe('Tournez à gauche dans Rue de Rivoli.');
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('retombe sur OSRM et recalcule la durée à pied si Valhalla échoue', async () => {
+    const calls: string[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (input: any) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.includes('valhalla')) throw new Error('502');
+      return {
+        ok: true,
+        json: async () => ({
+          routes: [
+            {
+              distance: 4800,
+              duration: 360, // durée voiture, ignorée pour la marche
+              geometry: '_p~iF~ps|U_ulLnnqC_mqNvxq`@',
+              legs: [{ steps: [] }],
+            },
+          ],
+        }),
+      } as any;
+    }) as any;
+    try {
+      const plan = await routeOnFootBikeOrCar(from, to, 'walk');
+      expect(calls).toHaveLength(2);
+      expect(calls[1]).toContain('project-osrm');
+      expect(plan.mode).toBe('walk');
+      // 4,8 km à 4,8 km/h = 1 h = 3600 s.
+      expect(plan.durationS).toBe(3600);
+      expect(plan.provider).toContain('OSRM');
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('signale l’indisponibilité quand les deux moteurs échouent', async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      throw new Error('offline');
+    }) as any;
+    try {
+      await expect(routeOnFootBikeOrCar(from, to, 'car')).rejects.toThrow(/indisponible/i);
+    } finally {
+      globalThis.fetch = original;
+    }
   });
 });

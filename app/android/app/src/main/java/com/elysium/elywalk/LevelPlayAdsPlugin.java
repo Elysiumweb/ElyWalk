@@ -450,6 +450,20 @@ public class LevelPlayAdsPlugin extends Plugin {
         } catch (Throwable t) {
             Log.w(TAG, "setGDPRConsent: " + t.getMessage());
         }
+        try {
+            // Refus de la vente / du partage des données personnelles quand
+            // l'utilisateur a choisi des annonces non personnalisées (CCPA et
+            // lois équivalentes). API dédiée depuis le SDK 9.4.0.
+            LevelPlayPrivacySettings.setCCPA(!wantsPersonalized);
+        } catch (Throwable t) {
+            Log.w(TAG, "setCCPA: " + t.getMessage());
+        }
+        try {
+            // ElyWalk n'est pas destinée aux enfants.
+            LevelPlayPrivacySettings.setCOPPA(false);
+        } catch (Throwable t) {
+            Log.w(TAG, "setCOPPA: " + t.getMessage());
+        }
     }
 
     // ------------------------------------------------------------------------

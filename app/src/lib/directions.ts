@@ -73,6 +73,16 @@ export const TRAVEL_MODES: Array<{ id: TravelMode; label: string; short: string;
 ];
 
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org';
+/**
+ * Serveur de routage **Valhalla** de la communauté FOSSGIS (données
+ * OpenStreetMap). Contrairement au serveur OSRM de démonstration — qui répond
+ * en voiture quel que soit le profil demandé (`/foot`, `/bike`, `/driving`) et
+ * renvoyait donc des itinéraires vélo par les quais ou des trajets à pied sur
+ * le périphérique — Valhalla applique réellement le coût du mode choisi :
+ * `pedestrian`, `bicycle`, `auto`. Gratuit, sans clé d’API, CORS ouvert.
+ */
+const VALHALLA_URL = 'https://valhalla1.openstreetmap.de';
+/** Repli : OSRM de démonstration (tracé voiture, durée recalculée à pied). */
 const OSRM_URL = 'https://router.project-osrm.org';
 
 async function fetchJson(url: string, timeoutMs = 12_000): Promise<any> {
@@ -84,7 +94,7 @@ async function fetchJson(url: string, timeoutMs = 12_000): Promise<any> {
     // sur les services publics, et par l'origine HTTPS du site.
     const res = await fetch(url, {
       signal: controller.signal,
-      headers: { Accept: 'application/json', 'X-Client': 'ElyWalk/2.1.3' },
+      headers: { Accept: 'application/json', 'X-Client': 'ElyWalk/2.1.4' },
     });
     if (!res.ok) throw new Error(`Service indisponible (${res.status}).`);
     return await res.json();
@@ -146,6 +156,12 @@ export function pointLabel(point: LatLng | null, address?: string | null): strin
 // OSRM — marche, vélo, voiture
 // ---------------------------------------------------------------------------
 
+const VALHALLA_COSTING: Record<'walk' | 'bike' | 'car', string> = {
+  walk: 'pedestrian',
+  bike: 'bicycle',
+  car: 'auto',
+};
+
 const OSRM_PROFILES: Record<'walk' | 'bike' | 'car', string> = {
   walk: 'foot',
   bike: 'bike',
@@ -153,7 +169,14 @@ const OSRM_PROFILES: Record<'walk' | 'bike' | 'car', string> = {
 };
 
 interface OsrmStep {
-  maneuver: { type: string; modifier?: string; location: [number, number] };
+  maneuver: {
+    type: string;
+    modifier?: string;
+    location: [number, number];
+    /** Renseigné par Valhalla (`directions_options.language = fr-FR`). */
+    instruction?: string;
+    exit?: number;
+  };
   name?: string;
   distance: number;
   duration: number;
@@ -196,7 +219,7 @@ function formatStep(step: OsrmStep): string {
   if (type === 'depart') return step.name ? `Partez sur ${step.name}` : 'Partez tout droit';
   if (type === 'arrive') return 'Vous êtes arrivé à destination';
   if (type === 'roundabout' || type === 'rotary') {
-    const exit = (step.maneuver as unknown as { exit?: number }).exit;
+    const exit = step.maneuver.exit;
     return `Au rond-point${exit ? `, prenez la sortie ${exit}` : ''}${road}`;
   }
   const base = MANEUVER_FR[type] || 'Continuez';
@@ -239,21 +262,63 @@ function decodePolyline(str: string, factor = 1e5): LatLng[] {
   return out;
 }
 
-/** Itinéraire via OSRM, avec consignes étape par étape. */
-export async function routeWithOsrm(from: LatLng, to: LatLng, mode: 'walk' | 'bike' | 'car'): Promise<RoutePlan> {
+/**
+ * Itinéraire marche / vélo / voiture via Valhalla, avec consignes en français
+ * fournies par le moteur (elles tiennent compte du mode : passages piétons,
+ * pistes cyclables, sens uniques).
+ */
+export async function routeWithValhalla(
+  from: LatLng,
+  to: LatLng,
+  mode: 'walk' | 'bike' | 'car'
+): Promise<RoutePlan> {
+  const body = {
+    locations: [
+      { lat: from.lat, lon: from.lng },
+      { lat: to.lat, lon: to.lng },
+    ],
+    costing: VALHALLA_COSTING[mode],
+    // Instructions localisées en français et distances en km.
+    directions_options: { language: 'fr-FR', units: 'kilometers' },
+  };
+  // `format=osrm` renvoie une géométrie polyline précision 1e5 : même décodeur
+  // que le repli, et un seul format à maintenir.
+  const data = await fetchJson(`${VALHALLA_URL}/route?json=${encodeURIComponent(JSON.stringify(body))}&format=osrm`);
+  const route = data?.routes?.[0];
+  if (!route) throw new Error('Aucun itinéraire trouvé entre ces deux points.');
+
+  const geometry: LatLng[] = route.geometry ? decodePolyline(route.geometry) : [];
+  const steps: RouteStep[] = [];
+  for (const leg of route.legs || []) {
+    for (const raw of (leg.steps as OsrmStep[]) || []) {
+      if (!raw.distance && raw.maneuver?.type !== 'arrive') continue;
+      steps.push({
+        // Valhalla fournit déjà la phrase française (« Tournez à gauche… »).
+        instruction: raw.maneuver?.instruction || formatStep(raw),
+        distanceM: Math.round(raw.distance || 0),
+        durationS: Math.round(raw.duration || 0),
+        mode,
+      });
+    }
+  }
+
+  return {
+    mode,
+    distanceM: Math.round(route.distance || 0),
+    durationS: Math.round(route.duration || 0),
+    geometry,
+    steps,
+    provider: 'OpenStreetMap · Valhalla (FOSSGIS)',
+  };
+}
+
+/** Repli OSRM (moteur de démonstration, tracé automobile), durée corrigée. */
+async function routeWithOsrm(from: LatLng, to: LatLng, mode: 'walk' | 'bike' | 'car'): Promise<RoutePlan> {
   const profile = OSRM_PROFILES[mode];
   const url =
     `${OSRM_URL}/route/v1/${profile}/${from.lng},${from.lat};${to.lng},${to.lat}` +
     '?overview=full&geometries=polyline&steps=true&annotations=false';
-  let data: any;
-  try {
-    data = await fetchJson(url);
-  } catch {
-    // Le serveur de démo refuse parfois le profil « foot » : repli sur le
-    // moteur voiture pour au moins afficher un tracé, avec une vitesse de marche.
-    if (mode !== 'walk') throw new Error('Itinéraire indisponible pour ce mode.');
-    return routeWithCarFallbackWalking(from, to);
-  }
+  const data = await fetchJson(url);
   const route = data?.routes?.[0];
   if (!route) throw new Error('Aucun itinéraire trouvé entre ces deux points.');
 
@@ -271,27 +336,38 @@ export async function routeWithOsrm(from: LatLng, to: LatLng, mode: 'walk' | 'bi
     }
   }
 
+  // Le serveur de démonstration ignore le profil demandé : la durée annoncée
+  // est recalculée pour la marche (4,8 km/h) et le vélo (15 km/h).
+  const speedKmh = mode === 'walk' ? 4.8 : mode === 'bike' ? 15 : 0;
+  const durationS = speedKmh
+    ? Math.round(((route.distance || 0) / 1000 / speedKmh) * 3600)
+    : Math.round(route.duration || 0);
+
   return {
     mode,
     distanceM: Math.round(route.distance || 0),
-    durationS: Math.round(route.duration || 0),
+    durationS,
     geometry,
     steps,
-    provider: 'OpenStreetMap · OSRM',
+    provider: mode === 'car' ? 'OpenStreetMap · OSRM' : 'OpenStreetMap · OSRM (tracé routier)',
   };
 }
 
-async function routeWithCarFallbackWalking(from: LatLng, to: LatLng): Promise<RoutePlan> {
-  const plan = await routeWithOsrm(from, to, 'car');
-  // Vitesse de marche moyenne 4,8 km/h pour la durée annoncée.
-  const walkSeconds = Math.round((plan.distanceM / 1000 / 4.8) * 3600);
-  return {
-    ...plan,
-    mode: 'walk',
-    durationS: walkSeconds,
-    steps: plan.steps.map((s) => ({ ...s, mode: 'walk' as TravelMode })),
-    provider: 'OpenStreetMap · OSRM (tracé routier)',
-  };
+/** Itinéraire marche / vélo / voiture : Valhalla d’abord, OSRM en secours. */
+export async function routeOnFootBikeOrCar(
+  from: LatLng,
+  to: LatLng,
+  mode: 'walk' | 'bike' | 'car'
+): Promise<RoutePlan> {
+  try {
+    return await routeWithValhalla(from, to, mode);
+  } catch {
+    try {
+      return await routeWithOsrm(from, to, mode);
+    } catch {
+      throw new Error('Itinéraire indisponible pour ce mode.');
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -577,7 +653,7 @@ export function formatRouteDistance(meters: number): string {
 /** Itinéraire pour le mode demandé ; bascule automatique si le tracé echoue. */
 export async function planRoute(from: LatLng, to: LatLng, mode: TravelMode): Promise<RoutePlan> {
   if (mode === 'transit') return routeWithTransit(from, to);
-  return routeWithOsrm(from, to, mode);
+  return routeOnFootBikeOrCar(from, to, mode);
 }
 
 /** Lien de repli (uniquement sur action explicite de l'utilisateur). */

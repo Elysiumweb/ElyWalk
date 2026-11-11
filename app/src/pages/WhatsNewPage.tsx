@@ -14,6 +14,15 @@ export default function WhatsNewPage() {
       </div>
 
       <div className="card">
+        <div className="card-title">Novembre 2026 — 2.1.4</div>
+        <ul className="whats-new">
+          <li>🛡️ Transparence publicitaire : l’écran de consentement et la politique de confidentialité expliquent désormais la consultation de la <strong>liste des applications installées</strong> (§ 4.1), exigée par le formulaire Sécurité des données de Google Play</li>
+          <li>🚶‍♂️ Itinéraires plus justes : la marche, le vélo et la voiture sont calculés par <strong>Valhalla</strong> (OpenStreetMap), qui respecte réellement le mode choisi — fini le trajet « à vélo » qui suivait les grands axes</li>
+          <li>🔐 Confidentialité publicitaire renforcée : refus de la vente/partage transmis au SDK (setCCPA) et application déclarée non destinée aux enfants (setCOPPA)</li>
+        </ul>
+      </div>
+
+      <div className="card">
         <div className="card-title">Novembre 2026 — 2.1.3</div>
         <ul className="whats-new">
           <li>⌨️ Saisie fluide : pseudo, bio, recherche et formulaires de Rencontres acceptent tout le texte d’un coup, sans perdre le curseur</li>
