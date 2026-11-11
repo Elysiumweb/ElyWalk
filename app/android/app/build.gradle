@@ -65,15 +65,11 @@ dependencies {
     implementation 'com.google.android.gms:play-services-location:21.3.0'
 
     // --- Unity LevelPlay (médiation) -------------------------------------
-    // LevelPlay arbitre les enchères ; Meta Audience Network y participe en
-    // in-app bidding via `facebook-adapter`. Suivre les versions recommandées
-    // dans la doc LevelPlay (SDK Android + tableau « Mediation networks »).
-    //   https://docs.unity.com/en-us/grow/levelplay/sdk/android/sdk-integration
-    //   https://docs.unity.com/en-us/grow/levelplay/sdk/android/networks/guides/meta-audience-network
-    implementation 'com.unity3d.ads-mediation:mediation-sdk:9.5.0'
-    // L'adaptateur Meta embarque le SDK Audience Network (>= 5.6.0) : inutile de
-    // le déclarer séparément, la version est pilotée par l'adaptateur.
+    // LevelPlay arbitre les enchères.
+    implementation 'com.unity3d.ads-mediation:mediation-sdk:9.7.0'
     implementation 'com.unity3d.ads-mediation:facebook-adapter:5.7.0'
+    implementation 'com.unity3d.ads-mediation:unityads-adapter:5.16.0'
+    implementation 'com.unity3d.ads-mediation:admob-adapter:5.19.0'
     // Identifiants publicitaires lus par LevelPlay (GAID + App Set ID).
     implementation 'com.google.android.gms:play-services-appset:16.0.0'
     implementation 'com.google.android.gms:play-services-ads-identifier:18.2.0'
