@@ -425,6 +425,24 @@ public class LevelPlayAdsPlugin extends Plugin {
         });
     }
 
+    /**
+     * Met à jour l'identifiant application de l'utilisateur
+     * ({@code LevelPlay.setDynamicUserId}). Utile après connexion : LevelPlay
+     * l'utilise pour les callbacks server-to-server et Ad Quality.
+     */
+    @PluginMethod
+    public void setUserId(PluginCall call) {
+        final String userId = call.getString("userId");
+        runOnUi(() -> {
+            try {
+                LevelPlay.setDynamicUserId(userId);
+            } catch (Throwable t) {
+                Log.w(TAG, "setDynamicUserId: " + t.getMessage());
+            }
+            call.resolve();
+        });
+    }
+
     /** Applique le consentement RGPD au SDK (personnalisé ou annonces limitées). */
     private void applyPrivacy(boolean wantsPersonalized) {
         try {

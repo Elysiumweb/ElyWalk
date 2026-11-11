@@ -54,6 +54,7 @@ export interface LevelPlayRewardResult {
 
 interface LevelPlayAdsPlugin {
   initialize(options: { appKey: string; userId?: string; personalized: boolean }): Promise<void>;
+  setUserId(options: { userId: string }): Promise<void>;
   setConsent(options: { personalized: boolean }): Promise<void>;
   showBanner(options: { adUnitId: string; adaptive?: boolean }): Promise<{ height: number }>;
   hideBanner(): Promise<void>;
@@ -101,6 +102,8 @@ let adsAllowed = false;
 let appliedConsent: AdConsent | null = null;
 let consentSubscribed = false;
 let currentUserId: string | undefined;
+/** Dernier UID réellement transmis au SDK (utile pour les callbacks S2S). */
+let appliedUserId: string | undefined;
 
 /** Applique le consentement courant au SDK LevelPlay (RGPD : personnalisé ou non). */
 async function applyConsent(): Promise<void> {
@@ -128,7 +131,10 @@ export async function initAds(userId?: string): Promise<void> {
   if (!isNative()) return;
   if (userId) currentUserId = userId;
   if (initialized) {
-    if (currentUserId) void applyConsent();
+    if (userId && userId !== appliedUserId) {
+      appliedUserId = userId;
+      void LevelPlayAds.setUserId({ userId }).catch(() => undefined);
+    }
     return;
   }
   if (initialization) return initialization;
@@ -146,6 +152,7 @@ export async function initAds(userId?: string): Promise<void> {
       });
       initialized = true;
       appliedConsent = consent;
+      appliedUserId = currentUserId;
       if (!consentSubscribed) {
         consentSubscribed = true;
         subscribeAdConsent(() => { void applyConsent(); });
