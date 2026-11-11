@@ -1,5 +1,53 @@
 # Changelog
 
+## 2.1.0 — 2026-11-11
+
+### Chartboost Mediation, lisibilité et accueil
+
+- **Médiation** : ElyWalk passe d'un appel direct au SDK Meta Audience Network à
+  **Chartboost Mediation** (Core `1.1.0`, Mediation `5.4.0`) avec l'adaptateur
+  **Meta Audience Network** (`5.6.22.0.0`, AN `6.22.0`), conformément à la
+  documentation Meta « Partner mediation → Chartboost »
+  (<https://developers.facebook.com/documentation/audience-network/bidding/partner-mediation/chartboost>).
+  Le plugin Capacitor `MetaAdsPlugin.java` est remplacé par
+  `ChartboostMediationAdsPlugin.java` (même nom de plugin côté JS : `ads.ts` ne
+  change pas de surface publique). Nouveau `android/build.gradle` (AGP 8.13.0,
+  dépôts `cboost.jfrog.io`) et nouvelles règles ProGuard. Version `2.1.0`,
+  `versionCode 210`.
+- Trois emplacements BIDDING créés côté Chartboost : `inter` (INTERSTITIAL),
+  `reward` (REWARDED) et `banner` (INTERSTITIAL). Meta ne remplit que
+  l'interstitiel et le récompensé : `showBanner`/`showNativeBanner` résolvent
+  désormais `{ height: 0 }` (plus de bandeau 320×50, plus d'espace réservé) et
+  `showMediumRectangle` retombe sur un plein écran.
+- La carte de fin de sortie n'a pas d'équivalent natif via Chartboost : elle est
+  rendue **dans la WebView** (overlay HTML), sans bloquer l'interface.
+- Le consentement n'est plus poussé vers une CMP (Chartboost Core 1.1.0 n'expose
+  pas de setter Java) : il reste appliqué applicativement et transmis à Meta via
+  `AdSettings.setDataProcessingOptions(["LDU"], 0, 0)`.
+
+### Design et accessibilité
+
+- **2.1** Les libellés des onglets ne sont plus masqués sur mobile ; les
+  destinations secondaires (classement, défis, rencontres, sortie, historique,
+  partenaires, nouveautés) passent dans une feuille « Plus ».
+- **2.2** Accueil hiérarchisé : compteur de pas et « Valider mes pas » en
+  premier, raccourcis compactés, actions secondaires repliables.
+- **2.3** Plus aucune version en dur : `ProfilePage` et `WhatsNewPage` lisent
+  `APP_VERSION` / `BUILD_STAMP` (générés au build depuis `package.json`).
+- **2.4** Plancher de lisibilité relevé (~30 tailles de police remontées, 11–12 px
+  minimum pour les textes secondaires).
+- **2.5** Centralisation des styles : 176 `style={{…}}` → 12 (les 12 restants
+  sont des valeurs calculées : largeurs de barres, tailles d'anneau, couleur de
+  niveau). Nouveau socle de jetons et d'utilitaires dans `src/ux-polish.css`.
+- **2.6** Rencontres : date et heure formatées avec `Intl` dans la locale de
+  l'appareil, fuseau affiché, plus de `toISOString()` (qui décalait d'un jour),
+  et création d'une rencontre déjà passée bloquée (nouveau `src/lib/events.ts`
+  + 16 tests).
+- **2.7** Profil → **Affichage** : Système / Sombre / Contraste renforcé
+  (`lib/theme.ts`, appliqué avant le premier rendu, persisté). Le zoom n'est plus
+  bloqué (`user-scalable=no` retiré de `index.html`) ; les champs de formulaire
+  gardent une taille de police lisible.
+
 ## 1.9.0 — 2026-11-09
 
 ### Régie publicitaire : passage d'AdMob à Meta Audience Network

@@ -84,7 +84,7 @@ export default function ChallengesPage() {
 
   return <div className="screen" data-testid="challenges-screen">
     <div className="screen-header"><div><h1 className="screen-title">Défis</h1><div className="screen-sub">Des objectifs datés, collectifs et saisonniers</div></div><button className="btn btn-ghost btn-sm" onClick={() => navigate(-1)}>Retour</button></div>
-    <div className="chip-row" style={{marginBottom:12}}>
+    <div className="chip-row mb-3">
       <button className={`chip ${tab==='global'?'chip-active':''}`} onClick={()=>setTab('global')}>Globaux</button>
       <button className={`chip ${tab==='friends'?'chip-active':''}`} onClick={()=>setTab('friends')}>Entre amis {friendChallenges.length>0 && `· ${friendChallenges.length}`}</button>
     </div>
@@ -104,7 +104,7 @@ export default function ChallengesPage() {
     </>}
     {tab==='friends' && (
       <div>
-        <div className="card" style={{display:'flex', flexDirection:'column', gap:10}}>
+        <div className="card stack">
           <div className="card-title">Défis entre amis</div>
           <p className="card-help">Lancez un défi 1 vs 1 ou petit groupe (2-6). Ex. « 50 000 pas cette semaine contre @Paul » — comparaison en direct des pas validés.</p>
           <button className="btn btn-gold" onClick={()=>setCreateOpen(true)}>+ Créer un défi privé</button>
@@ -113,18 +113,18 @@ export default function ChallengesPage() {
           const prog=friendProgress[ch.id!];
           const isCreator=ch.creatorUid===profile?.uid;
           return <div key={ch.id} className="card" data-testid="friend-challenge-card">
-            <div className="challenge-top"><span className="challenge-icon">⚔️</span><div className="row-main"><div className="challenge-kind">DÉFI AMIS · {ch.metric==='steps'?'PAS':'DISTANCE'}</div><h2>{ch.title}</h2><small style={{color:'var(--muted)'}}>par {ch.creatorName} · {daysLeft(ch.endsAt)}</small></div>{isCreator && <button className="btn btn-ghost btn-sm" onClick={async()=>{ if(confirm('Supprimer ce défi ?')){ await deleteFriendChallenge(profile!.uid,ch.id!); toast('Défi supprimé','info'); }}}>✕</button>}</div>
-            <div style={{marginTop:10}}>
+            <div className="challenge-top"><span className="challenge-icon">⚔️</span><div className="row-main"><div className="challenge-kind">DÉFI AMIS · {ch.metric==='steps'?'PAS':'DISTANCE'}</div><h2>{ch.title}</h2><small className="text-muted">par {ch.creatorName} · {daysLeft(ch.endsAt)}</small></div>{isCreator && <button className="btn btn-ghost btn-sm" onClick={async()=>{ if(confirm('Supprimer ce défi ?')){ await deleteFriendChallenge(profile!.uid,ch.id!); toast('Défi supprimé','info'); }}}>✕</button>}</div>
+            <div className="mt-2">
               {prog ? prog.map(p=>(
                 <div key={p.uid} className="list-row">
                   <Avatar name={p.displayName} photoURL={p.photoURL} size={36} />
-                  <div className="row-main"><div className="row-title" style={{fontSize:13}}>{p.displayName}{p.uid===profile?.uid?' (vous)':''}</div><div className="row-sub">{fmtNumber(p.progress)} / {fmtNumber(ch.target)} {ch.metric==='steps'?'pas':'m'}</div></div>
-                  <div className="row-value" style={{fontSize:12}}>{p.percent}%</div>
+                  <div className="row-main"><div className="row-title row-title-sm">{p.displayName}{p.uid===profile?.uid?' (vous)':''}</div><div className="row-sub">{fmtNumber(p.progress)} / {fmtNumber(ch.target)} {ch.metric==='steps'?'pas':'m'}</div></div>
+                  <div className="row-value row-value-sm">{p.percent}%</div>
                 </div>
-              )): <div className="empty-state" style={{padding:10}}>Calcul en cours...</div>}
+              )): <div className="empty-state empty-state-compact">Calcul en cours...</div>}
             </div>
-            {prog && <div className="challenge-progress" style={{marginTop:8}}><div style={{width:`${Math.max(...prog.map(x=>x.percent))}%`}} /></div>}
-            <div className="challenge-meta" style={{marginTop:6}}><span>{ch.participants.length} participants</span><span>{ch.startsAt} → {ch.endsAt}</span></div>
+            {prog && <div className="challenge-progress mt-2"><div style={{width:`${Math.max(...prog.map(x=>x.percent))}%`}} /></div>}
+            <div className="challenge-meta mt-1"><span>{ch.participants.length} participants</span><span>{ch.startsAt} → {ch.endsAt}</span></div>
           </div>;
         })}
       </div>
@@ -134,13 +134,13 @@ export default function ChallengesPage() {
       <div className="field"><label>Objectif (pas)</label><input className="input" type="number" value={target} onChange={e=>setTarget(e.target.value)} min={1000} max={500000} /></div>
       <div className="field"><label>Amis à défier (max 5)</label>
         {friends.length===0 ? <div className="empty-state">Aucun ami — ajoutez-en d’abord.</div> : friends.map(f=>(
-          <label key={f.uid} className="list-row" style={{cursor:'pointer'}}>
+          <label key={f.uid} className="list-row list-row-tappable">
             <input type="checkbox" checked={selected.includes(f.uid)} onChange={e=>{
               if(e.target.checked) setSelected(s=>[...s,f.uid]);
               else setSelected(s=>s.filter(x=>x!==f.uid));
             }} />
             <Avatar name={f.displayName} photoURL={f.photoURL} size={36} />
-            <div className="row-main"><div className="row-title" style={{fontSize:13}}>{f.displayName}</div></div>
+            <div className="row-main"><div className="row-title row-title-sm">{f.displayName}</div></div>
           </label>
         ))}
       </div>

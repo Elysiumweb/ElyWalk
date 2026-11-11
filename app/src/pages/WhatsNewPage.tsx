@@ -1,5 +1,77 @@
 import { useNavigate } from 'react-router-dom';
-export default function WhatsNewPage(){const n=useNavigate();return <div className="screen"><div className="screen-header"><div><h1 className="screen-title">Nouveautés</h1><div className="screen-sub">Version 1.9.0</div></div><button className="btn btn-ghost btn-sm" onClick={()=>n(-1)}>Retour</button></div>
-<div className="card"><div className="card-title">Novembre 2026</div><ul className="whats-new"><li>🎯 Nouvelles publicités, servies par Meta Audience Network</li><li>🔐 Écran de consentement clair : annonces personnalisées ou non, modifiable à tout moment depuis votre profil</li><li>🛡️ Vos pas, sorties et données de santé ne sont jamais transmis à la régie</li><li>📱 Bannière discrète en bas d’écran, sans jamais masquer les boutons</li></ul></div>
-<div className="card"><div className="card-title">Octobre 2026</div><ul className="whats-new"><li>⏸ Pause et reprise d’une sortie, pauses exclues de l’allure</li><li>🧭 Export GPX (Strava, Garmin) et CSV de vos sorties et de vos pas</li><li>✏️ Titre, note et météo ressentie sur chaque sortie</li><li>🔎 Filtres par type, période et distance + pagination de « Mes sorties »</li><li>📶 Qualité du signal GPS en direct et mode économie de batterie</li><li>📊 Résumés de la semaine et du mois, avec comparaison et partage</li><li>🎯 Objectif de sortie avec progression en direct et notification</li><li>🗺️ Cartes partagées : styles Voyager, Sombre et Satellite</li></ul></div>
-<div className="card"><div className="card-title">Août 2026</div><ul className="whats-new"><li>🔐 Compte, e-mail et contrôles ElyCoins renforcés</li><li>📊 Historique, objectifs, distance et badges</li><li>🤝 Recherche, partage, réactions et profils publics</li><li>🏆 Classements jour, semaine, mois et amis</li><li>📍 Partenaires proches, itinéraires et offres</li><li>🔔 Rappels de validation et notifications</li><li>🛡️ Export et suppression de vos données</li></ul></div></div>}
+import { APP_VERSION, BUILD_STAMP } from '../lib/version';
+
+// ============================================================================
+// Nouveautés — la version affichée vient de `package.json` (via `lib/version`),
+// jamais d'une chaîne saisie à la main : elle ne peut plus être oubliée.
+// ============================================================================
+
+type Release = { label: string; items: string[] };
+
+const RELEASES: Release[] = [
+  {
+    label: 'Novembre 2026',
+    items: [
+      '🎯 Régie publicitaire migrée vers Chartboost Mediation (annonces servies par Meta Audience Network)',
+      '🔐 Consentement publicitaire clair : annonces personnalisées ou non, modifiable à tout moment depuis le profil',
+      '🛡️ Vos pas, sorties et données de santé ne sont jamais transmis à la régie',
+      '🎨 Nouveau réglage Affichage : Système, Sombre ou Contraste renforcé',
+      '🔤 Textes secondaires agrandis et libellés d’onglets toujours visibles',
+      '➖ Accueil réorganisé : le compteur de pas et « Valider mes pas » en premier',
+      '🗓️ Rencontres : dates et heures affichées dans la langue et le fuseau de l’appareil, création d’une rencontre passée bloquée',
+    ],
+  },
+  {
+    label: 'Octobre 2026',
+    items: [
+      '⏸ Pause et reprise d’une sortie, pauses exclues de l’allure',
+      '🧭 Export GPX (Strava, Garmin) et CSV de vos sorties et de vos pas',
+      '✏️ Titre, note et météo ressentie sur chaque sortie',
+      '🔎 Filtres par type, période et distance + pagination de « Mes sorties »',
+      '📶 Qualité du signal GPS en direct et mode économie de batterie',
+      '📊 Résumés de la semaine et du mois, avec comparaison et partage',
+      '🎯 Objectif de sortie avec progression en direct et notification',
+      '🗺️ Cartes partagées : styles Voyager, Sombre et Satellite',
+    ],
+  },
+  {
+    label: 'Août 2026',
+    items: [
+      '🔐 Compte, e-mail et contrôles ElyCoins renforcés',
+      '📊 Historique, objectifs, distance et badges',
+      '🤝 Recherche, partage, réactions et profils publics',
+      '🏆 Classements jour, semaine, mois et amis',
+      '📍 Partenaires proches, itinéraires et offres',
+      '🔔 Rappels de validation et notifications',
+      '🛡️ Export et suppression de vos données',
+    ],
+  },
+];
+
+export default function WhatsNewPage() {
+  const navigate = useNavigate();
+  return (
+    <div className="screen" data-testid="whats-new-screen">
+      <div className="screen-header">
+        <div>
+          <h1 className="screen-title">Nouveautés</h1>
+          <div className="screen-sub" data-testid="whats-new-version">
+            Version {APP_VERSION}
+          </div>
+        </div>
+        <button className="btn btn-ghost btn-sm" onClick={() => navigate(-1)}>Retour</button>
+      </div>
+
+      {RELEASES.map((release) => (
+        <div className="card" key={release.label}>
+          <div className="card-title">{release.label}</div>
+          <ul className="whats-new">
+            {release.items.map((item) => <li key={item}>{item}</li>)}
+          </ul>
+        </div>
+      ))}
+
+      <p className="text-muted-sm text-center">Build {BUILD_STAMP}</p>
+    </div>
+  );
+}

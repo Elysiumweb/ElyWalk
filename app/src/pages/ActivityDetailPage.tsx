@@ -219,7 +219,7 @@ export default function ActivityDetailPage() {
     try { localStorage.setItem(MAP_STYLE_KEY, style); } catch { /* ignore */ }
   };
 
-  if (loading) return <div className="screen"><div className="spinner" style={{ margin: '40px auto' }} /></div>;
+  if (loading) return <div className="screen"><div className="spinner spinner-centered" /></div>;
   if (!session) {
     return (
       <div className="screen" data-testid="activity-detail-screen">
@@ -253,8 +253,8 @@ export default function ActivityDetailPage() {
         </div>
         <button className="btn btn-ghost btn-sm" onClick={() => navigate(-1)}>Retour</button>
       </div>
-      <div className="activity-map" ref={containerRef} data-testid="activity-detail-map" style={{ height: 'min(46vh, 440px)', borderRadius: 16, margin: '0 12px' }} />
-      <div className="card" style={{ margin: '12px' }}>
+      <div className="activity-map activity-map-detail" ref={containerRef} data-testid="activity-detail-map" />
+      <div className="card activity-detail-card">
         <div className="activity-stats">
           <div><strong>{formatDistance(session.distanceM || 0, unitSystem)}</strong><span>distance</span></div>
           <div><strong>{fmtDuration(session.durationSec || 0)}</strong><span>durée active</span></div>
@@ -263,42 +263,42 @@ export default function ActivityDetailPage() {
           <div><strong>{speedKmh(session.distanceM || 0, session.durationSec || 0).toFixed(1)}</strong><span>vitesse moy. (km/h)</span></div>
           <div><strong>{paceMinPerKm(session.distanceM || 0, session.durationSec || 0)}</strong><span>allure</span></div>
         </div>
-        <div className="row-sub" style={{ marginTop: 6 }}>
+        <div className="row-sub mt-1">
           {(session.points || []).length} points GPS enregistrés{gain > 0 ? ` · D+ ${gain} m` : ''}
         </div>
         {session.pausedSec && session.pausedSec >= 30 ? (
-          <div className="row-sub" style={{ marginTop: 4 }}>
+          <div className="row-sub mt-1">
             ⏸ {fmtDuration(session.pausedSec)} de pause exclus de l’allure
           </div>
         ) : null}
 
         {isOwner && (
-          <button className="btn btn-outline btn-sm" style={{ marginTop: 10 }} onClick={openEdit} disabled={busy}>
+          <button className="btn btn-outline btn-sm mt-2" onClick={openEdit} disabled={busy}>
             ✏️ {session.title || session.note || session.weather ? 'Modifier titre, note et météo' : 'Renommer et annoter cette sortie'}
           </button>
         )}
         {session.note && <p className="activity-note">📝 {session.note}</p>}
 
-        <div className="card" style={{ marginTop: 12, background: 'var(--surface-2)' }}>
+        <div className="card card-preview mt-3">
           <div className="card-title">Visibilité</div>
           <div className="chip-row">
             <button className={`chip ${visibility === 'private' ? 'chip-active' : ''}`} onClick={() => onVisibilityChange('private')} disabled={!isOwner}>🔒 Moi seul</button>
             <button className={`chip ${visibility === 'friends' ? 'chip-active' : ''}`} onClick={() => onVisibilityChange('friends')} disabled={!isOwner}>👥 Amis</button>
             <button className={`chip ${visibility === 'link' ? 'chip-active' : ''}`} onClick={() => onVisibilityChange('link')} disabled={!isOwner}>🔗 Lien</button>
           </div>
-          <small style={{ color: 'var(--muted)', fontSize: 11 }}>
+          <small className="field-help">
             {visibility === 'private' && 'Seul vous voyez cette sortie.'}
             {visibility === 'friends' && 'Vos amis peuvent voir cette sortie dans l’app.'}
             {visibility === 'link' && 'Visible via lien — amis uniquement pour l’instant.'}
           </small>
-          {!isOwner && <small style={{ color: 'var(--gold)', display: 'block', marginTop: 6 }}>Sortie de {session.uid === profile?.uid ? 'vous' : 'un ami'} · visibilité : {visibility}</small>}
+          {!isOwner && <small className="visibility-note">Sortie de {session.uid === profile?.uid ? 'vous' : 'un ami'} · visibilité : {visibility}</small>}
         </div>
 
         {!isOwner && (
-          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-            <button className="btn btn-outline btn-sm" style={{ flex: 1 }} onClick={() => onReactOnActivity('👏')}>👏 Bravo</button>
-            <button className="btn btn-outline btn-sm" style={{ flex: 1 }} onClick={() => onReactOnActivity('🔥')}>🔥</button>
-            <button className="btn btn-outline btn-sm" style={{ flex: 1 }} onClick={() => onReactOnActivity('💛')}>💛</button>
+          <div className="reaction-row">
+            <button className="btn btn-outline btn-sm" onClick={() => onReactOnActivity('👏')}>👏 Bravo</button>
+            <button className="btn btn-outline btn-sm" onClick={() => onReactOnActivity('🔥')}>🔥</button>
+            <button className="btn btn-outline btn-sm" onClick={() => onReactOnActivity('💛')}>💛</button>
           </div>
         )}
 
@@ -321,7 +321,7 @@ export default function ActivityDetailPage() {
           <small className="share-style-hint">{selectedStyle?.description}</small>
         </div>
 
-        <button className="btn btn-gold" style={{ marginTop: 12, width: '100%' }} onClick={onShare} disabled={busy}>
+        <button className="btn btn-gold btn-block mt-3" onClick={onShare} disabled={busy}>
           {busy ? 'Préparation…' : `📤 Partager cette sortie (${mapStyleLabel(mapStyle)})`}
         </button>
 
@@ -333,8 +333,8 @@ export default function ActivityDetailPage() {
           Le GPX s’importe dans Strava, Garmin, Google Earth ; le CSV s’ouvre dans un tableur.
         </small>
 
-        <button className="btn btn-outline" style={{ marginTop: 8, width: '100%' }} onClick={() => navigate('/activity')}>Voir toutes mes sorties</button>
-        {isOwner && <button className="btn btn-danger" style={{ marginTop: 8, width: '100%' }} onClick={onDelete} disabled={busy}>🗑 Supprimer cette sortie et son tracé GPS</button>}
+        <button className="btn btn-outline btn-block mt-2" onClick={() => navigate('/activity')}>Voir toutes mes sorties</button>
+        {isOwner && <button className="btn btn-danger btn-block mt-2" onClick={onDelete} disabled={busy}>🗑 Supprimer cette sortie et son tracé GPS</button>}
       </div>
 
       <Sheet open={editing} onClose={() => setEditing(false)} title="Renommer et annoter" testId="activity-edit-sheet">

@@ -49,16 +49,17 @@ export default function AdConsentSheet() {
       title="Confidentialité des annonces"
       testId="ad-consent-sheet"
     >
-      <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
-        ElyWalk est financé par la publicité, diffusée par <strong>Meta Audience Network</strong>.
+      <p className="sheet-text">
+        ElyWalk est financé par la publicité, diffusée via <strong>Chartboost Mediation</strong> et
+        <strong> Meta Audience Network</strong>.
         Nous ne transmettons <strong>jamais</strong> vos pas, vos sorties ou vos données de santé :
         seuls l’identifiant publicitaire de votre appareil et des données techniques sont utilisés.
       </p>
-      <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
+      <p className="sheet-text muted">
         Vous pouvez choisir des annonces personnalisées (plus rémunératrices pour l’application)
         ou non personnalisées. Ce choix est révocable à tout moment depuis votre profil.
       </p>
-      <div style={{ display: 'grid', gap: 10, marginTop: 8 }}>
+      <div className="consent-actions">
         <button
           type="button"
           className="btn btn-gold"
@@ -82,7 +83,6 @@ export default function AdConsentSheet() {
           href={PRIVACY_POLICY_URL}
           target="_blank"
           rel="noreferrer"
-          style={{ textAlign: 'center' }}
         >
           Politique de confidentialité
         </a>

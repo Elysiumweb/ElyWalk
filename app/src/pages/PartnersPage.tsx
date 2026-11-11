@@ -64,7 +64,7 @@ export default function PartnersPage() {
           </div>
         ) : (
           <>
-            <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 14 }}>
+            <p className="sheet-intro">
               Vous représentez une organisation et souhaitez proposer des offres aux
               marcheurs d’ElyWalk ? Envoyez votre demande au Président et au Co-Président.
             </p>

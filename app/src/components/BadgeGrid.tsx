@@ -22,7 +22,6 @@ export default function BadgeGrid({ badges, size = 'medium', onSelect }: Props) 
             title={has ? `${def.title}: ${def.description}` : `🔒 ${def.title}: ${def.description}`}
             data-testid={`badge-${def.id}`}
             disabled={!onSelect}
-            style={{ cursor: onSelect ? 'pointer' : 'default' }}
           >
             <span className="badge-icon">{has ? def.icon : '🔒'}</span>
             <span className="badge-name">{def.title}</span>
@@ -40,8 +39,8 @@ export function BadgePreview({ def, badge }: { def: BadgeDefinition; badge?: Use
       <div className={`badge-icon large tier-${def.tier}`}>{def.icon}</div>
       <h3>{def.title}</h3>
       <p>{def.description}</p>
-      {badge && <small style={{ color: 'var(--muted)' }}>Obtenu le {new Date(badge.unlockedAt).toLocaleDateString('fr-FR')}</small>}
-      {!badge && <small style={{ color: 'var(--muted)' }}>🔒 Non débloqué</small>}
+      {badge && <small className="text-muted">Obtenu le {new Date(badge.unlockedAt).toLocaleDateString('fr-FR')}</small>}
+      {!badge && <small className="text-muted">🔒 Non débloqué</small>}
       <span className={`badge-tier tier-${def.tier}`}>{def.tier}</span>
     </div>
   );

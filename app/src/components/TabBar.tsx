@@ -1,36 +1,126 @@
-import { useEffect, useState } from 'react';
-import { NavLink } from 'react-router-dom';
+import { useEffect, useState, type ComponentType } from 'react';
+import { NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { watchIncomingRequests } from '../lib/db';
+import Sheet from './Sheet';
 
-const tabs = [
-  { to: '/', label: 'Accueil', testId: 'tab-home', icon: HomeIcon },
-  { to: '/map', label: 'Carte', testId: 'tab-map', icon: MapIcon },
-  { to: '/friends', label: 'Amis', testId: 'tab-friends', icon: FriendsIcon },
-  { to: '/leaderboard', label: 'Classement', testId: 'tab-leaderboard', icon: TrophyIcon },
-  { to: '/wallet', label: 'Portefeuille', testId: 'tab-wallet', icon: WalletIcon },
-  { to: '/profile', label: 'Profil', testId: 'tab-profile', icon: ProfileIcon },
+/**
+ * Barre d'onglets — 5 destinations principales + un onglet « Plus ».
+ *
+ * Sur téléphone, les libellés restent **visibles** (courts, 11 px, coupés
+ * proprement sur deux lignes si besoin) : une barre d'icônes seules n'indique
+ * pas où l'on va. Les destinations secondaires (défis, rencontres, sortie GPS,
+ * historique, nouveautés) sont regroupées dans une feuille « Plus », en lignes
+ * de 48 px avec un libellé complet et une description.
+ *
+ * Les six anciens onglets ne tenaient pas avec un libellé lisible : 6 × 64 px
+ * sur un écran de 360 px ne laisse que 60 px par onglet, insuffisant pour
+ * « Portefeuille ». D'où le regroupement.
+ */
+
+type Tab = {
+  to: string;
+  label: string;
+  /** Libellé du `aria-label` (plus explicite que le libellé compact). */
+  ariaLabel: string;
+  testId: string;
+  icon: ComponentType;
+};
+
+const PRIMARY_TABS: Tab[] = [
+  { to: '/', label: 'Accueil', ariaLabel: 'Accueil', testId: 'tab-home', icon: HomeIcon },
+  { to: '/map', label: 'Carte', ariaLabel: 'Carte des partenaires', testId: 'tab-map', icon: MapIcon },
+  { to: '/friends', label: 'Amis', ariaLabel: 'Amis', testId: 'tab-friends', icon: FriendsIcon },
+  { to: '/wallet', label: 'Gains', ariaLabel: 'Portefeuille et gains', testId: 'tab-wallet', icon: WalletIcon },
+  { to: '/profile', label: 'Profil', ariaLabel: 'Profil', testId: 'tab-profile', icon: ProfileIcon },
 ];
 
+/** Destinations secondaires regroupées sous « Plus ». */
+const MORE_LINKS: { to: string; label: string; hint: string; icon: string }[] = [
+  { to: '/leaderboard', label: 'Classement', hint: 'Jour, semaine, mois et amis', icon: '🏆' },
+  { to: '/challenges', label: 'Défis', hint: 'Objectifs datés et défis entre amis', icon: '🎯' },
+  { to: '/events', label: 'Rencontres', hint: 'Marcher ensemble près des partenaires', icon: '👥' },
+  { to: '/activity', label: 'Sortie GPS', hint: 'Enregistrer un parcours avec pause et export', icon: '▶' },
+  { to: '/history', label: 'Historique & santé', hint: 'Calendrier, statistiques et réglages', icon: '📊' },
+  { to: '/partners', label: 'Partenaires', hint: 'Offres Elysium et établissements', icon: '📍' },
+  { to: '/whats-new', label: 'Nouveautés', hint: 'Les évolutions de cette version', icon: '✦' },
+];
+
+const MORE_PATHS = MORE_LINKS.map((link) => link.to);
+
 export default function TabBar() {
-  const { profile } = useAuth(); const [pending,setPending]=useState(0);
-  useEffect(()=>profile?watchIncomingRequests(profile.uid,r=>setPending(r.length)):undefined,[profile?.uid]);
+  const { profile } = useAuth();
+  const { pathname } = useLocation();
+  const [pending, setPending] = useState(0);
+  const [moreOpen, setMoreOpen] = useState(false);
+
+  useEffect(() => {
+    if (!profile) return;
+    return watchIncomingRequests(profile.uid, (requests) => setPending(requests.length));
+  }, [profile?.uid]);
+
+  // La feuille « Plus » se referme à chaque changement de page.
+  useEffect(() => {
+    setMoreOpen(false);
+  }, [pathname]);
+
+  // Une destination secondaire active justifie l'onglet « Plus ».
+  const moreActive = MORE_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
+
   return (
-    <nav className="tabbar" data-testid="bottom-tab-bar">
-      {tabs.map((t) => (
-        <NavLink
-          key={t.to}
-          to={t.to}
-          end={t.to === '/'}
-          data-testid={t.testId}
-          className={({ isActive }) => `tab ${isActive ? 'tab-active' : ''}`}
-          aria-label={t.label}
+    <>
+      <nav className="tabbar" data-testid="bottom-tab-bar" aria-label="Navigation principale">
+        {PRIMARY_TABS.map((tab) => (
+          <NavLink
+            key={tab.to}
+            to={tab.to}
+            end={tab.to === '/'}
+            data-testid={tab.testId}
+            className={({ isActive }) => `tab ${isActive ? 'tab-active' : ''}`}
+            aria-label={tab.ariaLabel}
+          >
+            <span className="tab-icon" aria-hidden="true">
+              <tab.icon />
+              {tab.to === '/friends' && pending > 0 && <b className="tab-badge">{pending > 9 ? '9+' : pending}</b>}
+            </span>
+            <span className="tab-label">{tab.label}</span>
+          </NavLink>
+        ))}
+
+        <button
+          type="button"
+          className={`tab tab-more ${moreActive ? 'tab-active' : ''}`}
+          onClick={() => setMoreOpen(true)}
+          data-testid="tab-more"
+          aria-label="Plus de destinations"
+          aria-expanded={moreOpen}
         >
-          <span className="tab-icon" aria-hidden="true"><t.icon />{t.to==='/friends'&&pending>0&&<b className="tab-badge">{pending}</b>}</span>
-          <span className="tab-label">{t.label}</span>
-        </NavLink>
-      ))}
-    </nav>
+          <span className="tab-icon" aria-hidden="true">
+            <MoreIcon />
+          </span>
+          <span className="tab-label">Plus</span>
+        </button>
+      </nav>
+
+      <Sheet open={moreOpen} onClose={() => setMoreOpen(false)} title="Plus" testId="more-sheet">
+        <div className="more-links">
+          {MORE_LINKS.map((link) => (
+            <NavLink
+              key={link.to}
+              to={link.to}
+              className={({ isActive }) => `more-link ${isActive ? 'more-link-active' : ''}`}
+              data-testid={`more-${link.to.replace(/\//g, '')}`}
+            >
+              <span className="more-link-icon" aria-hidden="true">{link.icon}</span>
+              <span className="more-link-main">
+                <span className="more-link-title">{link.label}</span>
+                <span className="more-link-hint">{link.hint}</span>
+              </span>
+            </NavLink>
+          ))}
+        </div>
+      </Sheet>
+    </>
   );
 }
 
@@ -60,15 +150,6 @@ function FriendsIcon() {
     </svg>
   );
 }
-function TrophyIcon() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-      <path d="M8 4h8v5a4 4 0 0 1-8 0V4Z" strokeLinejoin="round" />
-      <path d="M8 5H4.5a3.5 3.5 0 0 0 3.6 3.5M16 5h3.5a3.5 3.5 0 0 1-3.6 3.5" strokeLinecap="round" />
-      <path d="M12 13v4m-4 4h8m-6.5-4h5" strokeLinecap="round" />
-    </svg>
-  );
-}
 function WalletIcon() {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
@@ -83,6 +164,15 @@ function ProfileIcon() {
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
       <circle cx="12" cy="8" r="3.6" />
       <path d="M4.5 20.5c1-3.8 4-6 7.5-6s6.5 2.2 7.5 6" strokeLinecap="round" />
+    </svg>
+  );
+}
+function MoreIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
+      <circle cx="5" cy="12" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="19" cy="12" r="1.5" fill="currentColor" stroke="none" />
     </svg>
   );
 }

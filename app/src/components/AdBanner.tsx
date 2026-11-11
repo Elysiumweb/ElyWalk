@@ -5,18 +5,23 @@ import { hideBottomAd, showBottomAd, type BottomAdKind } from '../lib/ads';
 import { useAdConsent } from '../lib/adConsent';
 
 /**
- * Pages de type liste : le bandeau natif compact (placement « Native banner »)
- * y est plus lisible qu'une bannière 320×50 classique.
+ * Pages de type liste : l'appel « native banner » y était plus lisible qu'une
+ * bannière 320×50 classique.
  */
 const NATIVE_BANNER_ROUTES = ['/history'];
 
 /**
- * Bannière publicitaire ancrée en bas de l'écran, présente sur TOUTES les
- * pages de l'application (exigence produit : « une bannière sur chaque page »).
+ * Emplacement publicitaire bas d'écran, présent sur toutes les pages.
  *
- * Le rendu est natif (Meta Audience Network) : ce composant ne peint rien, il
- * pilote le plugin `MetaAds` et réserve la hauteur correspondante via la
- * variable CSS `--ad-banner-h` (voir styles.css).
+ * ⚠️ Depuis la 2.1.0 (Chartboost Mediation + Meta), les placements
+ * `CHARTBOOST_PLACEMENT_BANNER` sont des **interstitiels** : Meta ne remplit que
+ * l'interstitiel et le récompensé. Le plugin résout donc `{ height: 0 }` et
+ * **aucun espace n'est réservé** (`--ad-banner-h` reste à `0px`) — la barre
+ * d'onglets et les feuilles remontent exactement comme avant.
+ *
+ * L'appel est conservé tel quel pour que rétablir un vrai format BANNIER ne
+ * demande qu'un changement de placement côté dashboard : la hauteur renvoyée
+ * par le plugin est déjà répercutée dans `--ad-banner-h` (`lib/ads.ts`).
  */
 export default function AdBanner() {
   const { pathname } = useLocation();
@@ -24,6 +29,7 @@ export default function AdBanner() {
 
   useEffect(() => {
     if (!Capacitor.isNativePlatform() || !ready) return;
+    // Tant qu'aucun choix n'est exprimé, aucune annonce n'est demandée.
     if (consent === 'unknown') {
       void hideBottomAd();
       return;

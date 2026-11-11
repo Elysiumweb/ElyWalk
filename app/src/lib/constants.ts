@@ -1,11 +1,34 @@
 // ===== ElyWalk — Constantes globales =====
 
-// --- Meta Audience Network (production) ---
-// Format des identifiants de placement : `<APP_ID>_<PLACEMENT_ID>`.
-// Ils sont créés dans Monetization Manager (business.facebook.com/audiencenetwork).
+// --- Chartboost Mediation (médiation depuis 2.1.0) ---
+// Chartboost Mediation arbitre la publicité et revend l'inventaire à Meta
+// Audience Network via l'adaptateur « bidding » officiel :
+//   https://developers.facebook.com/documentation/audience-network/bidding/partner-mediation/chartboost
+//
+// Les emplacements ci-dessous sont les **noms d'ad location créés sur le
+// dashboard Chartboost** (Mediation → Placements), pas des identifiants Meta.
+// Le SDK natif (`ChartboostMediationAdsPlugin.java`) est le seul à les lire ;
+// aucune annonce n'est demandée tant que `initialize()` n'a pas répondu.
+export const CHARTBOOST_APP_ID = '6a1f2c3d4e5f60718293a4b5';
+
+/** Ad location `inter` — INTERSTITIAL · BIDDING. */
+export const CHARTBOOST_PLACEMENT_INTERSTITIAL = 'inter';
+/** Ad location `reward` — REWARDED · BIDDING (vidéo → ElyCoins). */
+export const CHARTBOOST_PLACEMENT_REWARDED = 'reward';
+/**
+ * Ad location `banner` — créée en INTERSTITIAL · BIDDING côté Chartboost.
+ * Elle est donc demandée en **interstitiel** (et non collée en bas d'écran).
+ */
+export const CHARTBOOST_PLACEMENT_BANNER = 'banner';
+
+// --- Meta Audience Network (revendeur de l'inventaire) ---
+// Format des identifiants de placement Meta : `<APP_ID>_<PLACEMENT_ID>`.
+// Ils sont créés dans Monetization Manager (business.facebook.com/audiencenetwork)
+// puis rattachés aux emplacements Chartboost ci-dessus (Bidding → Select network).
+// Conservés pour le consentement natif (LDU) et la déclaration app-ads.txt.
 export const META_APP_ID = '1712220190424595';
 
-/** Bannière 320×50 (bas de page). */
+/** Bannière 320×50 (les emplacements Chartboost étant « inter », non utilisée). */
 export const META_PLACEMENT_BANNER = '1712220190424595_1712220347091246';
 /** Interstitiel plein écran (ouverture de l'app, validation des pas, fin de sortie). */
 export const META_PLACEMENT_INTERSTITIAL = '1712220190424595_1712220353757912';

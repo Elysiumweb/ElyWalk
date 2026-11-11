@@ -15,6 +15,8 @@ import { ACCOUNT_DELETION_URL, DATA_DELETION_URL, BADGE_DEFINITIONS } from '../l
 import { openAdPrivacyOptions } from '../lib/ads';
 import { isPresidentUid } from '../lib/constants';
 import { fmtCoins, fmtNumber, formatDistance } from '../lib/coins';
+import { APP_VERSION, BUILD_STAMP } from '../lib/version';
+import { THEME_OPTIONS, useThemePreference } from '../lib/theme';
 import type { UserBadge, BadgeDefinition } from '../lib/types';
 
 export default function ProfilePage() {
@@ -68,6 +70,9 @@ export default function ProfilePage() {
 
   const [qrOpen, setQrOpen] = useState(false);
   const [privacyOpen, setPrivacyOpen] = useState(false);
+
+  // Réglage d'affichage (Système / Sombre / Contraste renforcé).
+  const { preference: themePreference, setPreference: setThemePreference } = useThemePreference();
 
   const isAdmin = isPresidentUid(profile?.uid);
 
@@ -196,7 +201,7 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      <div className="gold-hero" style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+      <div className="gold-hero profile-hero">
         <img src="/deco-1.webp" className="hero-deco" alt="" />
         <button
           type="button"
@@ -210,14 +215,14 @@ export default function ProfilePage() {
             <CamIcon />
           </span>
         </button>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div className="display" style={{ fontSize: 17 }} data-testid="profile-name">
+        <div className="profile-hero-main">
+          <div className="profile-name" data-testid="profile-name">
             {profile.displayName}
           </div>
-          {profile.bio && <div style={{ color: '#d8d2c2', fontSize: 12, marginTop: 4, lineHeight:1.4 }}>{profile.bio}</div>}
-          {!profile.bio && <div style={{ color: 'var(--muted)', fontSize: 12, marginTop: 4 }}>Aucune bio · touche « Modifier » pour en ajouter</div>}
-          {profile.email ? <button type="button" className="copy-value" onClick={() => copyText(profile.email!, 'E-mail')} title="Copier l’e-mail">{profile.email} <span aria-hidden="true">⧉</span></button> : <div style={{ color: 'var(--muted)', fontSize: 13 }}>Aucun e-mail</div>}
-          <div style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {profile.bio && <div className="profile-bio">{profile.bio}</div>}
+          {!profile.bio && <div className="text-muted mt-1">Aucune bio · touche « Modifier » pour en ajouter</div>}
+          {profile.email ? <button type="button" className="copy-value" onClick={() => copyText(profile.email!, 'E-mail')} title="Copier l’e-mail">{profile.email} <span aria-hidden="true">⧉</span></button> : <div className="text-muted-sm">Aucun e-mail</div>}
+          <div className="badge-row">
             {isAdmin && (
               <span className="badge">👑 {profile.role === 'president' ? 'Président' : 'Co-Président'}</span>
             )}
@@ -237,18 +242,18 @@ export default function ProfilePage() {
       <div className="card" data-testid="badges-card">
         <div className="card-title">Badges · {badges.length}/{BADGE_DEFINITIONS.length}</div>
         <BadgeGrid badges={badges} onSelect={(def,b)=>setBadgeSheet({def,badge:b})} />
-        {badges.length===0 && <p className="card-help" style={{marginTop:10}}>Validez vos pas, lancez une sortie GPS ou maintenez une série pour débloquer vos premiers trophées !</p>}
+        {badges.length===0 && <p className="card-help mt-2">Validez vos pas, lancez une sortie GPS ou maintenez une série pour débloquer vos premiers trophées !</p>}
       </div>
 
       <div className="card">
         <div className="card-title">Statistiques</div>
-        <div className="stat-grid" style={{gridTemplateColumns:'1fr 1fr'}}>
+        <div className="stat-grid-2">
           <div className="stat"><div className="stat-value">{fmtNumber(profile.totalSteps)}</div><div className="stat-label">pas cumulés</div></div>
           <div className="stat"><div className="stat-value">{formatDistance(totalDistance, profile.unitSystem || 'metric')}</div><div className="stat-label">distance totale</div></div>
           <div className="stat"><div className="stat-value">{profile.streak}</div><div className="stat-label">meilleure série</div></div>
           <div className="stat"><div className="stat-value">{fmtNumber(profile.totalCalories)}</div><div className="stat-label">kcal totales</div></div>
         </div>
-        <div className="row-sub" style={{marginTop:8}}>Membre depuis {new Date(profile.createdAt).toLocaleDateString('fr-FR')}</div>
+        <div className="row-sub mt-2">Membre depuis {new Date(profile.createdAt).toLocaleDateString('fr-FR')}</div>
       </div>
 
       <div className="card">
@@ -256,12 +261,12 @@ export default function ProfilePage() {
         <button type="button" className="referral-code" onClick={() => copyText(profile.referralCode, 'Code')} aria-label={`Copier le code ${profile.referralCode}`}>
           <span>Mon code</span><strong>{profile.referralCode}</strong><small>Toucher pour copier · +10 EC par filleul</small>
         </button>
-        <div className="two-col" style={{marginTop:10}}>
+        <div className="two-col mt-2">
           <button type="button" className="btn btn-outline btn-sm" onClick={onShare}>Partager le lien</button>
           <button type="button" className="btn btn-gold btn-sm" onClick={()=>setQrOpen(true)}>QR code</button>
         </div>
         {profile.referralRejected && (
-          <div className="row-sub" style={{ color: '#ff8b8b', marginTop: 6 }} data-testid="referral-rejected-note">
+          <div className="row-sub text-danger mt-1" data-testid="referral-rejected-note">
             ⚠️ Parrainage non éligible : même appareil ou même adresse IP
             détecté(e) entre votre parrain et vous.
           </div>
@@ -277,7 +282,7 @@ export default function ProfilePage() {
         <div className="card-title">Tableau de parrainage</div>
         {referralData ? (
           <>
-            <div className="stat-grid" style={{gridTemplateColumns:'1fr 1fr 1fr'}}>
+            <div className="stat-grid">
               <div className="stat"><div className="stat-value">{referralData.total}</div><div className="stat-label">filleuls</div></div>
               <div className="stat"><div className="stat-value">{referralData.active}</div><div className="stat-label">actifs*</div></div>
               <div className="stat"><div className="stat-value">+{referralData.earned} EC</div><div className="stat-label">gains</div></div>
@@ -287,12 +292,12 @@ export default function ProfilePage() {
               <div key={f.uid} className="list-row">
                 <Avatar name={f.displayName} photoURL={null} size={36} />
                 <div className="row-main">
-                  <div className="row-title" style={{fontSize:13}}>{f.displayName}</div>
+                  <div className="row-title row-title-sm">{f.displayName}</div>
                   <div className="row-sub">{fmtNumber(f.totalSteps||0)} pas · {f.active?'actif':'inactif'}</div>
                 </div>
                 {f.rejected ? <span className="badge badge-danger">Refusé</span> : f.claimed ? <span className="badge badge-success">Éligible ✓</span> : <span className="badge badge-muted">En attente</span>}
               </div>
-            )) : <div className="empty-state" style={{padding:'12px 0'}}>Aucun filleul pour l’instant — partagez votre code !</div>}
+            )) : <div className="empty-state empty-state-compact">Aucun filleul pour l’instant — partagez votre code !</div>}
           </>
         ) : <div className="empty-state">Chargement...</div>}
       </div>
@@ -301,7 +306,7 @@ export default function ProfilePage() {
         <div className="card-title">Paiement</div>
         <div className="list-row">
           <div className="row-main">
-            <div className="row-title" style={{ fontSize: 14 }}>{profile.paypalEmail || 'Aucun e-mail PayPal'}</div>
+            <div className="row-title">{profile.paypalEmail || 'Aucun e-mail PayPal'}</div>
             <div className="row-sub">Compte de réception des retraits</div>
           </div>
           <button className="btn btn-ghost btn-sm" onClick={() => setPaypalOpen(true)} data-testid="edit-paypal-button">
@@ -314,7 +319,7 @@ export default function ProfilePage() {
         <div className="card-title">Confidentialité du fil d’activité</div>
         <p className="card-help">Choisissez ce que vos amis voient dans leur fil.</p>
         <div className="list-row">
-          <div className="row-main"><div className="row-title" style={{fontSize:13}}>Objectifs atteints</div><div className="row-sub">Quand vous validez 10k pas</div></div>
+          <div className="row-main"><div className="row-title row-title-sm">Objectifs atteints</div><div className="row-sub">Quand vous validez 10k pas</div></div>
           <button className={`btn btn-sm ${profile.activityPrivacy?.shareGoals!==false?'btn-gold':'btn-ghost'}`} onClick={async()=>{
             const current = profile.activityPrivacy?.shareGoals !== false;
             await updateActivityPrivacy(profile.uid, { ...(profile.activityPrivacy||{}), shareGoals: !current });
@@ -322,7 +327,7 @@ export default function ProfilePage() {
           }}>{profile.activityPrivacy?.shareGoals===false?'Masqué':'Partagé'}</button>
         </div>
         <div className="list-row">
-          <div className="row-main"><div className="row-title" style={{fontSize:13}}>Sorties GPS</div><div className="row-sub">Fin de sortie</div></div>
+          <div className="row-main"><div className="row-title row-title-sm">Sorties GPS</div><div className="row-sub">Fin de sortie</div></div>
           <button className={`btn btn-sm ${profile.activityPrivacy?.shareActivities!==false?'btn-gold':'btn-ghost'}`} onClick={async()=>{
             const current = profile.activityPrivacy?.shareActivities !== false;
             await updateActivityPrivacy(profile.uid, { ...(profile.activityPrivacy||{}), shareActivities: !current });
@@ -330,7 +335,7 @@ export default function ProfilePage() {
           }}>{profile.activityPrivacy?.shareActivities===false?'Masqué':'Partagé'}</button>
         </div>
         <div className="list-row">
-          <div className="row-main"><div className="row-title" style={{fontSize:13}}>Badges</div><div className="row-sub">Trophées débloqués</div></div>
+          <div className="row-main"><div className="row-title row-title-sm">Badges</div><div className="row-sub">Trophées débloqués</div></div>
           <button className={`btn btn-sm ${profile.activityPrivacy?.shareBadges!==false?'btn-gold':'btn-ghost'}`} onClick={async()=>{
             const current = profile.activityPrivacy?.shareBadges !== false;
             await updateActivityPrivacy(profile.uid, { ...(profile.activityPrivacy||{}), shareBadges: !current });
@@ -338,7 +343,7 @@ export default function ProfilePage() {
           }}>{profile.activityPrivacy?.shareBadges===false?'Masqué':'Partagé'}</button>
         </div>
         <div className="list-row">
-          <div className="row-main"><div className="row-title" style={{fontSize:13}}>Défis</div><div className="row-sub">Victoires et challenges</div></div>
+          <div className="row-main"><div className="row-title row-title-sm">Défis</div><div className="row-sub">Victoires et challenges</div></div>
           <button className={`btn btn-sm ${profile.activityPrivacy?.shareChallenges!==false?'btn-gold':'btn-ghost'}`} onClick={async()=>{
             const current = profile.activityPrivacy?.shareChallenges !== false;
             await updateActivityPrivacy(profile.uid, { ...(profile.activityPrivacy||{}), shareChallenges: !current });
@@ -353,7 +358,7 @@ export default function ProfilePage() {
           <>
             <div className="list-row">
               <div className="row-main">
-                <div className="row-title" style={{ fontSize: 14 }}>Rappel quotidien (20 h)</div>
+                <div className="row-title">Rappel quotidien (20 h)</div>
                 <div className="row-sub">Notification locale de validation des pas</div>
               </div>
               <button
@@ -366,7 +371,7 @@ export default function ProfilePage() {
             </div>
             <div className="list-row">
               <div className="row-main">
-                <div className="row-title" style={{ fontSize: 14 }}>Notifications push</div>
+                <div className="row-title">Notifications push</div>
                 <div className="row-sub">Demandes d’amis, retraits et actualités</div>
               </div>
               <button
@@ -381,18 +386,54 @@ export default function ProfilePage() {
         )}
       </div>
 
+      {/* Réglage d'affichage : Système / Sombre / Contraste renforcé.
+          Le choix est persisté et appliqué via data-theme sur <html>. */}
+      <div className="card" data-testid="display-settings">
+        <div className="card-title">Affichage</div>
+        <p className="card-help mb-2">
+          La charte noir &amp; or reste la référence. Choisissez un contraste plus élevé si
+          vous lisez dehors ou avec une vue fatiguée.
+        </p>
+        <div className="theme-options" role="radiogroup" aria-label="Thème d’affichage">
+          {THEME_OPTIONS.map((option) => {
+            const selected = themePreference === option.id;
+            return (
+              <button
+                key={option.id}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                className={`theme-option ${selected ? 'theme-option-selected' : ''}`}
+                onClick={() => { void setThemePreference(option.id); }}
+                data-testid={`theme-option-${option.id}`}
+              >
+                <span className="theme-option-icon" aria-hidden="true">{option.icon}</span>
+                <span className="theme-option-main">
+                  <span className="theme-option-title">{option.label}</span>
+                  <span className="theme-option-hint">{option.hint}</span>
+                </span>
+                <span className="theme-option-check" aria-hidden="true">{selected ? '✓' : ''}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       <div className="card"><div className="card-title">Compte & données</div>
         <button className="btn btn-ghost" onClick={()=>setSecurityOpen(true)}>Changer le mot de passe</button>
         <button className="btn btn-ghost" onClick={()=>setEmailOpen(true)} data-testid="change-email-button">Changer l’adresse e-mail</button><div className="section-gap" />
-        <button className="btn btn-outline" onClick={onPrivacyOptions}>Confidentialité des annonces (Meta)</button><div className="section-gap" />
+        <button className="btn btn-outline" onClick={onPrivacyOptions} data-testid="ad-privacy-button">Confidentialité des annonces (Chartboost · Meta)</button><div className="section-gap" />
         <button className="btn btn-outline" onClick={onExport}>Exporter mes données (RGPD)</button><div className="section-gap" />
         <a className="btn btn-outline" href={DATA_DELETION_URL} target="_blank" rel="noopener noreferrer">Supprimer une partie de mes données</a><div className="section-gap" />
         <button className="btn btn-danger" onClick={onDelete} disabled={busy}>Supprimer définitivement mon compte</button>
-        <p style={{ color: 'var(--muted)', fontSize: 12, marginTop: 8, lineHeight: 1.5 }}>
+        <p className="text-muted mt-2">
           Procédure détaillée, données supprimées et durées de conservation :{' '}
           <a href={ACCOUNT_DELETION_URL} target="_blank" rel="noopener noreferrer">{ACCOUNT_DELETION_URL}</a>
         </p>
-        <div className="legal-links"><a href="/legal/terms">CGU</a> · <a href="/legal/privacy">Confidentialité</a> · <a href="/legal/notices">Mentions légales</a> · <a href="mailto:contact@elysium-esport.fr?subject=Feedback%20ElyWalk">Donner mon avis</a> · <button className="text-button" style={{display:'inline',padding:0,width:'auto'}} onClick={()=>navigate('/whats-new')}>Nouveautés</button><br/>ElyWalk 1.4.0</div>
+        <div className="legal-links"><a href="/legal/terms">CGU</a> · <a href="/legal/privacy">Confidentialité</a> · <a href="/legal/notices">Mentions légales</a> · <a href="mailto:contact@elysium-esport.fr?subject=Feedback%20ElyWalk">Donner mon avis</a> · <button className="text-button legal-inline-button" onClick={()=>navigate('/whats-new')}>Nouveautés</button><br/>
+          {/* Version générée au build (package.json) : plus de chaîne en dur. */}
+          <span data-testid="app-version" title={`Build ${BUILD_STAMP}`}>ElyWalk {APP_VERSION}</span>
+        </div>
       </div>
 
       {isAdmin && (
@@ -461,7 +502,7 @@ export default function ProfilePage() {
           />
         </div>
         <div className="field">
-          <label>Bio <span style={{color:'var(--muted)', textTransform:'none'}}>{editBio.length}/160</span></label>
+          <label>Bio <span className="field-counter">{editBio.length}/160</span></label>
           <textarea
             className="input"
             value={editBio}
@@ -471,16 +512,16 @@ export default function ProfilePage() {
             rows={3}
             data-testid="edit-bio-input"
           />
-          <small style={{color:'var(--muted)', fontSize:11}}>Visible sur votre profil public. 160 caractères max.</small>
+          <small className="field-help">Visible sur votre profil public. 160 caractères max.</small>
         </div>
         {editBio && (
-          <div className="card" style={{background:'var(--surface-2)', marginBottom:12}}>
-            <div className="card-title" style={{fontSize:11}}>Aperçu public</div>
-            <div style={{display:'flex', gap:10, alignItems:'center'}}>
+          <div className="card card-preview mb-3">
+            <div className="card-title">Aperçu public</div>
+            <div className="profile-preview-row">
               <Avatar name={editName||profile.displayName} photoURL={editPreview||profile.photoURL} size={44} />
               <div>
-                <div style={{fontWeight:700, fontSize:14}}>{editName||profile.displayName}</div>
-                <div style={{color:'var(--muted)', fontSize:12, marginTop:2}}>{editBio || 'Votre bio apparaîtra ici'}</div>
+                <div className="profile-preview-name">{editName||profile.displayName}</div>
+                <div className="row-sub">{editBio || 'Votre bio apparaîtra ici'}</div>
               </div>
             </div>
           </div>
@@ -528,12 +569,12 @@ export default function ProfilePage() {
       </Sheet>
 
       <Sheet open={qrOpen} onClose={()=>setQrOpen(false)} title="Mon QR ami">
-        <div style={{textAlign:'center', padding:'10px 0'}}>
+        <div className="qr-sheet text-center">
           <QRCode value={`${location.origin}/?ref=${profile.referralCode}`} size={220} title={`Code ${profile.referralCode}`} />
-          <div style={{marginTop:14, fontFamily:'var(--font-display)', fontSize:26, color:'var(--gold)', letterSpacing:'0.2em'}}>{profile.referralCode}</div>
-          <p className="card-help" style={{marginTop:8}}>Vos amis scannent ce QR en présentiel pour vous ajouter instantanément.</p>
-          <button className="btn btn-gold" style={{marginTop:14}} onClick={onShareQR}>Partager l’image stylée</button>
-          <button className="btn btn-outline" style={{marginTop:8}} onClick={()=>copyText(`${location.origin}/?ref=${profile.referralCode}`,'Lien')}>Copier le lien</button>
+          <div className="qr-sheet-code">{profile.referralCode}</div>
+          <p className="card-help mt-2">Vos amis scannent ce QR en présentiel pour vous ajouter instantanément.</p>
+          <button className="btn btn-gold mt-3" onClick={onShareQR}>Partager l’image stylée</button>
+          <button className="btn btn-outline mt-2" onClick={()=>copyText(`${location.origin}/?ref=${profile.referralCode}`,'Lien')}>Copier le lien</button>
         </div>
       </Sheet>
     </div>

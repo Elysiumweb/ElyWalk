@@ -94,7 +94,7 @@ export default function WalletPage() {
         <img src="/deco-2.webp" className="gc-deco" alt="" />
         <div className="gc-label">Solde actuel</div>
         <div className="gc-balance" data-testid="wallet-balance">
-          {fmtCoins(profile?.elycoins || 0)} <span style={{ fontSize: 17 }}>EC</span>
+          {fmtCoins(profile?.elycoins || 0)} <span className="gc-unit">EC</span>
         </div>
         <div className="gc-euro" data-testid="wallet-euro-value">
           ≈ {coinsToEuros(profile?.elycoins || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
@@ -103,7 +103,7 @@ export default function WalletPage() {
 
       {isExcluded && (
         <div className="card" data-testid="president-excluded-notice">
-          <p style={{ color: 'var(--muted)', fontSize: 13 }}>
+          <p className="text-muted-sm">
             👑 En tant que {profile?.role === 'president' ? 'Président' : 'Co-Président'}, vous êtes
             exclu de la conversion en argent et des avantages partenaires mais vos ElyCoins
             comptent au classement ! Les donations restent possibles.
@@ -148,10 +148,10 @@ export default function WalletPage() {
               <div className="list-row" key={t.id} data-testid="transaction-row">
                 <span className="transaction-icon" aria-hidden="true">{transactionIcon(t.type)}</span>
                 <div className="row-main">
-                  <div className="row-title" style={{ fontSize: 14 }}>{t.note}</div>
+                  <div className="row-title">{t.note}</div>
                   <div className="row-sub">{formatDateTime(t.createdAt)}</div>
                 </div>
-                <div className="row-value" style={{ color: t.coins >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+                <div className={`row-value ${t.coins >= 0 ? 'amount-positive' : 'amount-negative'}`}>
                   {t.coins >= 0 ? '+' : ''}{fmtCoins(t.coins)} EC
                 </div>
               </div>
@@ -167,7 +167,7 @@ export default function WalletPage() {
             withdrawals.map((w) => (
               <div className="list-row" key={w.id} data-testid="withdrawal-row">
                 <div className="row-main">
-                  <div className="row-title" style={{ fontSize: 14 }}>
+                  <div className="row-title">
                     {w.type === 'paypal' ? `PayPal · ${w.paypalEmail}` : w.type === 'donation' ? 'Donation Elysium' : 'Partenaire'}
                   </div>
                   <div className="row-sub">
@@ -181,7 +181,7 @@ export default function WalletPage() {
       </div>
 
       <Sheet open={paypalOpen} onClose={() => setPaypalOpen(false)} title="Retrait PayPal" testId="paypal-sheet">
-        <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 14 }}>
+        <p className="sheet-intro">
           1000 ElyCoins = 1 €. Le paiement sera envoyé sur votre compte PayPal.
         </p>
         <div className="field">
@@ -206,7 +206,7 @@ export default function WalletPage() {
             data-testid="paypal-amount-input"
           />
           {Number(amount) > 0 && (
-            <div style={{ color: 'var(--gold)', fontSize: 13, marginTop: 6 }}>
+            <div className="field-hint-gold">
               = {fmtEuros(Math.floor(Number(amount)))}
             </div>
           )}
@@ -217,7 +217,7 @@ export default function WalletPage() {
       </Sheet>
 
       <Sheet open={donateOpen} onClose={() => setDonateOpen(false)} title="Donation à Elysium" testId="donate-sheet">
-        <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 14 }}>
+        <p className="sheet-intro">
           Transformez vos ElyCoins en soutien direct à l’association Elysium. 💛
         </p>
         <div className="field">

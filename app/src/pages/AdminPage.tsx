@@ -180,13 +180,13 @@ export default function AdminPage() {
             </div>
           ) : (
             partnerReqs.map((p) => (
-              <div key={p.id} style={{ padding: '12px 0', borderBottom: '1px solid rgba(216,202,130,0.08)' }} data-testid="admin-partner-row">
+              <div key={p.id} className="admin-req-row" data-testid="admin-partner-row">
                 <div className="row-title">{p.organization}</div>
                 <div className="row-sub">
                   Par {p.userName} · {p.contactEmail} · {new Date(p.createdAt).toLocaleDateString('fr-FR')}
                 </div>
-                <p style={{ fontSize: 13.5, margin: '8px 0', color: 'var(--white)' }}>{p.message}</p>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <p className="admin-req-message">{p.message}</p>
+                <div className="admin-req-actions">
                   <span className={`badge ${p.status === 'accepted' ? 'badge-success' : p.status === 'rejected' ? 'badge-danger' : 'badge-muted'}`}>
                     {p.status === 'pending' ? 'Nouvelle' : p.status === 'read' ? 'Lue' : p.status === 'accepted' ? 'Acceptée' : 'Refusée'}
                   </span>
@@ -219,7 +219,7 @@ export default function AdminPage() {
             </div>
           ) : (
             withdrawals.map((w) => (
-              <div key={w.id} style={{ padding: '12px 0', borderBottom: '1px solid rgba(216,202,130,0.08)' }} data-testid="admin-withdrawal-row">
+              <div key={w.id} className="admin-req-row" data-testid="admin-withdrawal-row">
                 <div className="row-title">
                   {w.userName} — {w.type === 'paypal' ? fmtEuros(w.coins) : `${fmtCoins(w.coins)} EC`}
                 </div>
@@ -227,7 +227,7 @@ export default function AdminPage() {
                   {w.type === 'paypal' ? `PayPal : ${w.paypalEmail}` : w.type === 'donation' ? 'Donation Elysium' : 'Partenaire'} ·{' '}
                   {new Date(w.createdAt).toLocaleDateString('fr-FR')}
                 </div>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+                <div className="admin-req-actions mt-2">
                   <span className={`badge ${w.status === 'paid' || w.status === 'received' ? 'badge-success' : w.status === 'rejected' ? 'badge-danger' : 'badge-muted'}`}>
                     {w.status === 'pending' ? 'En attente' : w.status === 'paid' ? 'Payé' : w.status === 'received' ? 'Donation reçue' : 'Refusé'}
                   </span>
@@ -250,7 +250,7 @@ export default function AdminPage() {
         <>
           <div className="card" data-testid="admin-establishment-form">
             <div className="card-title">Nouvelle fiche établissement</div>
-            <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 14 }}>
+            <p className="text-muted-sm mb-3">
               La fiche apparaîtra sur la carte à l’adresse indiquée, pour promouvoir le partenaire.
             </p>
             <div className="field">
@@ -285,18 +285,18 @@ export default function AdminPage() {
             </div>
             <div className="field">
               <label>Logo</label>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div className="logo-picker">
                 {estLogo ? (
-                  <img src={estLogo} alt="Logo" style={{ width: 52, height: 52, borderRadius: 12, objectFit: 'cover', border: '1px solid var(--gold-border)' }} />
+                  <img src={estLogo} alt="Logo" className="logo-preview" />
                 ) : (
-                  <div className="avatar" style={{ width: 52, height: 52, borderRadius: 12 }}>?</div>
+                  <div className="avatar logo-preview logo-preview-empty">?</div>
                 )}
-                <label className="btn btn-ghost btn-sm" style={{ cursor: 'pointer' }}>
+                <label className="btn btn-ghost btn-sm file-label">
                   Choisir une image
                   <input
                     type="file"
                     accept="image/*"
-                    style={{ display: 'none' }}
+                    className="visually-hidden-file"
                     onChange={(e) => onLogoFile(e.target.files?.[0] || null)}
                     data-testid="establishment-logo-input"
                   />
@@ -318,7 +318,7 @@ export default function AdminPage() {
               establishments.map((e) => (
                 <div className="list-row" key={e.id} data-testid="admin-establishment-row">
                   {e.logoDataUrl ? (
-                    <img src={e.logoDataUrl} alt="" style={{ width: 42, height: 42, borderRadius: 10, objectFit: 'cover', border: '1px solid var(--gold-border)' }} />
+                    <img src={e.logoDataUrl} alt="" className="logo-thumb" />
                   ) : (
                     <div className="avatar">{e.name.charAt(0).toUpperCase()}</div>
                   )}

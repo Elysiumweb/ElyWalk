@@ -69,7 +69,7 @@ export default function AuthPage() {
       <h1 className="auth-title">ELYWALK</h1>
       <p className="auth-sub">Marche. Gagne. Soutiens Elysium.</p>
 
-      <div className="chip-row" style={{ justifyContent: 'center' }}>
+      <div className="chip-row chip-row-center">
         <button
           className={`chip ${mode === 'login' ? 'chip-active' : ''}`}
           onClick={() => setMode('login')}

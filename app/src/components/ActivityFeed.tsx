@@ -34,7 +34,7 @@ export default function ActivityFeed(){
         <div key={it.id} className="list-row" data-testid="feed-item">
           <Avatar name={it.displayName} photoURL={it.photoURL} size={38} />
           <div className="row-main">
-            <div className="row-title" style={{fontSize:13}}><span style={{marginRight:6}}>{iconFor(it.type)}</span>{it.displayName} <span style={{color:'var(--muted)', fontWeight:400}}>{it.message}</span></div>
+            <div className="row-title row-title-sm"><span className="feed-icon">{iconFor(it.type)}</span>{it.displayName} <span className="feed-message">{it.message}</span></div>
             <div className="row-sub">{timeAgo(it.createdAt)}</div>
           </div>
         </div>

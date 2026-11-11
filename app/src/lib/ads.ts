@@ -1,35 +1,43 @@
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { Preferences } from '@capacitor/preferences';
 import {
-  META_PLACEMENT_BANNER,
-  META_PLACEMENT_INTERSTITIAL,
-  META_PLACEMENT_MEDIUM_RECTANGLE,
-  META_PLACEMENT_NATIVE,
-  META_PLACEMENT_NATIVE_BANNER,
-  META_PLACEMENT_REWARDED_INTERSTITIAL,
+  CHARTBOOST_APP_ID,
+  CHARTBOOST_PLACEMENT_BANNER,
+  CHARTBOOST_PLACEMENT_INTERSTITIAL,
+  CHARTBOOST_PLACEMENT_REWARDED,
 } from './constants';
 import { getAdConsent, subscribeAdConsent, type AdConsent } from './adConsent';
 
 // ============================================================================
-// Publicité — Meta Audience Network (régie unique depuis 1.9.0).
+// Publicité — Chartboost Mediation → Meta Audience Network (depuis 2.1.0).
 //
-// Le SDK Meta est du code natif Android : la WebView ne peut pas l'appeler
-// directement. Un plugin Capacitor maison (`MetaAdsPlugin.java`) expose donc :
-//   • initialize / setConsent
-//   • bannière 320×50 (bas de page, sur toutes les pages)
-//   • native banner compact (listes)
-//   • interstitiel plein écran
-//   • interstitiel récompensé (vidéo → ElyCoins)
-//   • medium rectangle 300×250 (avant un retrait)
-//   • carte native (fin de sortie)
+// Chartboost Mediation arbitre les enchères et revend l'inventaire à Meta
+// Audience Network via l'adaptateur officiel :
+//   https://developers.facebook.com/documentation/audience-network/bidding/partner-mediation/chartboost
+//
+// Les SDK sont du code natif Android : la WebView ne peut pas les appeler
+// directement. Un plugin Capacitor maison
+// (`ChartboostMediationAdsPlugin.java`, exposé sous le nom `MetaAds`) expose :
+//   • initialize(appId) / setConsent
+//   • bannière ancrée en bas  → ad location `banner`
+//   • interstitiel plein écran → ad location `inter`
+//   • interstitiel récompensé → ad location `reward`
+//   • encart avant retrait, carte de fin de sortie (plein écran / in-app)
+//
+// ⚠️ Les trois ad locations Chartboost existantes sont INTERSTITIAL, REWARDED
+// et INTERSTITIAL (« banner » a été créée au format interstitiel). Aucun
+// inventaire bannière n'existe donc : `showBottomAd()` résout avec une hauteur
+// de 0 px et l'interface n'occupe pas d'espace en bas de l'écran. Voir
+// DEPLOYMENT.md § « Chartboost Mediation » pour revenir à une vraie bannière.
 //
 // Côté web (navigateur), tout est inerte : les fonctions résolvent sans rien
 // afficher, l'app reste utilisable en `npm run dev`.
 //
-// ⚠️ Meta Audience Network ne propose PAS de Server-Side Verification pour les
-// récompenses (contrairement à AdMob SSV) : la récompense ElyCoins est donc
-// créditée côté client, bornée par la règle Firestore (1 récompense/heure et
-// un slot `adClaims` unique par heure) et par l'attestation Play Integrity.
+// ⚠️ Ni Chartboost Mediation ni Meta Audience Network ne proposent de
+// Server-Side Verification signée pour les récompenses : la récompense ElyCoins
+// est donc créditée côté client, bornée par la règle Firestore (1 récompense
+// par heure et par compte, slot `adClaims` unique) et par l'attestation Play
+// Integrity.
 // ============================================================================
 
 const isNative = () => Capacitor.isNativePlatform();
@@ -39,7 +47,7 @@ const isNative = () => Capacitor.isNativePlatform();
 // ---------------------------------------------------------------------------
 
 interface MetaAdsPlugin {
-  initialize(): Promise<void>;
+  initialize(options: { appId: string }): Promise<void>;
   setConsent(options: { personalized: boolean }): Promise<void>;
   showBanner(options: { placementId: string }): Promise<{ height: number }>;
   hideBanner(): Promise<void>;
@@ -97,7 +105,7 @@ async function applyConsent(): Promise<void> {
     await MetaAds.setConsent({ personalized: consent === 'granted' });
     appliedConsent = consent;
   } catch (e) {
-    console.warn('[MetaAds] setConsent error', e);
+    console.warn('[Ads] setConsent error', e);
   }
   if (!adsAllowed) await hideBottomAd();
 }
@@ -109,9 +117,10 @@ export async function initAds(): Promise<void> {
 
   initialization = (async () => {
     try {
-      // Le plugin Android ne résout initialize qu'après le callback Meta :
-      // toute requête publicitaire attend donc vraiment la fin du démarrage.
-      await MetaAds.initialize();
+      // Le plugin Android ne résout initialize qu'après le callback du module
+      // Chartboost Mediation : toute requête publicitaire attend donc vraiment
+      // la fin du démarrage (et celle de l'adaptateur Meta Audience Network).
+      await MetaAds.initialize({ appId: CHARTBOOST_APP_ID });
       initialized = true;
       await applyConsent();
       if (!consentSubscribed) {
@@ -119,7 +128,7 @@ export async function initAds(): Promise<void> {
         subscribeAdConsent(() => { void applyConsent(); });
       }
     } catch (e) {
-      console.warn('[MetaAds] init error', e);
+      console.warn('[Ads] init error', e);
     } finally {
       initialization = null;
     }
@@ -165,19 +174,19 @@ export async function showBottomAd(kind: BottomAdKind): Promise<void> {
     if (kind === 'nativeBanner') {
       // Un seul ancrage bas à la fois : on retire l'autre format.
       if (bottomKind) await MetaAds.hideBanner().catch(() => undefined);
-      const { height } = await MetaAds.showNativeBanner({ placementId: META_PLACEMENT_NATIVE_BANNER });
+      const { height } = await MetaAds.showNativeBanner({ placementId: CHARTBOOST_PLACEMENT_BANNER });
       // Pas de remplissage (no fill) : on ne mémorise rien pour pouvoir
       // retenter à la prochaine navigation.
       bottomKind = height > 0 ? 'nativeBanner' : null;
       setBannerHeight(height);
     } else {
       if (bottomKind) await MetaAds.hideNativeBanner().catch(() => undefined);
-      const { height } = await MetaAds.showBanner({ placementId: META_PLACEMENT_BANNER });
+      const { height } = await MetaAds.showBanner({ placementId: CHARTBOOST_PLACEMENT_BANNER });
       bottomKind = height > 0 ? 'banner' : null;
       setBannerHeight(height);
     }
   } catch (e) {
-    console.warn('[MetaAds] bottom ad error', e);
+    console.warn('[Ads] bottom ad error', e);
     bottomKind = null;
     setBannerHeight(0);
   }
@@ -207,14 +216,14 @@ export async function showInterstitial(): Promise<void> {
   if (!canShowAds()) return;
   try {
     const { loaded } = await withTimeout(
-      MetaAds.loadInterstitial({ placementId: META_PLACEMENT_INTERSTITIAL }),
+      MetaAds.loadInterstitial({ placementId: CHARTBOOST_PLACEMENT_INTERSTITIAL }),
       LOAD_TIMEOUT_MS,
       { loaded: false }
     );
     if (!loaded) return;
     await MetaAds.showInterstitial();
   } catch (e) {
-    console.warn('[MetaAds] interstitial error', e);
+    console.warn('[Ads] interstitial error', e);
   }
 }
 
@@ -235,7 +244,7 @@ export async function showRewardedAd(_uid?: string): Promise<boolean> {
   if (!canShowAds()) return false;
   try {
     const { loaded } = await withTimeout(
-      MetaAds.loadRewarded({ placementId: META_PLACEMENT_REWARDED_INTERSTITIAL }),
+      MetaAds.loadRewarded({ placementId: CHARTBOOST_PLACEMENT_REWARDED }),
       LOAD_TIMEOUT_MS,
       { loaded: false }
     );
@@ -243,7 +252,7 @@ export async function showRewardedAd(_uid?: string): Promise<boolean> {
     const { rewarded } = await MetaAds.showRewarded();
     return !!rewarded;
   } catch (e) {
-    console.warn('[MetaAds] rewarded error', e);
+    console.warn('[Ads] rewarded error', e);
     return false;
   }
 }
@@ -261,12 +270,12 @@ export async function showWithdrawalAd(): Promise<void> {
     // L'encart s'affiche au-dessus de la feuille de retrait ; on n'attend pas
     // plus de 8 s pour ne pas retarder la demande de l'utilisateur.
     await withTimeout(
-      MetaAds.showMediumRectangle({ placementId: META_PLACEMENT_MEDIUM_RECTANGLE }),
+      MetaAds.showMediumRectangle({ placementId: CHARTBOOST_PLACEMENT_BANNER }),
       8000,
       { shown: false }
     );
   } catch (e) {
-    console.warn('[MetaAds] medium rectangle error', e);
+    console.warn('[Ads] medium rectangle error', e);
   }
 }
 
@@ -280,9 +289,9 @@ export async function showEndOfActivityAd(): Promise<void> {
   await initAds();
   if (!canShowAds()) return;
   try {
-    await MetaAds.showNativeCard({ placementId: META_PLACEMENT_NATIVE });
+    await MetaAds.showNativeCard({ placementId: CHARTBOOST_PLACEMENT_INTERSTITIAL });
   } catch (e) {
-    console.warn('[MetaAds] native card error', e);
+    console.warn('[Ads] native card error', e);
   }
 }
 
@@ -335,7 +344,7 @@ export async function shouldShowAppOpenAd(): Promise<boolean> {
   try {
     return isAppOpenAllowed(await readAppOpenState());
   } catch (e) {
-    console.warn('[MetaAds] appOpen state error', e);
+    console.warn('[Ads] appOpen state error', e);
     return false;
   }
 }
@@ -354,7 +363,7 @@ export async function recordAppOpenAdShown(now = Date.now()): Promise<void> {
       } satisfies AppOpenState),
     });
   } catch (e) {
-    console.warn('[MetaAds] appOpen record error', e);
+    console.warn('[Ads] appOpen record error', e);
   }
 }
 
@@ -367,13 +376,13 @@ export async function loadAppOpenAd(): Promise<void> {
   if (!canShowAds()) return;
   try {
     const { loaded } = await withTimeout(
-      MetaAds.loadInterstitial({ placementId: META_PLACEMENT_INTERSTITIAL }),
+      MetaAds.loadInterstitial({ placementId: CHARTBOOST_PLACEMENT_INTERSTITIAL }),
       LOAD_TIMEOUT_MS,
       { loaded: false }
     );
     appOpenPreloaded = loaded;
   } catch (e) {
-    console.warn('[MetaAds] appOpen load error', e);
+    console.warn('[Ads] appOpen load error', e);
   }
 }
 
@@ -386,7 +395,7 @@ export async function showAppOpenAdIfReady(): Promise<void> {
   try {
     if (!appOpenPreloaded) {
       const { loaded } = await withTimeout(
-        MetaAds.loadInterstitial({ placementId: META_PLACEMENT_INTERSTITIAL }),
+        MetaAds.loadInterstitial({ placementId: CHARTBOOST_PLACEMENT_INTERSTITIAL }),
         LOAD_TIMEOUT_MS,
         { loaded: false }
       );
@@ -396,6 +405,6 @@ export async function showAppOpenAdIfReady(): Promise<void> {
     const { shown } = await MetaAds.showInterstitial();
     if (shown) await recordAppOpenAdShown();
   } catch (e) {
-    console.warn('[MetaAds] appOpen show error', e);
+    console.warn('[Ads] appOpen show error', e);
   }
 }

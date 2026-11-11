@@ -47,16 +47,16 @@ export default function PublicProfilePage(){
       <Avatar name={p.displayName} photoURL={p.photoURL} size={76}/>
       <h2>{p.displayName}</h2>
       <p>{p.bio||'Membre de la communauté ElyWalk'}</p>
-      <div style={{marginTop:10, display:'flex', gap:8, justifyContent:'center', flexWrap:'wrap'}}>
+      <div className="badge-row badge-row-center mt-2">
         <span className="badge">{fmtCoins(p.elycoins)} EC</span>
         <span className="badge">🔥 {p.streak} j</span>
       </div>
     </div>
 
     {!isMe && (
-      <div className="card" style={{display:'flex', gap:8}}>
-        <button className="btn btn-gold" style={{flex:1}} onClick={onAddFriend} disabled={busy} data-testid="public-add-friend">+ Ajouter en ami</button>
-        <button className="btn btn-outline" style={{flex:1}} onClick={onEncourage} disabled={busy} data-testid="public-encourage">👏 Encourager</button>
+      <div className="card friend-actions">
+        <button className="btn btn-gold" onClick={onAddFriend} disabled={busy} data-testid="public-add-friend">+ Ajouter en ami</button>
+        <button className="btn btn-outline" onClick={onEncourage} disabled={busy} data-testid="public-encourage">👏 Encourager</button>
       </div>
     )}
 
@@ -65,30 +65,30 @@ export default function PublicProfilePage(){
       <div className="stat"><div className="stat-value">{p.streak}</div><div className="stat-label">série</div></div>
       <div className="stat"><div className="stat-value">{fmtCoins(p.elycoins)}</div><div className="stat-label">EC</div></div>
     </div>
-    <div className="stat-grid" style={{marginTop:10}}>
+    <div className="stat-grid mt-2">
       <div className="stat"><div className="stat-value">{fmtNumber(p.totalSteps)}</div><div className="stat-label">pas cumulés</div></div>
       <div className="stat"><div className="stat-value">{formatDistance(totalDistance, p.unitSystem||'metric')}</div><div className="stat-label">distance totale</div></div>
       <div className="stat"><div className="stat-value">{fmtNumber(p.totalCalories)}</div><div className="stat-label">kcal totales</div></div>
     </div>
 
-    <div style={{marginTop:12}}>
+    <div className="mt-3">
       <LevelBadge totalSteps={p.totalSteps} />
     </div>
 
     <div className="card">
       <div className="card-title">Badges · {badges.length}</div>
-      {badges.length>0 ? <BadgeGrid badges={badges} size="small" /> : <div className="empty-state" style={{padding:'12px 0'}}>Aucun badge encore débloqué.</div>}
+      {badges.length>0 ? <BadgeGrid badges={badges} size="small" /> : <div className="empty-state empty-state-compact">Aucun badge encore débloqué.</div>}
     </div>
 
     <div className="card">
       <div className="card-title">À propos</div>
       <div className="list-row">
-        <div className="row-main"><div className="row-title" style={{fontSize:13}}>Membre depuis</div><div className="row-sub">{memberSince}</div></div>
+        <div className="row-main"><div className="row-title row-title-sm">Membre depuis</div><div className="row-sub">{memberSince}</div></div>
       </div>
       <div className="list-row">
-        <div className="row-main"><div className="row-title" style={{fontSize:13}}>Objectif quotidien</div><div className="row-sub">{fmtNumber(p.dailyStepGoal||10000)} pas</div></div>
+        <div className="row-main"><div className="row-title row-title-sm">Objectif quotidien</div><div className="row-sub">{fmtNumber(p.dailyStepGoal||10000)} pas</div></div>
       </div>
-      {p.bio && <div style={{marginTop:10, padding:10, background:'var(--surface-2)', borderRadius:8, color:'#d8d2c2', fontSize:13}}>{p.bio}</div>}
+      {p.bio && <div className="profile-bio-block">{p.bio}</div>}
     </div>
 
     {!isMe && (

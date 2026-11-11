@@ -804,7 +804,7 @@ export default function ActivityPage() {
             )}
           </div>
 
-          {loadingSessions && sessions.length === 0 && <div className="spinner" style={{ margin: '18px auto' }} />}
+          {loadingSessions && sessions.length === 0 && <div className="spinner spinner-inline" />}
           {!loadingSessions && sessions.length === 0 && (
             <div className="empty-state">
               {activeFilterCount > 0 ? 'Aucune sortie ne correspond à ces filtres.' : 'Démarrez votre première sortie GPS.'}
@@ -826,11 +826,11 @@ export default function ActivityPage() {
             </button>
           ))}
           {hasMore && (
-            <button className="btn btn-outline" style={{ marginTop: 8 }} onClick={loadMoreSessions} disabled={loadingSessions}>
+            <button className="btn btn-outline mt-2" onClick={loadMoreSessions} disabled={loadingSessions}>
               {loadingSessions ? 'Chargement…' : 'Charger plus de sorties'}
             </button>
           )}
-          <button className="text-button" style={{ marginTop: 6 }} onClick={() => navigate('/history')}>
+          <button className="text-button mt-1" onClick={() => navigate('/history')}>
             Voir l’historique quotidien
           </button>
       </div>

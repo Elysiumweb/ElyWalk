@@ -90,7 +90,7 @@ function Shell() {
     return (
       <div className="loading-screen" data-testid="loading-screen">
         <div className="loading-emblem">
-          <img src="/elywalk-logo.png" alt="ElyWalk" style={{ width: 110 }} />
+          <img src="/elywalk-logo.png" alt="ElyWalk" className="splash-logo" />
         </div>
         <div className="spinner" />
       </div>

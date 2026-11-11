@@ -202,7 +202,7 @@ npx cap sync android
 npx cap open android
 ```
 
-La version Android est `190 / 1.9.0`.
+La version Android est `210 / 2.1.0`.
 
 ## Consentement publicitaire RGPD (F03)
 
@@ -214,8 +214,13 @@ recueilli **dans l'application** (`src/lib/adConsent.ts` + `components/AdConsent
 - Tant qu'aucun choix n'est exprimé (`unknown`), **aucune annonce n'est
   demandée** : ni bannière, ni interstitiel, ni vidéo récompensée.
 - Le choix est persisté (`Preferences`, clé `ads.consent.v1`), transmis au SDK
-  natif via `MetaAds.setConsent({ personalized })` puis révocable à tout moment
-  depuis Profil → *Confidentialité des annonces*.
+  natif via `MetaAds.setConsent({ personalized })` (le nom du plugin Capacitor
+  n'a pas changé, mais il pilote désormais Chartboost Mediation) puis révocable
+  à tout moment depuis Profil → *Confidentialité des annonces (Chartboost · Meta)*.
+- Côté Meta, le refus est appliqué par `AdSettings.setDataProcessingOptions(["LDU"], 0, 0)` ;
+  l'acceptation remet les options à zéro. Chartboost Core 1.1.0 n'expose pas de
+  setter de consentement Java (uniquement via adaptateur CMP) : le garde-fou
+  applicatif reste la source de vérité.
 
 > ⚠️ **EEE / Royaume-Uni** : ce garde-fou applicatif ne remplace pas une CMP
 > enregistrée IAB TCF v2. Pour une mise en production conforme, brancher une CMP
@@ -224,20 +229,35 @@ recueilli **dans l'application** (`src/lib/adConsent.ts` + `components/AdConsent
 > Monetization Manager → *Data processing options* que le mode `LDU` est bien
 > appliqué en cas de refus.
 
-## Meta Audience Network (régie publicitaire depuis 1.9.0)
+## Chartboost Mediation + Meta Audience Network (régie depuis 2.1.0)
+
+Depuis la 2.1.0, ElyWalk n'appelle plus directement le SDK Meta : l'application
+intègre **Chartboost Mediation** (ex-Helium, SDK Android `5.4.0`), qui sert les
+emplacements et délègue le remplissage à l'**adaptateur Meta Audience Network**
+(`5.6.22.0.0`, AN SDK `6.22.0`). Procédure suivie :
+<https://developers.facebook.com/documentation/audience-network/bidding/partner-mediation/chartboost>.
+
+> Meta Audience Network est **bidding uniquement** et ne remplit que
+> l'**interstitiel** et l'**interstitiel récompensé**. Le « bannière » n'existe
+> donc pas côté Meta : voir *Formats et emplacements* ci-dessous.
 
 ### Identifiants
 
-| Rôle | Constante (`app/src/lib/constants.ts`) | Placement |
-| --- | --- | --- |
-| Bannière 320×50 (toutes les pages) | `META_PLACEMENT_BANNER` | `1712220190424595_1712220347091246` |
-| Interstitiel (ouverture, validation des pas, fin de sortie) | `META_PLACEMENT_INTERSTITIAL` | `1712220190424595_1712220353757912` |
-| Medium rectangle 300×250 (retrait) | `META_PLACEMENT_MEDIUM_RECTANGLE` | `1712220190424595_1712220350424579` |
-| Natif (carte de fin de sortie) | `META_PLACEMENT_NATIVE` | `1712220190424595_1712220357091245` |
-| Native banner (bandeau des listes) | `META_PLACEMENT_NATIVE_BANNER` | `1712220190424595_1712220360424578` |
-| Interstitiel récompensé (vidéo → ElyCoins) | `META_PLACEMENT_REWARDED_INTERSTITIAL` | `1712220190424595_1712220367091244` |
+| Rôle | Constante (`app/src/lib/constants.ts`) | Placement Chartboost | Format |
+| --- | --- | --- | --- |
+| Interstitiel (ouverture, validation des pas) | `CHARTBOOST_PLACEMENT_INTERSTITIAL` | `inter` | INTERSTITIAL |
+| Vidéo récompensée (ElyCoins) | `CHARTBOOST_PLACEMENT_REWARDED` | `reward` | REWARDED |
+| Medium rectangle / carte native | `CHARTBOOST_PLACEMENT_BANNER` | `banner` | INTERSTITIAL (⚠️) |
 
-App ID : `1712220190424595`.
+App ID Chartboost : `CHARTBOOST_APP_ID` dans `app/src/lib/constants.ts`
+(**à remplacer par l'identifiant réel du dashboard avant toute publication**).
+Les identifiants Meta (`META_APP_ID`, `META_PLACEMENT_*`) restent nécessaires à
+`app-ads.txt` et au consentement, mais ne sont plus utilisés pour charger une
+annonce.
+
+Les trois placements sont créés dans le dashboard Chartboost en **BIDDING**,
+sans restriction de pays ni de CPM ; l'adaptateur Meta se configure dans
+*Mediation → Networks → Meta* (app id + placement id proxifiés par Chartboost).
 
 ### `app-ads.txt` (obligatoire)
 
@@ -255,23 +275,29 @@ facebook.com, 1598870752271390, DIRECT, c3e20eee3f780d68
   la ligne ci-dessus en `text/plain` (les rewrites SPA ne s'appliquent pas aux
   fichiers existants).
 - Après modification, forcer la relecture dans Monetization Manager →
-  *app-ads.txt* (le crawl Meta peut prendre 24 à 48 h).
+  *app-ads.txt* (le crawl Meta peut prendre 24 à 48 h), et déclarer la ligne
+  équivalente fournie par Chartboost dans son dashboard.
 
 ### Formats et emplacements
 
-| Emplacement | Format | Fichier |
-| --- | --- | --- |
-| Ouverture / retour dans l'app | Interstitiel, plafonné à 2/jour et espacé de 10 min | `src/App.tsx` + `lib/ads.ts` |
-| Validation des pas | Interstitiel | `src/pages/HomePage.tsx` |
-| Vidéo récompensée (ElyCoins) | Interstitiel récompensé | `src/pages/HomePage.tsx` |
-| Retrait ElyCoins | Medium rectangle 300×250 | `src/pages/WalletPage.tsx` |
-| Toutes les pages | Bannière 320×50 (+ native banner sur `/history`) | `src/components/AdBanner.tsx` |
-| Fin de sortie GPS | Carte native | `src/pages/ActivityPage.tsx` |
+| Emplacement | Format réel | Placement | Fichier |
+| --- | --- | --- | --- |
+| Ouverture / retour dans l'app | Interstitiel, plafonné à 2/jour et espacé de 10 min | `inter` | `src/App.tsx` + `lib/ads.ts` |
+| Validation des pas | Interstitiel | `inter` | `src/pages/HomePage.tsx` |
+| Vidéo récompensée (ElyCoins) | Récompensé | `reward` | `src/pages/HomePage.tsx` |
+| Retrait ElyCoins | ⚠️ le placement `banner` est un **INTERSTITIAL** : l'écran affiche un plein écran (`showMediumRectangle` → `loadAndShowOnce`) | `banner` | `src/pages/WalletPage.tsx` |
+| Fin de sortie GPS | Pas d'équivalent natif chez Meta via Chartboost : **carte intégrée** dans la WebView (overlay HTML), sans revenu | `inter` (fallback) | `src/components/AdBanner.tsx` |
 
-Le rendu natif est assuré par un **plugin Capacitor maison** :
-`android/app/src/main/java/com/elysium/elywalk/MetaAdsPlugin.java`
-(layouts `res/layout/meta_ad_*.xml`). Il n'existe pas de plugin Capacitor officiel
-pour Meta Audience Network, d'où cette implémentation directe du SDK.
+Conséquences à connaître :
+
+- `showBanner`, `showNativeBanner`, `hideBanner` et `hideNativeBanner` résolvent
+  immédiatement `{ height: 0 }` : **aucun espace n'est réservé** en bas d'écran
+  (`--ad-banner-h` reste à `0`). Il n'y a donc plus de bandeau 320×50.
+- `showMediumRectangle` et `showNativeCard` renvoient `{ shown: false }` tant
+  que Chartboost ne remplit pas ; l'interface ne les attend jamais.
+- Pour retrouver un vrai bandeau, créer un placement `banner` au format
+  **BANNER** (Chartboost/AdMob) et rétablir l'appel `showBanner` dans
+  `AdBanner.tsx` — l'API du plugin est déjà prête (elle retourne la hauteur).
 
 ### Build Android
 
@@ -280,28 +306,44 @@ cd app
 npm run build && npx cap sync android
 ```
 
-Le SDK est déclaré dans `android/app/build.gradle` :
+Dépendances déclarées dans `android/app/build.gradle` :
 
 ```gradle
-implementation 'com.facebook.android:audience-network-sdk:6.21.0'
+implementation 'com.chartboost:chartboost-core-sdk:1.1.0'
+implementation 'com.chartboost:chartboost-mediation-sdk:5.4.0'
+implementation 'com.chartboost:chartboost-mediation-adapter-meta-audience-network:5.6.22.0.0'
+implementation 'com.chartboost:chartboost-mediation-adapter-chartboost:5.9.14.0.0'
+implementation 'com.facebook.android:audience-network-sdk:6.22.0'
 implementation 'com.google.android.gms:play-services-ads-identifier:18.2.0'
+implementation 'com.google.android.gms:play-services-appset:16.1.0'
 ```
 
-Vérifier la dernière version publiée :
-<https://central.sonatype.com/artifact/com.facebook.android/audience-network-sdk>.
+Les dépôts Chartboost sont déclarés dans `android/build.gradle`
+(`allprojects.repositories`) :
 
-`minSdkVersion` doit rester ≥ 21 (ElyWalk est à 24) et
+```gradle
+maven { url 'https://cboost.jfrog.io/artifactory/chartboost-mediation' }
+maven { url 'https://cboost.jfrog.io/artifactory/chartboost-core' }
+maven { url 'https://cboost.jfrog.io/artifactory/chartboost-ads' }
+```
+
+Le SDK Chartboost Core exige Retrofit/OkHttp/Kotlinx Serialization, déjà ajoutés
+au même bloc `dependencies`. Les règles ProGuard de `proguard-rules.pro`
+conservent `com.chartboost.**`, les adaptateurs et `com.facebook.ads.**`.
+
+`minSdkVersion` doit rester ≥ 24 (Core 1.1.0 / Mediation 5.4.0) et
 `android:hardwareAccelerated="true"` est activé dans le manifeste (vidéos).
 
 ### Test des annonces
 
-- Meta Audience Network fonctionne en **bidding uniquement** : sans campagne
-  active, `onError` renvoie un *no fill* — c'est normal, l'application continue
-  de fonctionner (toutes les fonctions publicitaires résolvent sans bloquer).
-- Pour tester un remplissage, créer un placement de test dans Monetization
-  Manager ou ajouter l'appareil de test via `AdSettings.addTestDevice(...)`.
-- Sur la version web (`npm run dev`), les publicités sont **inertes** : les
-  fonctions de `lib/ads.ts` résolvent immédiatement.
+- Le plugin passe `ChartboostMediationSdk.setTestMode(ctx, true)` **uniquement**
+  si l'APK est `debuggable` : la release ne bascule jamais en Test Mode.
+- Sans campagne active, Chartboost renvoie un *no fill* : c'est normal, toutes
+  les fonctions publicitaires résolvent sans bloquer (`{ shown: false }`,
+  `{ rewarded: false }`, `{ height: 0 }`).
+- Pour tester un remplissage : activer le Test Mode dans le dashboard Chartboost
+  ou créer des campagnes de test côté Meta.
+- Sur la version web (`npm run dev`), les publicités sont **inertes**.
 
 ## Notifications (F10)
 
@@ -313,8 +355,12 @@ Aucune permission n'est demandée de façon inconditionnelle.
 
 - Les mentions légales (`LegalPage.tsx`) sont complètes (CGU, confidentialité,
   mentions légales). Mettre à jour la **fiche Play « Sécurité des données »** en
-  cohérence : publicité (AdMob), géolocalisation, activité physique/santé, âge
+  cohérence : publicité (Chartboost Mediation · Meta Audience Network),
+  géolocalisation, activité physique/santé, âge
   minimum 15 ans.
+- **Bumper la version avant publication** : `app/package.json`, puis
+  `versionCode` / `versionName` dans `app/android/app/build.gradle` (actuellement
+  `210` / `2.1.0`). Play Console refuse un `versionCode` déjà utilisé.
 - Configurer `contact@elysium-esport.fr` comme adresse d'assistance Play Store.
 - Vérifier les modèles d'e-mails Firebase Authentication (vérification,
   changement d'e-mail) et les domaines autorisés.
@@ -325,6 +371,6 @@ Aucune permission n'est demandée de façon inconditionnelle.
 
 Firestore borne toujours les montants (validation quotidienne ≤ 60 000 pas,
 récompense publicitaire ≤ 1/h, débits atomiques). Le Worker apporte l'attestation
-forte manquante (Play Integrity + AdMob SSV) : sans jeton vérifié côté serveur,
+forte manquante (Play Integrity + vérification serveur des récompenses) : sans jeton vérifié côté serveur,
 le client ne peut pas créditer son solde sur une preuve externe. Reste à brancher
 un prestataire de paiement réel (PayPal Payouts) pour l'exécution des retraits.

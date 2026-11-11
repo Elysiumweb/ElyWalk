@@ -130,7 +130,7 @@ export default function MapPage() {
           <h1 className="screen-title">Carte</h1>
           <div className="screen-sub">Partenaires autour de vous · vos sorties GPS dans Sortie</div>
         </div>
-        <div style={{display:'flex', gap:8}}><button className="btn btn-outline btn-sm" onClick={() => navigate('/events')}>👥 Événements</button><button className="btn btn-gold btn-sm" onClick={() => navigate('/activity')}>▶ Sortie</button></div>
+        <div className="map-header-actions"><button className="btn btn-outline btn-sm" onClick={() => navigate('/events')}>👥 Événements</button><button className="btn btn-gold btn-sm" onClick={() => navigate('/activity')}>▶ Sortie</button></div>
       </div>
 
       <div className="map-search"><input className="input" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Rechercher un partenaire…"/><div className="nearby-list">{nearby.slice(0,5).map(e=><button key={e.id} onClick={()=>{setSelected(e);mapRef.current?.setView([e.lat,e.lng],16)}}><b>{e.name}</b><span>{distance(e)!==null?`${distance(e)!.toFixed(1)} km`:e.address}</span></button>)}</div></div>
@@ -144,7 +144,7 @@ export default function MapPage() {
         aria-label="Me localiser"
       >
         {locating ? (
-          <div className="spinner" style={{ width: 20, height: 20, borderWidth: 2 }} />
+          <div className="spinner spinner-sm" />
         ) : (
           <LocateIcon />
         )}
@@ -152,26 +152,26 @@ export default function MapPage() {
 
       {selected && (
         <div className="map-card pop-in" data-testid="establishment-card">
-          <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+          <div className="map-card-head">
             {selected.logoDataUrl ? (
               <img src={selected.logoDataUrl} alt={selected.name} className="map-card-logo" />
             ) : (
-              <div className="avatar" style={{ width: 52, height: 52, fontSize: 20 }}>
+              <div className="avatar avatar-lg">
                 {selected.name.charAt(0).toUpperCase()}
               </div>
             )}
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div className="display" style={{ fontSize: 15, color: 'var(--gold)' }} data-testid="establishment-name">
+            <div className="map-card-main">
+              <div className="display map-card-name" data-testid="establishment-name">
                 {selected.name}
               </div>
-              <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{selected.address}</div>
+              <div className="row-sub mt-0">{selected.address}</div>
             </div>
             <button className="map-card-close" onClick={() => setSelected(null)} data-testid="establishment-card-close">
               ✕
             </button>
           </div>
-          <p style={{ fontSize: 13.5, marginTop: 10, color: 'var(--white)' }}>{selected.description}</p>
-          <div className="partner-details">{selected.openingHours&&<span>🕐 {selected.openingHours}</span>}{selected.phone&&<a href={`tel:${selected.phone}`}>☎ {selected.phone}</a>}{selected.website&&<a href={selected.website} target="_blank" rel="noreferrer">Site web</a>}{selected.offerText&&<strong>Offre : {selected.offerText}</strong>}</div><button className="btn btn-gold btn-sm" style={{marginTop:10}} onClick={()=>openMaps(selected)}>Itinéraire / ouvrir dans Maps</button>
+          <p className="map-card-desc">{selected.description}</p>
+          <div className="partner-details">{selected.openingHours&&<span>🕐 {selected.openingHours}</span>}{selected.phone&&<a href={`tel:${selected.phone}`}>☎ {selected.phone}</a>}{selected.website&&<a href={selected.website} target="_blank" rel="noreferrer">Site web</a>}{selected.offerText&&<strong>Offre : {selected.offerText}</strong>}</div><button className="btn btn-gold btn-sm mt-2" onClick={()=>openMaps(selected)}>Itinéraire / ouvrir dans Maps</button>
         </div>
       )}
     </div>

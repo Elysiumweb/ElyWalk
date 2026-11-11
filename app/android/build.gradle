@@ -21,6 +21,22 @@ allprojects {
     repositories {
         google()
         mavenCentral()
+        // Chartboost Mediation + Chartboost Core : dépôts JFrog officiels
+        // (aucun de ces artefacts n'est publié sur Maven Central).
+        maven {
+            name "Chartboost Mediation's maven repo"
+            url "https://cboost.jfrog.io/artifactory/chartboost-mediation"
+        }
+        maven {
+            name "Chartboost Core's maven repo"
+            url "https://cboost.jfrog.io/artifactory/chartboost-core"
+        }
+        // Chartboost Ads (SDK publicitaire) : requis par l'adaptateur et
+        // éventuellement par la location Chartboost elle-même.
+        maven {
+            name "Chartboost Ads maven repo"
+            url "https://cboost.jfrog.io/artifactory/chartboost-ads/"
+        }
     }
 }
 

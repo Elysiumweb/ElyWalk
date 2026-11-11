@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Conteneur de la carte native (Meta Audience Network, fin de sortie). -->
-<com.facebook.ads.NativeAdLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/meta_ad_native_card_container"
-    android:layout_width="match_parent"
-    android:layout_height="wrap_content" />

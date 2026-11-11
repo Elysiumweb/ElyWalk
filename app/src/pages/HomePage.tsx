@@ -30,6 +30,9 @@ export default function HomePage() {
   const [steps, setSteps] = useState(0);
   const [perm, setPerm] = useState<PermState>('unavailable');
   const [showTiers, setShowTiers] = useState(false);
+  // Accès secondaires repliés par défaut : la validation et le compteur restent
+  // les actions dominantes (l'écran tient sans défilement excessif).
+  const [showMore, setShowMore] = useState(false);
   const [busyValidate, setBusyValidate] = useState(false);
   const [busyAd, setBusyAd] = useState(false);
   const [celebration, setCelebration] = useState<string | null>(null);
@@ -182,19 +185,19 @@ export default function HomePage() {
       <div className="gold-hero">
         <img src="/deco-1.webp" className="hero-deco" alt="" />
         <ProgressRing progress={steps / dailyGoal}>
-          <div className="display" style={{ fontSize: 34, color: '#fff' }} data-testid="today-steps-value">
+          <div className="hero-steps" data-testid="today-steps-value">
             {fmtNumber(steps)}
           </div>
           <div className="goal-label">
             sur {fmtNumber(dailyGoal)} pas
           </div>
-          <div style={{ color: 'var(--gold)', fontSize: 13, marginTop: 6, fontFamily: 'var(--font-display)' }}>
+          <div className="hero-coins">
             ≈ {potentialCoins} EC
           </div>
           <div className="next-tier-note">{nextTier ? `Encore ${fmtNumber(nextTier.remaining)} pas pour le palier ${fmtNumber(nextTier.target)} · ${nextTier.coins} EC` : 'Palier ElyCoins maximum atteint'}</div>
         </ProgressRing>
 
-        <div className="stat-grid" style={{ marginTop: 16 }}>
+        <div className="stat-grid mt-3">
           <div className="stat">
             <div className="stat-icon"><FlameIcon /></div>
             <div className="stat-value" data-testid="stat-streak">{profile?.streak || 0}</div>
@@ -223,7 +226,7 @@ export default function HomePage() {
       {isNative && perm !== 'granted' && (
         <div className="card" data-testid="permission-card">
           <div className="card-title">Activer le comptage des pas</div>
-          <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 12 }}>
+          <p className="text-muted-sm mb-3">
             ElyWalk utilise le capteur de pas de votre téléphone, même lorsque
             l’application est fermée. Autorisez « Activité physique » — une
             notification discrète restera visible pour continuer à compter.
@@ -252,21 +255,75 @@ export default function HomePage() {
           <button type="button" className="text-button" onClick={() => setShowTiers(true)} data-testid="show-tiers-button">Barème des gains</button>
         </div>
       </section>
+
+      {/* Raccourcis : la sortie GPS est l'action utile, les autres accès sont
+          compacts et les destinations secondaires passent sous « Plus ». */}
       <div className="home-actions">
-        <button type="button" className="btn btn-ghost" onClick={() => navigate('/history')}>Historique, santé & calendrier</button>
-        <button type="button" className="btn btn-outline" onClick={() => navigate('/challenges')}>🏆 Ouvrir les défis datés</button>
-        <button type="button" className="btn btn-outline" onClick={() => navigate('/events')}>👥 Marcher ensemble · événements</button>
-        <button type="button" className="btn btn-outline" onClick={() => navigate('/activity')}>▶ Commencer une sortie</button>
-        <button type="button" className="btn btn-outline" onClick={async () => { if (!profile) return; try { const result = await shareDailyStats(profile, steps, formatDistance(distanceMeters, unitSystem), calories); toast(result === 'shared' ? 'Carte partagée !' : 'Carte enregistrée dans vos téléchargements.', 'success'); } catch (e) { if ((e as Error).name !== 'AbortError') toast((e as Error).message, 'error'); } }}>Partager mes pas du jour</button>
+        <button
+          type="button"
+          className="home-shortcut home-shortcut-primary"
+          onClick={() => navigate('/activity')}
+          data-testid="home-start-activity"
+        >
+          <span className="home-shortcut-icon" aria-hidden="true">▶</span>
+          <span className="home-shortcut-main">
+            <span>Commencer une sortie</span>
+            <span className="home-shortcut-hint">GPS, allure et pause</span>
+          </span>
+        </button>
+        <button type="button" className="home-shortcut" onClick={() => navigate('/history')} data-testid="home-history">
+          <span className="home-shortcut-icon" aria-hidden="true">📊</span>
+          <span>Historique & santé</span>
+          <span className="home-shortcut-hint">Calendrier et statistiques</span>
+        </button>
+        <button type="button" className="home-shortcut" onClick={() => navigate('/challenges')} data-testid="home-challenges">
+          <span className="home-shortcut-icon" aria-hidden="true">🏆</span>
+          <span>Défis</span>
+          <span className="home-shortcut-hint">Objectifs datés et amis</span>
+        </button>
       </div>
+
+      <button
+        type="button"
+        className="home-more-toggle"
+        onClick={() => setShowMore((value) => !value)}
+        aria-expanded={showMore}
+        aria-controls="home-more"
+        data-testid="home-more-toggle"
+      >
+        {showMore ? '− Moins d’options' : '+ Plus d’options'}
+      </button>
+
+      {showMore && (
+        <div id="home-more" className="stack mb-3" data-testid="home-more">
+          <button type="button" className="btn btn-outline" onClick={() => navigate('/events')} data-testid="home-events">👥 Marcher ensemble · rencontres</button>
+          <button
+            type="button"
+            className="btn btn-outline"
+            onClick={async () => {
+              if (!profile) return;
+              try {
+                const result = await shareDailyStats(profile, steps, formatDistance(distanceMeters, unitSystem), calories);
+                toast(result === 'shared' ? 'Carte partagée !' : 'Carte enregistrée dans vos téléchargements.', 'success');
+              } catch (e) {
+                if ((e as Error).name !== 'AbortError') toast((e as Error).message, 'error');
+              }
+            }}
+          >
+            Partager mes pas du jour
+          </button>
+          <button type="button" className="text-button" onClick={() => navigate('/leaderboard')}>Voir le classement</button>
+        </div>
+      )}
+
       {profile && <LevelBadge totalSteps={profile.totalSteps} />}
-      <div className="card streak-freeze-card"><div className="card-title">Série protégée</div><div className="freeze-count">🧊 {profile?.streakFreezes ?? 1} gel disponible</div><p>Une journée manquée peut être rattrapée automatiquement le lendemain. Votre série ne repart plus forcément à 1.</p></div>
+      <div className="card streak-freeze-card"><div className="card-title">Série protégée</div><div className="freeze-count">🧊 {profile?.streakFreezes ?? 1} gel disponible</div><p className="card-help">Une journée manquée peut être rattrapée automatiquement le lendemain. Votre série ne repart plus forcément à 1.</p></div>
 
       <Sheet open={showTiers} onClose={() => setShowTiers(false)} title="Barème quotidien" testId="tiers-sheet">
         {STEP_TIERS.map((t) => (
           <div className="list-row" key={t.min}>
             <div className="row-main">
-              <div className="row-title" style={{ fontSize: 14 }}>
+              <div className="row-title">
                 {t.max === Infinity
                   ? `${fmtNumber(t.min)}+ pas`
                   : `${fmtNumber(t.min)} – ${fmtNumber(t.max)} pas`}
@@ -277,13 +334,13 @@ export default function HomePage() {
         ))}
         <div className="list-row">
           <div className="row-main">
-            <div className="row-title" style={{ fontSize: 14 }}>1 pub récompensée</div>
+            <div className="row-title">1 pub récompensée</div>
           </div>
           <div className="row-value">0,1 EC</div>
         </div>
         <div className="list-row">
           <div className="row-main">
-            <div className="row-title" style={{ fontSize: 14 }}>1000 ElyCoins</div>
+            <div className="row-title">1000 ElyCoins</div>
           </div>
           <div className="row-value">1 €</div>
         </div>

@@ -9,8 +9,9 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(StepCounterPlugin.class);
         registerPlugin(TrackingPlugin.class);
-        // Pont vers le SDK Meta Audience Network (remplace AdMob depuis 1.9.0).
-        registerPlugin(MetaAdsPlugin.class);
+        // Pont vers Chartboost Mediation (médiation Meta Audience Network
+        // depuis 2.1.0). Le nom Capacitor reste « MetaAds ».
+        registerPlugin(ChartboostMediationAdsPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

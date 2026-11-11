@@ -17,37 +17,26 @@ export default function QRCode({ value, size = 180, title }: Props) {
     return (
       <div
         className="qr-fallback"
-        style={{
-          width: size,
-          height: size,
-          background: 'var(--surface-2)',
-          border: '1px solid var(--gold-border)',
-          borderRadius: 12,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 8,
-          padding: 12,
-        }}
+        // La taille est calculée (`size`), le reste vient de `.qr-fallback`.
+        style={{ width: size, height: size }}
       >
-        <div style={{ fontFamily: 'var(--font-display)', color: 'var(--gold)', fontSize: 22, letterSpacing: '0.2em' }}>{value}</div>
-        <small style={{ color: 'var(--muted)', textAlign: 'center' }}>{title || 'Code ami ElyWalk'}</small>
+        <div className="qr-fallback-code">{value}</div>
+        <small className="qr-fallback-title">{title || 'Code ami ElyWalk'}</small>
       </div>
     );
   }
   return (
-    <div className="qr-wrap" style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+    <div className="qr-wrap">
       <img
         src={url}
         alt={`QR ${value}`}
         width={size}
         height={size}
-        style={{ borderRadius: 12, border: '1px solid var(--gold-border)', background: 'white', padding: 6 }}
+        className="qr-image"
         onError={() => setFailed(true)}
         data-testid="qr-image"
       />
-      {title && <small style={{ color: 'var(--muted)' }}>{title}</small>}
+      {title && <small className="text-muted">{title}</small>}
     </div>
   );
 }
@@ -110,5 +99,5 @@ export function QRFallbackCanvas({ code, name }: { code:string; name:string }){
     ctx.fillStyle='#98948a'; ctx.font='14px Arial'; ctx.fillText(name,120,160);
     ctx.textAlign='left';
   },[code,name]);
-  return <canvas ref={ref} width={240} height={240} style={{borderRadius:12, border:'1px solid var(--gold-border)'}} />;
+  return <canvas ref={ref} width={240} height={240} className="qr-canvas" />;
 }

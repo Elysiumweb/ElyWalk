@@ -80,7 +80,7 @@ export default function LeaderboardPage() {
                 style={u.uid === profile?.uid ? { background: 'var(--gold-dim)', borderRadius: 10, padding: '12px 8px' } : undefined}
                 data-testid="leaderboard-row"
               >
-                <div className="row-value" style={{ width: 22, textAlign: 'center', color: i < 3 ? 'var(--gold)' : 'var(--muted)' }}>
+                <div className={`row-value rank-index ${i < 3 ? 'rank-index-top' : ''}`}>
                   {i + 1}
                 </div>
                 <Avatar name={u.displayName} photoURL={u.photoURL} size={42} />
@@ -88,11 +88,12 @@ export default function LeaderboardPage() {
                   <button className="link-title" onClick={() => navigate(`/user/${u.uid}`)}>
                     {u.displayName}{' '}
                     {isPresidentUid(u.uid) && (
-                      <span className="badge" style={{ marginLeft: 4 }}>
+                      <span className="badge badge-inline">
                         👑 {u.uid === PRESIDENT_UID ? 'Président' : 'Co-Président'}
                       </span>
                     )}
-                    <span className="badge" style={{ marginLeft: 4, background: `${getWalkerLevel(u.totalSteps).color}22`, color: getWalkerLevel(u.totalSteps).color, borderColor: getWalkerLevel(u.totalSteps).color }}>
+                    {/* Couleur de niveau calculée : seule la teinte reste dynamique. */}
+                    <span className="badge badge-inline" style={{ background: `${getWalkerLevel(u.totalSteps).color}22`, color: getWalkerLevel(u.totalSteps).color, borderColor: getWalkerLevel(u.totalSteps).color }}>
                       {getWalkerLevel(u.totalSteps).icon} {getWalkerLevel(u.totalSteps).title.split(' ').pop()}
                     </span>
                   </button>

@@ -29,3 +29,26 @@
 -keep class com.facebook.ads.internal.** { *; }
 -dontwarn com.facebook.ads.**
 -keepattributes *Annotation*
+
+# ---------------------------------------------------------------------------
+# Chartboost Core + Mediation (médiation publicitaire — voir
+# ChartboostMediationAdsPlugin.java). Les adaptateurs partenaires et les modules
+# sont instanciés par réflexion depuis la configuration serveur : ils doivent
+# conserver leurs noms de classe et leurs constructeurs.
+# ---------------------------------------------------------------------------
+-keep class com.chartboost.core.** { *; }
+-keep class com.chartboost.chartboostmediationsdk.** { *; }
+-keep class com.chartboost.mediation.** { *; }
+-keep class com.chartboost.sdk.** { *; }
+-dontwarn com.chartboost.**
+
+# Adaptateurs partenaires chargés dynamiquement.
+-keep class * extends com.chartboost.core.initialization.Module { *; }
+-keep class * implements com.chartboost.mediation.partneradapter.** { *; }
+
+# kotlinx.serialization est utilisé par Chartboost pour (dé)sérialiser la
+# configuration et les événements ILRD.
+-keepattributes *Annotation*, InnerClasses
+-dontnote kotlinx.serialization.**
+-keepclassmembers class **$$serializer { *; }
+-keepclasseswithmembers class * { kotlinx.serialization.KSerializer serializer(...); }

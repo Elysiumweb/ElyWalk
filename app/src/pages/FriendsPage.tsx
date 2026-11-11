@@ -126,7 +126,7 @@ export default function FriendsPage() {
         </button>
       </div>
 
-      <div className="chip-row" style={{marginBottom:8}}>
+      <div className="chip-row mb-2">
         <button className={`chip ${tab==='friends'?'chip-active':''}`} onClick={()=>setTab('friends')}>Amis</button>
         <button className={`chip ${tab==='feed'?'chip-active':''}`} onClick={()=>setTab('feed')}>Fil d’activité</button>
         <button className={`chip ${tab==='messages'?'chip-active':''}`} onClick={()=>setTab('messages')}>Messages {messages.length>0 && `· ${messages.length}`}</button>
@@ -134,11 +134,11 @@ export default function FriendsPage() {
 
       <div className="card">
         <div className="card-title">Mon code ami</div>
-        <div className="display" style={{ fontSize: 22, color: 'var(--gold)', letterSpacing: '0.2em' }} data-testid="my-friend-code">
+        <div className="friend-code" data-testid="my-friend-code">
           {profile?.referralCode}
         </div>
-        <p style={{ color: 'var(--muted)', fontSize: 12, marginTop: 6 }}>Partagez ce code : il sert aussi de code de parrainage (+10 EC par filleul éligible).</p>
-        <div className="two-col" style={{marginTop:10}}>
+        <p className="card-help mt-1">Partagez ce code : il sert aussi de code de parrainage (+10 EC par filleul éligible).</p>
+        <div className="two-col mt-2">
           <button className="btn btn-outline btn-sm" onClick={share}>Partager / copier</button>
           <button className="btn btn-gold btn-sm" onClick={()=>setQrOpen(true)}>QR code</button>
         </div>
@@ -166,7 +166,7 @@ export default function FriendsPage() {
         </div>
       )}
 
-      {reactions.length>0&&<div className="card"><div className="card-title">Encouragements reçus</div>{reactions.map(r=><div className="list-row" key={r.id}><span style={{fontSize:24}}>{r.emoji}</span><div className="row-main"><div className="row-title">{r.fromName}</div><div className="row-sub">{r.message||'vous encourage !'}</div></div></div>)}</div>}
+      {reactions.length>0&&<div className="card"><div className="card-title">Encouragements reçus</div>{reactions.map(r=><div className="list-row" key={r.id}><span className="emoji-lg">{r.emoji}</span><div className="row-main"><div className="row-title">{r.fromName}</div><div className="row-sub">{r.message||'vous encourage !'}</div></div></div>)}</div>}
       {outgoing.length>0&&<div className="card"><div className="card-title">Demandes envoyées</div>{outgoing.map(r=><div className="list-row" key={r.id}><div className="row-main"><div className="row-title">{r.toName}</div><div className="row-sub">En attente</div></div></div>)}</div>}
 
       <div className="card">
@@ -213,13 +213,13 @@ export default function FriendsPage() {
             </div>
           ))}
           {messages.length>0 && (
-            <div style={{marginTop:12}}>
-              <div className="card-title" style={{fontSize:12}}>Derniers messages</div>
+            <div className="mt-3">
+              <div className="card-title">Derniers messages</div>
               {messages.slice(0,5).map(m=>(
-                <div key={m.id} className="list-row" style={{opacity:0.9}}>
-                  <span style={{fontSize:18}}>{m.from===profile?.uid?'↗':'↘'}</span>
-                  <div className="row-main"><div className="row-title" style={{fontSize:12}}>{m.from===profile?.uid?`À ${m.toName}`:m.fromName}</div><div className="row-sub">{m.text.slice(0,60)}</div></div>
-                  <small style={{color:'var(--muted)'}}>{new Date(m.createdAt).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}</small>
+                <div key={m.id} className="list-row message-preview">
+                  <span className="emoji-md">{m.from===profile?.uid?'↗':'↘'}</span>
+                  <div className="row-main"><div className="row-title row-title-sm">{m.from===profile?.uid?`À ${m.toName}`:m.fromName}</div><div className="row-sub">{m.text.slice(0,60)}</div></div>
+                  <small className="text-muted">{new Date(m.createdAt).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}</small>
                 </div>
               ))}
             </div>
@@ -243,28 +243,28 @@ export default function FriendsPage() {
       </Sheet>
 
       <Sheet open={qrOpen} onClose={()=>setQrOpen(false)} title="QR code ami">
-        <div style={{textAlign:'center', padding:'8px 0'}}>
+        <div className="qr-sheet text-center">
           {profile && <QRCode value={`${location.origin}/?ref=${profile.referralCode}`} size={220} title={`Code ${profile.referralCode}`} />}
-          <div style={{marginTop:12, fontFamily:'var(--font-display)', fontSize:24, color:'var(--gold)', letterSpacing:'0.2em'}}>{profile?.referralCode}</div>
-          <p style={{color:'var(--muted)', fontSize:12, marginTop:8}}>Montrez ce QR à vos amis en présentiel — scan instantané.</p>
-          <button className="btn btn-gold" style={{marginTop:12}} onClick={shareQR}>Partager l’image stylée ElyWalk</button>
+          <div className="qr-sheet-code">{profile?.referralCode}</div>
+          <p className="card-help mt-2">Montrez ce QR à vos amis en présentiel — scan instantané.</p>
+          <button className="btn btn-gold mt-3" onClick={shareQR}>Partager l’image stylée ElyWalk</button>
         </div>
       </Sheet>
 
       <Sheet open={!!msgOpen} onClose={()=>setMsgOpen(null)} title={`💬 ${msgOpen?.name||''}`}>
-        <div style={{maxHeight:'50vh', overflow:'auto', marginBottom:12}}>
+        <div className="chat-thread">
           {chatMessages.length===0 ? <div className="empty-state">Aucun message. Dites bonjour ! 👋</div> : chatMessages.map(m=>(
-            <div key={m.id} className={`list-row ${m.from===profile?.uid?'':'incoming'}`} style={{background: m.from===profile?.uid?'var(--gold-dim)':'transparent', borderRadius:8, margin:'6px 0', padding:'8px 10px'}}>
+            <div key={m.id} className={`list-row chat-message ${m.from===profile?.uid?'chat-outgoing':'incoming'}`}>
               <div className="row-main">
-                <div className="row-title" style={{fontSize:12}}>{m.from===profile?.uid?'Vous':m.fromName} <span style={{color:'var(--muted)', fontWeight:400}}>{new Date(m.createdAt).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}</span></div>
-                <div className="row-sub" style={{color:'var(--white)'}}>{m.text}</div>
+                <div className="row-title row-title-sm">{m.from===profile?.uid?'Vous':m.fromName} <span className="chat-time">{new Date(m.createdAt).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})}</span></div>
+                <div className="row-sub chat-text">{m.text}</div>
               </div>
             </div>
           ))}
         </div>
         <div className="field">
           <textarea className="input" rows={2} maxLength={500} value={msgText} onChange={e=>setMsgText(e.target.value)} placeholder="Message (500 car. max) — restez bienveillant" data-testid="message-input" />
-          <small style={{color:'var(--muted)'}}>{msgText.length}/500</small>
+          <small className="text-muted">{msgText.length}/500</small>
         </div>
         <button className="btn btn-gold" onClick={sendMsg} disabled={msgBusy||!msgText.trim()} data-testid="send-message-button">{msgBusy?'Envoi...':'Envoyer'}</button>
       </Sheet>
