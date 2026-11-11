@@ -14,7 +14,18 @@ export default function WhatsNewPage() {
       </div>
 
       <div className="card">
-        <div className="card-title">Novembre 2026</div>
+        <div className="card-title">Novembre 2026 — 2.1.3</div>
+        <ul className="whats-new">
+          <li>⌨️ Saisie fluide : pseudo, bio, recherche et formulaires de Rencontres acceptent tout le texte d’un coup, sans perdre le curseur</li>
+          <li>📸 Photo de profil : compression sur l’appareil, enregistrement immédiat et aperçu « Photo prête » — fini le chargement sans fin</li>
+          <li>🗺️ Carte : la recherche ne recouvre plus Parcours, Événements et Sortie, et le bouton de localisation reste visible au-dessus de la bannière</li>
+          <li>🧭 Itinéraire dans l’app : adresse réelle de départ et d’arrivée, tracé et consignes à pied, à vélo, en voiture et en transports en commun, correspondances comprises</li>
+          <li>🚩 Sorties : plus d’erreur « index requis » sur « Mes sorties », et l’organisateur ne se retrouve plus en liste d’attente</li>
+        </ul>
+      </div>
+
+      <div className="card">
+        <div className="card-title">Novembre 2026 — 2.1.0</div>
         <ul className="whats-new">
           <li>🤝 Publicités désormais servies par <strong>Unity LevelPlay</strong>, avec Meta Audience Network en in-app bidding : plus de réseaux en concurrence, donc de meilleurs revenus pour vos ElyCoins</li>
           <li>🎬 Vidéo récompensée « ElyCoin » : une pub visionnée jusqu’au bout crédite toujours 0,1 EC, bornée à une récompense par heure</li>

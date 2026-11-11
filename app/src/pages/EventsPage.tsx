@@ -5,6 +5,8 @@ import { useToast } from '../components/Toast';
 import { useI18n } from '../context/LocaleContext';
 import Sheet from '../components/Sheet';
 import Avatar from '../components/Avatar';
+import DirectionsPanel from '../components/DirectionsPanel';
+import { getCurrentPosition } from '../lib/geo';
 import { createCommunityEvent, watchCommunityEvents, joinCommunityEvent, leaveCommunityEvent, updateCommunityEvent, getProfiles } from '../lib/db';
 import { listEstablishments, type Establishment } from '../lib/establishments';
 import { eventDate, getEventReminder, rescheduleEventReminders, setEventReminder } from '../lib/eventReminders';
@@ -49,6 +51,9 @@ export default function EventsPage() {
   const [participantEvent, setParticipantEvent] = useState<CommunityEvent | null>(null);
   const [reminderEvent, setReminderEvent] = useState<CommunityEvent | null>(null);
   const [reminderEnabled, setReminderEnabled] = useState(false); const [reminderMinutes, setReminderMinutes] = useState(60);
+  // Itinéraire calculé dans l'application (adresse + 4 modes), sans redirection Maps.
+  const [directionsEvent, setDirectionsEvent] = useState<CommunityEvent | null>(null);
+  const [directionsOrigin, setDirectionsOrigin] = useState<{ lat: number; lng: number } | null>(null);
 
   useEffect(() => watchCommunityEvents(items => { setEvents(items); void rescheduleEventReminders(items); }), []);
   useEffect(() => { listEstablishments().then(setEstablishments).catch(() => undefined); }, []);
@@ -87,7 +92,16 @@ export default function EventsPage() {
   const showParticipants = async (ev: CommunityEvent) => { setParticipantEvent(ev); setParticipants(await getProfiles([...ev.participants, ...(ev.waitlist || [])])); };
   const openReminder = async (ev: CommunityEvent) => { const setting = await getEventReminder(ev.id!); setReminderEnabled(setting.enabled); setReminderMinutes(setting.minutes); setReminderEvent(ev); };
   const saveReminder = async () => { if (!reminderEvent) return; try { await setEventReminder(reminderEvent, reminderEnabled, reminderMinutes); toast(reminderEnabled ? 'Rappel programmé.' : 'Rappel désactivé.', 'success'); setReminderEvent(null); } catch (e) { toast((e as Error).message, 'error'); } };
-  const directions = (ev: CommunityEvent) => { const destination = ev.lat != null && ev.lng != null ? `${ev.lat},${ev.lng}` : encodeURIComponent(ev.location || ev.establishmentName || ''); if (destination) window.open(`https://www.google.com/maps/dir/?api=1&destination=${destination}`, '_blank', 'noopener'); };
+  const openDirections = (ev: CommunityEvent) => setDirectionsEvent(ev);
+  /** Localisation demandée depuis la feuille d'itinéraire (Silent en cas de refus). */
+  const locateForDirections = async () => {
+    try {
+      const pos = await getCurrentPosition({ silent: false });
+      if (pos) setDirectionsOrigin({ lat: pos.lat, lng: pos.lng });
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    }
+  };
 
   return <div className="screen" data-testid="events-screen">
     <div className="screen-header"><div><h1 className="screen-title">Rencontres</h1><div className="screen-sub">Marcher ensemble · établissements partenaires</div></div><button className="btn btn-ghost btn-sm" onClick={() => nav(-1)}>Retour</button></div>
@@ -98,7 +112,8 @@ export default function EventsPage() {
         <div className="row-between"><div><div className="title-sm">{ev.title}</div><div className="row-sub">📅 {formatDate(eventDate(ev), { dateStyle: 'full', timeStyle: 'short' })}</div><div className="row-sub">📍 {ev.location || ev.establishmentName || 'Lieu à préciser'}</div></div><button className="badge" onClick={() => void showParticipants(ev)}>{ev.participants.length}{ev.maxParticipants ? ` / ${ev.maxParticipants}` : ''} inscrits</button></div>
         {ev.status === 'cancelled' && <span className="badge badge-danger">Annulé</span>}{full && ev.status !== 'cancelled' && <span className="badge">Complet · {(ev.waitlist || []).length} en attente</span>}
         <p className="muted-text">{ev.description}</p>{ev.lastChange && <p className="event-change">{ev.lastChange.type === 'cancelled' ? '⛔' : '🔔'} {ev.lastChange.message}</p>}
-        <div className="route-actions">{(joined || waiting) && ev.status !== 'cancelled' && <button className="btn btn-danger btn-sm" onClick={() => void toggleJoin(ev)}>Se désinscrire{waiting ? ' de l’attente' : ''}</button>}{!joined && !waiting && ev.status !== 'cancelled' && !mine && <button className="btn btn-gold btn-sm" onClick={() => void toggleJoin(ev)}>{full ? 'Rejoindre la liste d’attente' : 'Rejoindre'}</button>}{(joined || mine) && ev.status !== 'cancelled' && <button className="btn btn-outline btn-sm" onClick={() => void openReminder(ev)}>🔔 Rappel</button>}<button className="btn btn-outline btn-sm" onClick={() => directions(ev)}>Itinéraire</button>{mine && ev.status !== 'cancelled' && <><button className="btn btn-ghost btn-sm" onClick={() => openEdit(ev)}>Modifier</button><button className="btn btn-danger btn-sm" onClick={() => void cancel(ev)}>Annuler</button></>}</div>
+        <div className="route-actions">{(joined || waiting) && ev.status !== 'cancelled' && <button className="btn btn-danger btn-sm" onClick={() => void toggleJoin(ev)}>Se désinscrire{waiting ? ' de l’attente' : ''}</button>}{!joined && !waiting && ev.status !== 'cancelled' && !mine && <button className="btn btn-gold btn-sm" onClick={() => void toggleJoin(ev)}>{full ? 'Rejoindre la liste d’attente' : 'Rejoindre'}</button>}
+        {mine && ev.status !== 'cancelled' && <span className="badge badge-muted">Vous organisez cette sortie</span>}{(joined || mine) && ev.status !== 'cancelled' && <button className="btn btn-outline btn-sm" onClick={() => void openReminder(ev)}>🔔 Rappel</button>}<button className="btn btn-outline btn-sm" onClick={() => openDirections(ev)} data-testid="event-directions">Itinéraire</button>{mine && ev.status !== 'cancelled' && <><button className="btn btn-ghost btn-sm" onClick={() => openEdit(ev)}>Modifier</button><button className="btn btn-danger btn-sm" onClick={() => void cancel(ev)}>Annuler</button></>}</div>
         <small className="muted-xs" style={{ display: 'block', marginTop: 'var(--space-1)' }}>Créé par {ev.creatorName}</small>
       </div>;
     })}
@@ -110,6 +125,22 @@ export default function EventsPage() {
       <button className="btn btn-gold" onClick={submit} disabled={busy}>{busy ? 'Enregistrement…' : editing ? 'Enregistrer et prévenir' : 'Créer'}</button>
     </Sheet>
     <Sheet open={!!participantEvent} onClose={() => setParticipantEvent(null)} title="Participants"><p className="card-help">{participantEvent?.participants.length} inscrits · {(participantEvent?.waitlist || []).length} en liste d’attente</p>{participants.map(p => <div className="list-row" key={p.uid}><Avatar name={p.displayName} photoURL={p.photoURL} size={38} /><div className="row-main"><div className="row-title">{p.displayName}</div><div className="row-sub">{participantEvent?.participants.includes(p.uid) ? 'Inscrit' : 'Liste d’attente'}</div></div></div>)}</Sheet>
+    <DirectionsPanel
+      open={!!directionsEvent}
+      onClose={() => setDirectionsEvent(null)}
+      destination={
+        directionsEvent
+          ? {
+              name: directionsEvent.title,
+              address: directionsEvent.location || directionsEvent.establishmentName || null,
+              lat: directionsEvent.lat ?? null,
+              lng: directionsEvent.lng ?? null,
+            }
+          : null
+      }
+      origin={directionsOrigin}
+      onLocate={locateForDirections}
+    />
     <Sheet open={!!reminderEvent} onClose={() => setReminderEvent(null)} title="Rappel avant le départ"><label className="check-row"><input type="checkbox" checked={reminderEnabled} onChange={e => setReminderEnabled(e.target.checked)} /> Recevoir une notification sur cet appareil</label><div className="field"><label>Délai avant le départ</label><select className="input" value={reminderMinutes} onChange={e => setReminderMinutes(Number(e.target.value))}><option value={15}>15 minutes</option><option value={30}>30 minutes</option><option value={60}>1 heure</option><option value={120}>2 heures</option><option value={1440}>La veille</option></select></div><button className="btn btn-gold" onClick={saveReminder}>Enregistrer le rappel</button></Sheet>
   </div>;
 }
