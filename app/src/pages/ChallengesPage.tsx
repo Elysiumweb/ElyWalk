@@ -60,9 +60,9 @@ export default function ChallengesPage() {
   useEffect(()=>{
     if(!profile) return;
     const unsub=watchFriendships(profile.uid, async (uids)=>{
-      const profs=await getProfiles(uids);
-      setFriends(profs);
-    });
+      try { setFriends(await getProfiles(uids)); }
+      catch { setFriends([]); }
+    }, () => setFriends([]));
     return unsub;
   },[profile?.uid]);
 

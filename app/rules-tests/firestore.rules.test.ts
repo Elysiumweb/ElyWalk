@@ -7,8 +7,10 @@ const PROJECT = 'elywalk-security-tests';
 const ALICE = 'alice'; const BOB = 'bob'; const ADMIN = 'BZ333LlhuJMoD4rXIquGE0zzjX43';
 let env: RulesTestEnvironment;
 const as = (uid: string) => env.authenticatedContext(uid, { email_verified: true }).firestore();
-const request = (from: string, to: string) => ({ from, fromName: from, to, toName: to, status: 'pending', createdAt: Date.now(), notified: false });
-const message = (from: string, to: string) => ({ from, fromName: from, to, toName: to, text: 'Bonjour', createdAt: Date.now(), read: false });
+// `fromBlocked: false` est obligatoire : le champ figé à l'envoi est ce qui
+// permet aux règles de liste de filtrer sans `get()` par ligne (F12).
+const request = (from: string, to: string) => ({ from, fromName: from, to, toName: to, status: 'pending', createdAt: Date.now(), notified: false, fromBlocked: false });
+const message = (from: string, to: string) => ({ from, fromName: from, to, toName: to, text: 'Bonjour', createdAt: Date.now(), read: false, fromBlocked: false });
 const block = (ownerUid: string, blockedUid: string) => ({ ownerUid, blockedUid, blockedName: blockedUid, createdAt: Date.now() });
 
 before(async () => { env = await initializeTestEnvironment({ projectId: PROJECT, firestore: { rules: readFileSync('../firestore.rules', 'utf8'), host: '127.0.0.1', port: 8080 } }); });
@@ -21,7 +23,7 @@ describe('blocage bilatéral', () => {
     await assertFails(setDoc(doc(as(BOB), 'friendRequests/bob_alice'), request(BOB, ALICE)));
     await assertFails(setDoc(doc(as(ALICE), 'friendRequests/alice_bob'), request(ALICE, BOB)));
     await assertFails(setDoc(doc(as(BOB), 'directMessages/bob_alice'), message(BOB, ALICE)));
-    await assertFails(setDoc(doc(as(ALICE), 'friendReactions/alice_bob'), { from: ALICE, to: BOB, emoji: '👏', message: '' }));
+    await assertFails(setDoc(doc(as(ALICE), 'friendReactions/alice_bob'), { from: ALICE, to: BOB, emoji: '👏', message: '', fromBlocked: false }));
   });
   it('autorise les interactions sans blocage et seul le propriétaire débloque', async () => {
     await assertSucceeds(setDoc(doc(as(BOB), 'friendRequests/bob_alice'), request(BOB, ALICE)));
@@ -59,7 +61,7 @@ const session = (uid: string, visibility: 'private' | 'friends' | 'link') => ({
   uid, type: 'walk', startedAt: 1, durationSec: 60, distanceM: 100, calories: 5,
   points: [{ lat: 1, lng: 1, recordedAt: 1 }], status: 'completed', visibility,
 });
-const friendship = (a: string, b: string) => ({ members: [a, b].sort(), createdAt: 1 });
+const friendship = (a: string, b: string) => ({ members: [a, b].sort(), createdAt: 1, hiddenFor: [] });
 
 describe('F01 — audiences des sorties', () => {
   it('refuse une sortie « amis » à un tiers non ami', async () => {
@@ -185,5 +187,136 @@ describe('F07 — lisibilité du classement', () => {
       getDocs(query(col(as(BOB), 'users/alice/dailySteps'), orderBy('validatedAt', 'desc'), lim(30)))
     );
     expect(snaps.docs.length).toBe(30);
+  });
+});
+
+// « Les amis chargent en boucle » : la même limite de 10 accès document
+// s'appliquait aux lectures de `friendships`, `friendRequests`,
+// `friendReactions`, `directMessages` et du fil. Vérifier le blocage par
+// `exists()` coûtait 2 appels par document : la requête était refusée dès le 6e
+// ami, `onSnapshot` échouait et l'écran restait en chargement.
+//
+// Le blocage est désormais répliqué dans les documents lus (`blockedBy`,
+// `hiddenFor`, `fromBlocked`) : les règles de liste n'ont plus aucun appel de
+// document, donc leur coût ne dépend plus du nombre de résultats.
+describe('F12 — lectures d’amis sans dépassement de budget', () => {
+  const profile = (uid: string, extra: Record<string, unknown> = {}) => ({
+    uid, displayName: uid, photoURL: null, role: 'user', createdAt: 1,
+    totalSteps: 0, totalCalories: 0, streak: 0, todaySteps: 0, todayDate: '2026-11-12',
+    elycoins: 0, referralCode: uid.toUpperCase(), dailyStepGoal: 10000, unitSystem: 'metric',
+    onboardingDone: true, lastValidatedDate: '2026-11-12', email: `${uid}@example.com`,
+    blockedUsers: [] as string[], blockedBy: [] as string[], ...extra,
+  });
+
+  it('autorise la liste des 20 amis d’un utilisateur', async () => {
+    const { collection: col, getDocs, query, where, limit: lim } = await import('firebase/firestore');
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'users/alice'), profile(ALICE));
+      for (let i = 0; i < 20; i += 1) {
+        await setDoc(doc(ctx.firestore(), `users/friend${i}`), profile(`friend${i}`));
+        await setDoc(doc(ctx.firestore(), `friendships/alice_friend${i}`), {
+          members: [ALICE, `friend${i}`], createdAt: Date.now(), hiddenFor: [],
+        });
+      }
+    });
+    const snaps = await assertSucceeds(
+      getDocs(query(col(as(ALICE), 'friendships'), where('members', 'array-contains', ALICE), lim(20)))
+    );
+    expect(snaps.docs.length).toBe(20);
+  });
+
+  it('autorise 25 messages, encouragements et demandes reçues', async () => {
+    const { collection: col, getDocs, query, where, limit: lim } = await import('firebase/firestore');
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'users/alice'), profile(ALICE));
+      await setDoc(doc(ctx.firestore(), 'users/bob'), profile(BOB));
+      for (let i = 0; i < 25; i += 1) {
+        await setDoc(doc(ctx.firestore(), `directMessages/m${i}`), message(BOB, ALICE));
+        await setDoc(doc(ctx.firestore(), `friendReactions/r${i}`), { from: BOB, to: ALICE, emoji: '👏', message: '', fromBlocked: false });
+        await setDoc(doc(ctx.firestore(), `friendRequests/q${i}`), request(BOB, ALICE));
+      }
+    });
+    const dm = await assertSucceeds(getDocs(query(col(as(ALICE), 'directMessages'), where('to', '==', ALICE), lim(25))));
+    expect(dm.docs.length).toBe(25);
+    const reactions = await assertSucceeds(getDocs(query(col(as(ALICE), 'friendReactions'), where('to', '==', ALICE), lim(25))));
+    expect(reactions.docs.length).toBe(25);
+    const reqs = await assertSucceeds(getDocs(query(col(as(ALICE), 'friendRequests'), where('to', '==', ALICE), lim(25))));
+    expect(reqs.docs.length).toBe(25);
+  });
+
+  it('retire un profil bloqué du classement via `blockedBy`, sans casser la requête', async () => {
+    const { collection: col, getDocs, query, orderBy, limit: lim } = await import('firebase/firestore');
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      // Alice a bloqué Bob : `blockedBy` est écrit sur le profil de Bob.
+      await setDoc(doc(ctx.firestore(), 'users/bob'), profile(BOB, { blockedBy: [ALICE] }));
+      for (let i = 0; i < 40; i += 1) {
+        await setDoc(doc(ctx.firestore(), `users/player${i}`), profile(`player${i}`, { elycoins: i }));
+      }
+    });
+    const snaps = await assertSucceeds(
+      getDocs(query(col(as(ALICE), 'users'), orderBy('elycoins', 'desc'), lim(60)))
+    );
+    // 40 résultats lisibles, aucun refus : le coût de la règle ne dépend plus du
+    // nombre de documents examinés.
+    expect(snaps.docs.length).toBe(40);
+    expect(snaps.docs.some((d) => d.id === 'bob')).toBe(false);
+  });
+
+  it('masque une amitié bloquée via `hiddenFor`', async () => {
+    const { collection: col, getDocs, query, where, limit: lim } = await import('firebase/firestore');
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'users/alice'), profile(ALICE));
+      await setDoc(doc(ctx.firestore(), 'users/bob'), profile(BOB));
+      await setDoc(doc(ctx.firestore(), 'friendships/alice_bob'), {
+        members: [ALICE, BOB], createdAt: Date.now(), hiddenFor: [ALICE],
+      });
+    });
+    const snaps = await assertSucceeds(
+      getDocs(query(col(as(ALICE), 'friendships'), where('members', 'array-contains', ALICE), lim(20)))
+    );
+    expect(snaps.docs.length).toBe(0);
+    // L'autre membre conserve sa ligne tant qu'il n'a pas bloqué à son tour.
+    const other = await assertSucceeds(
+      getDocs(query(col(as(BOB), 'friendships'), where('members', 'array-contains', BOB), lim(20)))
+    );
+    expect(other.docs.length).toBe(1);
+  });
+
+  it('`blockedBy` n’accepte que l’identifiant de celui qui écrit', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'users/alice'), profile(ALICE));
+      await setDoc(doc(ctx.firestore(), 'users/bob'), profile(BOB));
+    });
+    // Bob déclare son propre blocage sur le profil d'Alice : autorisé.
+    await assertSucceeds(updateDoc(doc(as(BOB), 'users/alice'), { blockedBy: [BOB] }));
+    // Bob ne peut pas accuser un tiers…
+    await assertFails(updateDoc(doc(as(BOB), 'users/alice'), { blockedBy: [BOB, 'carol'] }));
+    // …ni retirer un blocage qui n'est pas le sien.
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await updateDoc(doc(ctx.firestore(), 'users/bob'), { blockedBy: [ADMIN] });
+    });
+    await assertFails(updateDoc(doc(as(ALICE), 'users/bob'), { blockedBy: [] }));
+    // Personne n'écrit sa propre liste `blockedBy` (on ne se déclare pas bloqué).
+    await assertFails(updateDoc(doc(as(BOB), 'users/bob'), { blockedBy: [] }));
+  });
+
+  it('autorise la mise à jour de blockedUsers, un ajout à la fois', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'users/alice'), profile(ALICE));
+      await setDoc(doc(ctx.firestore(), 'users/bob'), profile(BOB));
+      await setDoc(doc(ctx.firestore(), 'users/carol'), profile('carol'));
+    });
+    await assertSucceeds(updateDoc(doc(as(ALICE), 'users/alice'), { blockedUsers: [BOB] }));
+    await assertSucceeds(updateDoc(doc(as(ALICE), 'users/alice'), { blockedUsers: [BOB, 'carol'] }));
+    // Deux retraits d'un coup : refusé (impossible de vider la liste).
+    await assertFails(updateDoc(doc(as(ALICE), 'users/alice'), { blockedUsers: [] }));
+    // Écrire dans la liste d'un autre : refusé.
+    await assertFails(updateDoc(doc(as(ALICE), 'users/bob'), { blockedUsers: [ALICE] }));
+    // La liste peut accompagner une modification de profil (lot atomique du
+    // client), mais uniquement avec un delta d'une entrée.
+    await assertSucceeds(updateDoc(doc(as(ALICE), 'users/alice'), { blockedUsers: ['carol'], bio: 'coucou' }));
+    await assertSucceeds(updateDoc(doc(as(ALICE), 'users/alice'), { blockedUsers: [], bio: 'encore' }));
+    // `blockedBy` ne peut pas être glissé dans une modification de profil.
+    await assertFails(updateDoc(doc(as(ALICE), 'users/alice'), { bio: 'x', blockedBy: [BOB] }));
   });
 });

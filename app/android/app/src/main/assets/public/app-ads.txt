@@ -1,0 +1,15 @@
+# ElyWalk — app-ads.txt
+# Régie : Unity LevelPlay (médiation) avec Meta Audience Network en bidding.
+# Domaine de développeur déclaré sur la fiche Play Store : elywalk-2f7ba.web.app
+# Ce fichier doit rester accessible à la racine du domaine :
+#   https://elywalk-2f7ba.web.app/app-ads.txt
+#
+# Meta Audience Network (réseau en bidding derrière LevelPlay).
+facebook.com, 1598870752271390, DIRECT, c3e20eee3f780d68
+#
+# Unity LevelPlay / ironSource : copier la ligne exacte affichée dans
+# LevelPlay → Compte → app-ads.txt (elle contient votre Publisher ID), puis
+# décommenter. La ligne ci-dessous est un modèle, <PUBLISHER_ID> doit être
+# remplacé — un identifiant inventé fait rejeter le fichier par les acheteurs.
+# ironsrc.com, <PUBLISHER_ID>, DIRECT
+# unity.com, <PUBLISHER_ID>, DIRECT

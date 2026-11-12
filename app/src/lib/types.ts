@@ -46,6 +46,24 @@ export interface UserProfile {
   unitSystem?: UnitSystem;
   /** Préférences de vie privée pour le fil d'activité */
   activityPrivacy?: ActivityPrivacySettings;
+  /**
+   * F01/F07 — identifiants des comptes bloqués (jamais les noms).
+   *
+   * Source de vérité : `blockedAccounts`. Ce doublon volontaire existe parce que
+   * les règles Firestore limitent une requête à 10 appels de document au total :
+   * vérifier un blocage via `exists()` coûte 2 appels par ligne, ce qui rendait
+   * tout classement ou fil d'activité refusé au-delà de 5 résultats. Absent sur
+   * les profils créés avant la 2.2.2 (voir `backfillBlockedUsers`).
+   */
+  blockedUsers?: string[];
+  /**
+   * F12 — comptes qui m'ont bloqué, écrits par eux sur mon profil.
+   *
+   * Permet à une règle de **liste** de filtrer les profils visibles sans aucun
+   * `get()` par ligne. Identifiants uniquement, jamais de nom, et jamais
+   * exploitables pour savoir *qui* a bloqué *qui* au-delà de sa propre fiche.
+   */
+  blockedBy?: string[];
 }
 
 export interface ActivityPrivacySettings {
@@ -248,12 +266,30 @@ export interface FriendRequest {
   status: 'pending' | 'accepted' | 'rejected';
   createdAt: number;
   notified?: boolean;
+  /**
+   * F12 — `true` si l'expéditeur était bloqué au moment de l'envoi.
+   *
+   * La règle de lecture s'appuie sur ce champ (présent dans le document évalué)
+   * au lieu de relire la table des blocages une fois par ligne, ce qui faisait
+   * refuser la requête entière au 11e document.
+   */
+  fromBlocked?: boolean;
 }
 
 export interface Friendship {
   id?: string;
   members: string[];
   createdAt: number;
+  /**
+   * F12 — comptes pour lesquels cette amitié est masquée (blocage).
+   *
+   * Le blocage n'efface pas l'historique : il retire l'amitié de la liste des
+   * deux personnes sans perdre la date de départ. La règle de lecture s'appuie
+   * sur ce champ présent dans le document évalué (coût nul), au lieu de lire la
+   * table `blockedAccounts` une fois par ligne — ce qui faisait refuser la
+   * requête entière au 11e ami.
+   */
+  hiddenFor?: string[];
 }
 
 export interface ReferralClaim {
@@ -349,6 +385,14 @@ export interface ActivityFeedItem {
   message: string;
   metadata?: Record<string, unknown>;
   createdAt: number;
+  /**
+   * F12 — audience du document (`friends` par défaut).
+   *
+   * Portée par le document, elle est vérifiable sans lire une autre fiche, donc
+   * sans consommer le budget de 10 appels de document par requête qui faisait
+   * refuser le fil dès le 11e élément.
+   */
+  audience?: 'friends' | 'public' | 'private';
 }
 
 // ========== Messagerie légère ==========
@@ -363,6 +407,8 @@ export interface DirectMessage {
   createdAt: number;
   activityId?: string | null;
   read?: boolean;
+  /** F12 — voir `FriendRequest.fromBlocked`. */
+  fromBlocked?: boolean;
 }
 
 // ========== Événements communautaires ==========

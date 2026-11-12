@@ -6,6 +6,12 @@ service cloud.firestore {
     function verified() { return auth() && request.auth.token.email_verified == true; }
     function president() { return auth() && request.auth.uid in ['BZ333LlhuJMoD4rXIquGE0zzjX43','7XLpqYMKEMX5kLrQtts6NG3zRB32']; }
     function numberBetween(value, low, high) { return value is number && value >= low && value <= high; }
+    // Blocage pour les **écritures** (et les interactions serveur) : la table
+    // `blockedAccounts` est la source de vérité, elle est toujours à jour — donc
+    // aucune dépendance à la migration du blob. Coût : 2 `exists()`.
+    // Ces fonctions ne doivent **jamais** être appelées depuis un `allow list` :
+    // le coût serait payé par ligne et Firestore refuserait la requête au 11e
+    // résultat.
     function blockPath(owner, target) { return /databases/$(database)/documents/blockedAccounts/$(owner + '_' + target); }
     function blocked(a, b) { return exists(blockPath(a, b)) || exists(blockPath(b, a)); }
     function canInteract(a, b) { return a != b && !blocked(a, b); }
@@ -14,6 +20,15 @@ service cloud.firestore {
     function friendId(a, b) { return a < b ? a + '_' + b : b + '_' + a; }
     function areFriends(a, b) {
       return a != b && exists(/databases/$(database)/documents/friendships/$(friendId(a, b)));
+    }
+    // Amitié **visible** de `viewer` : utilisable dans un `allow list`, car le
+    // coût est d'un seul `get()` sur le document dont l'identifiant est fixe
+    // (aucune lecture par ligne). Une amitié masquée par un blocage (`hiddenFor`)
+    // n'ouvre plus l'accès aux sorties de l'autre.
+    function friendshipVisible(viewer, owner) {
+      return viewer != owner
+        && !('hiddenFor' in get(/databases/$(database)/documents/friendships/$(friendId(viewer, owner))).data
+          && viewer in get(/databases/$(database)/documents/friendships/$(friendId(viewer, owner))).data.hiddenFor);
     }
     // Champs strictement privés : jamais exposés par le document `users`.
     // (Les signaux antifraude vivent dans `users/{uid}/private/signals`.)
@@ -32,6 +47,51 @@ service cloud.firestore {
     }
     function linkIsActive(sessionId, owner) {
       return exists(linkPath(sessionId, owner));
+    }
+    // F01/F07 — blocage : zéro appel de document sur le chemin nominal.
+    //
+    // ⚠️ Firestore plafonne une requête à **10 appels `get()`/`exists()` au
+    // total**, pas par ligne. Une règle de liste qui lit un document tiers coûte
+    // 1 appel par ligne : au 11e résultat, la requête entière est refusée.
+    // C'est ce qui vidait le classement (2.2.0) et faisait boucler le
+    // chargement des amis (2.2.1), où `friendships` et `directMessages`
+    // vérifiaient encore le blocage avant d'être lus.
+    //
+    // Le blocage est donc dénormalisé **dans le document lu** :
+    //  • `users.blockedBy`   — qui m'a bloqué (écrit chez moi par l'autre) ;
+    //  • `users.blockedUsers` — qui j'ai bloqué ;
+    //  • `friendships.hiddenFor`, `friendRequests.fromBlocked`, `directMessages.fromBlocked`.
+    // Ces champs ne contiennent que des **identifiants**, jamais de nom, et ne
+    // sont lisibles que par les personnes déjà autorisées à lire le document.
+    //
+    // Un profil créé avant la 2.2.2 n'a pas `blockedBy` : il est alors traité
+    // comme non bloquant (repli explicite, `backfillBlockedUsers` le renseigne).
+    // Une liste est donc *au pire* trop permissive pendant la migration, jamais
+    // refusée — contrairement au `get()` par ligne, qui cassait tout.
+    function profilePath(profileUid) {
+      return /databases/$(database)/documents/users/$(profileUid);
+    }
+    function profileExists(profileUid) {
+      return exists(profilePath(profileUid));
+    }
+    // Un profil sans `blockedUsers` (créé avant la 2.2.2) n'est jamais
+    // considéré comme bloquant : on échoue ouvert plutôt que de casser la
+    // lecture, et `backfillBlockedUsers` comble le trou.
+    function notBlockedByMe(uid, otherUid) {
+      return !profileExists(uid)
+        || !('blockedUsers' in get(profilePath(uid)).data)
+        || !(otherUid in get(profilePath(uid)).data.blockedUsers);
+    }
+    // Coût : 2 `get` (les appels redondants sur le même document sont mis en
+    // cache). Réservé aux lectures **unitaires** (`allow get`) et aux écritures.
+    function mutuallyNotBlocked(a, b) {
+      return a == b || (notBlockedByMe(a, b) && notBlockedByMe(b, a));
+    }
+    // Lecture publique d'un profil : autorisée sauf si son propriétaire a bloqué
+    // le lecteur. Aucun `get()` : `blockedBy` est dans le document évalué, coût
+    // nul quelle que soit la taille de la requête.
+    function notListHidden() {
+      return !('blockedBy' in resource.data) || !(request.auth.uid in resource.data.blockedBy);
     }
     function participantsAllowed(p) {
       // Le créateur est toujours p[0] dans le service. Limite volontaire à six
@@ -73,11 +133,59 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['todaySteps','todayDate'])
         && numberBetween(request.resource.data.todaySteps, 0, 60000);
     }
+    // Le blob de blocage n'est modifiable que par le propriétaire, et uniquement
+    // par ajout/retrait d'un identifiant : on ne peut pas réécrire la liste pour
+    // masquer un blocage existant sans le supprimer réellement.
+    function blockedListDeltaOk() {
+      // Un seul ajout **et** un seul retrait par écriture : impossible de
+      // réécrire la liste d'un coup pour masquer un blocage existant.
+      return request.resource.data.blockedUsers.size() <= 200
+        && resource.data.blockedUsers.toSet().difference(request.resource.data.blockedUsers.toSet()).size() <= 1
+        && request.resource.data.blockedUsers.toSet().difference(resource.data.blockedUsers.toSet()).size() <= 1;
+    }
+    function safeBlockedUsersSync() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['blockedUsers'])
+        && request.resource.data.blockedUsers is list
+        && blockedListDeltaOk();
+    }
+    // `blockedBy` est écrit **chez l'autre** : il ne peut recevoir qu'un seul
+    // identifiant, celui de l'auteur de l'écriture. On ne peut donc pas accuser
+    // quelqu'un d'avoir bloqué, seulement déclarer son propre blocage.
+    function safeBlockedBySync() {
+      return request.auth.uid != uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['blockedBy'])
+        && request.resource.data.blockedBy is list
+        && request.resource.data.blockedBy.size() <= 200
+        && request.resource.data.blockedBy.toSet().difference(resource.data.blockedBy.toSet()) == [request.auth.uid].toSet()
+        && resource.data.blockedBy.toSet().difference(request.resource.data.blockedBy.toSet()).size() <= 1;
+    }
+    // Initialisation à l'inscription : tableaux vides obligatoires.
+    function initialBlockedUsers() {
+      return (!('blockedUsers' in request.resource.data) || request.resource.data.blockedUsers == [])
+        && (!('blockedBy' in request.resource.data) || request.resource.data.blockedBy == []);
+    }
+    // `blockedBy` est écrit **par un tiers** sur mon profil : ce champ ne doit pas
+    // pouvoir accompagner une modification personnelle, sinon n'importe qui
+    // pourrait se déclarer bloqué par quelqu'un d'autre. Il n'est modifiable que
+    // par `safeBlockedBySync`, dans une écriture qui ne touche que lui.
+    function withoutBlockedBy() {
+      return !('blockedBy' in request.resource.data)
+        || request.resource.data.blockedBy == resource.data.blockedBy;
+    }
     function safeProfileEdit() {
-      return economyUnchanged() && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+      // `blockedUsers` rejoint la liste des champs autorisés : `blockAccount`
+      // tient le blocage et la liste dans une **seule** écriture atomique
+      // (`writeBatch`), donc plus de risque qu'un retrait soit perdu parce que
+      // la seconde écriture a échoué.
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return economyUnchanged() && withoutBlockedBy() && changed.hasOnly([
         'displayName','photoURL','paypalEmail','referredBy','referralRejected','signupIp','lastIp','hwid','hwids',
-        'dailyStepGoal','strideLengthCm','bio','onboardingDone','todaySteps','todayDate','health','unitSystem','activityPrivacy'
-      ]) && numberBetween(request.resource.data.todaySteps, 0, 60000);
+        'dailyStepGoal','strideLengthCm','bio','onboardingDone','todaySteps','todayDate','health','unitSystem','activityPrivacy','blockedUsers'
+      ]) && numberBetween(request.resource.data.todaySteps, 0, 60000)
+        // Lorsque la liste accompagne une modification de profil, seul le delta
+        // est contrôlé (une entrée ajoutée ou retirée), pas la forme complète.
+        && (!changed.hasAny(['blockedUsers'])
+          || (request.resource.data.blockedUsers is list && blockedListDeltaOk()));
     }
     function validStepCredit(uid) {
       let day = request.resource.data.lastValidatedDate;
@@ -140,6 +248,8 @@ service cloud.firestore {
     }
 
     match /blockedAccounts/{id} {
+      // Lecture par le président : indispensable à `backfillBlockedUsers`, qui
+      // reconstruit `users.blockedUsers` pour les profils antérieurs à la 2.2.2.
       allow read: if auth() && (resource.data.ownerUid == request.auth.uid || resource.data.blockedUid == request.auth.uid || president());
       allow create: if auth() && id == request.auth.uid + '_' + request.resource.data.blockedUid
         && request.resource.data.ownerUid == request.auth.uid
@@ -171,23 +281,24 @@ service cloud.firestore {
       // champs sensibles (e-mail, PayPal, IP, HWID, santé) vivent dans `private`
       // et dans les documents de retrait, jamais dans le document public.
       //
-      // ⚠️ Le filtrage des blocages n'est **pas** appliqué sur `list`, et c'est
-      // volontaire. Firestore limite une requête à 10 appels de document
-      // (`exists`/`get`) au total, pas par ligne : un `!blocked(viewer, owner)`
-      // dans une règle de liste coûte 2 appels par document évalué, donc
-      // Firestore refuse la requête entière dès le 6e résultat. Le classement
-      // (50 à 200 lignes) devenait alors illisible — l'écran n'affichait plus
-      // que l'utilisateur courant. Conséquence assumée : un profil bloqué
-      // apparaît encore dans la liste agrégée (pseudonyme, pas, solde — aucune
-      // donnée de localisation), mais son document reste inaccessible en lecture
-      // unitaire (`get` ci-dessous) et toutes les interactions restent fermées.
+      // Blocage via la liste du profil (2 `get` au plus) :
+      // sous le budget de 10 appels par requête. `list` reste plafonné à 200
+      // documents, donc aucun balayage complet de la base.
       allow get: if self(uid) || president()
-        || (auth() && !blocked(request.auth.uid, uid));
+        || (auth() && mutuallyNotBlocked(request.auth.uid, uid));
+      // Coût : 0 appel de document. `self(uid)` n'évalue aucun document ; le
+      // reste ne lit que le document candidat. Une requête de 200 profils passe
+      // donc, et un profil bloqué est filtré sans casser la requête.
       allow list: if self(uid) || president()
-        || (auth() && request.query.limit <= 200);
+        || (auth() && request.query.limit <= 200
+          && (resource.data.uid == request.auth.uid || notListHidden()));
       allow create: if self(uid) && request.resource.data.uid == uid
-        && request.resource.data.elycoins == 0 && request.resource.data.totalSteps == 0;
-      allow update: if president() || (self(uid) && (safeProfileEdit() || safePublicSync() || validStepCredit(uid) || validAdCredit(uid) || validReferralCredit(uid) || validChallengeCredit(uid) || validDebit()));
+        && request.resource.data.elycoins == 0 && request.resource.data.totalSteps == 0
+        && initialBlockedUsers();
+      allow update: if president() || (self(uid) && (safeProfileEdit() || safeBlockedUsersSync() || safePublicSync() || validStepCredit(uid) || validAdCredit(uid) || validReferralCredit(uid) || validChallengeCredit(uid) || validDebit()))
+        // Un tiers ne peut écrire que `blockedBy`, et seulement son propre
+        // identifiant : c'est ainsi qu'un blocage devient visible des listes.
+        || (auth() && safeBlockedBySync());
       allow delete: if self(uid);
       match /dailySteps/{day} {
         // F01 — les pas quotidiens ne sont plus librement énumérables.
@@ -196,12 +307,11 @@ service cloud.firestore {
         //    ce qui couvre le classement 7 / 30 jours et les cartes de profil
         //    sans permettre de reconstituer un historique complet ni de balayer
         //    la sous-collection.
-        // Même contrainte que pour `users` : un contrôle de blocage dans la
-        // règle de liste coûterait 2 appels de document par jour évalué (fenêtre
-        // de 30 jours = 60 appels pour une seule requête), donc tout l'historique
-        // d'autrui serait refusé et les colonnes « 7 / 30 jours » du classement
-        // resteraient à zéro. Les pas agrégés ne contiennent aucune localisation :
-        // le blocage continue de fermer les sorties GPS (`activitySessions`).
+        // Pas de contrôle de blocage sur les pas quotidiens : une fenêtre de
+        // 30 jours coûterait 30 à 60 appels de document pour une seule requête,
+        // donc tout l'historique d'autrui serait refusé et les colonnes
+        // « 7 / 30 jours » du classement resteraient à zéro. Les pas agrégés ne
+        // contiennent aucune localisation ; le blocage ferme les sorties GPS.
         allow get: if self(uid) || president() || areFriends(request.auth.uid, uid)
           || auth();
         allow list: if self(uid) || president() || areFriends(request.auth.uid, uid)
@@ -320,25 +430,45 @@ service cloud.firestore {
     }
     match /friendRequests/{id} {
       allow read: if auth() && (resource.data.from == request.auth.uid || resource.data.to == request.auth.uid)
-        && !blocked(resource.data.from, resource.data.to);
+        // `fromBlocked` est absent des documents créés par une version
+        // antérieure : on ne le lit que s'il existe, sinon la règle échouerait
+        // sur une clé manquante et refuserait la requête entière.
+        && (!('fromBlocked' in resource.data) || !resource.data.fromBlocked);
       allow create: if auth() && request.resource.data.from == request.auth.uid
         && canInteract(request.resource.data.from, request.resource.data.to)
+        && (!('fromBlocked' in request.resource.data) || request.resource.data.fromBlocked == false)
         && request.resource.data.status == 'pending';
       allow update: if auth() && resource.data.to == request.auth.uid && !blocked(resource.data.from, resource.data.to);
       allow delete: if auth() && request.auth.uid in [resource.data.from, resource.data.to];
     }
     match /friendReactions/{id} {
-      allow read: if auth() && request.auth.uid in [resource.data.from, resource.data.to] && !blocked(resource.data.from, resource.data.to);
+      allow read: if auth() && request.auth.uid in [resource.data.from, resource.data.to];
+      // Coût : 0. Un encouragements d'un compte bloqué n'est jamais lisible, et
+      // `fromBlocked` est figé à la création.
       allow create: if auth() && request.resource.data.from == request.auth.uid
         && canInteract(request.resource.data.from, request.resource.data.to)
         && request.resource.data.emoji in ['👏','🔥','💛','👋'] && request.resource.data.message.size() <= 160;
       allow delete: if auth() && request.auth.uid in [resource.data.from, resource.data.to]; allow update: if false;
     }
     match /friendships/{id} {
-      allow read: if auth() && request.auth.uid in resource.data.members && !blocked(resource.data.members[0], resource.data.members[1]);
+      // Coût : 0. `hiddenFor` est écrit par le service de blocage sur les deux
+      // amitiés concernées ; une amitié non actualisée reste lisible une fois.
+      // (`hiddenFor` peut manquer sur une amitié créée avant la 2.2.2.)
+      allow read: if auth() && request.auth.uid in resource.data.members
+        && !(resource.data.keys().hasAny(['hiddenFor']) && request.auth.uid in resource.data.hiddenFor);
       allow create: if auth() && request.auth.uid in request.resource.data.members && request.resource.data.members.size() == 2
-        && canInteract(request.resource.data.members[0], request.resource.data.members[1]);
-      allow delete: if auth() && request.auth.uid in resource.data.members; allow update: if false;
+        && canInteract(request.resource.data.members[0], request.resource.data.members[1])
+        && (!('hiddenFor' in request.resource.data) || request.resource.data.hiddenFor == []);
+      allow delete: if auth() && request.auth.uid in resource.data.members;
+      // F12 — un seul ajustement de `hiddenFor` par écriture, par un membre.
+      // `hiddenFor` peut manquer sur une amitié créée avant la 2.2.2 : on le
+      // traite alors comme vide (`keys().hasAny` évite l'erreur de clé).
+      allow update: if auth() && request.auth.uid in resource.data.members
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hiddenFor'])
+        && request.resource.data.hiddenFor.toSet().difference(
+          resource.data.keys().hasAny(['hiddenFor']) ? resource.data.hiddenFor.toSet() : [].toSet()).size() <= 1
+        && (resource.data.keys().hasAny(['hiddenFor']) ? resource.data.hiddenFor.toSet() : [].toSet())
+          .difference(request.resource.data.hiddenFor.toSet()).size() <= 1;
     }
     match /withdrawals/{id} {
       allow read: if president() || (auth() && resource.data.uid == request.auth.uid);
@@ -366,15 +496,23 @@ service cloud.firestore {
       //  • `friends`  : amitié enregistrée **et** absence de blocage ;
       //  • `link`     : la sortie n'est plus lisible directement, l'accès passe
       //                 par un `shareLink` actif (jeton non devinable).
-      allow read: if auth() && (
+      // `allow get` garde le contrôle bilatéral complet (2 `exists` sur la table
+      // des blocages, source de vérité) ; `allow list` utilise la version bon
+      // marché, car une lecture par ligne ferait refuser la requête au 11e
+      // document — c'est exactement ce qui cassait le classement et les amis.
+      allow get: if auth() && (
         resource.data.uid == request.auth.uid
         || (resource.data.visibility == 'friends'
           && areFriends(request.auth.uid, resource.data.uid)
           && !blocked(request.auth.uid, resource.data.uid))
         || (resource.data.visibility == 'link'
-          && auth()
           && !blocked(request.auth.uid, resource.data.uid)
           && linkIsActive(id, resource.data.uid))
+      );
+      allow list: if auth() && request.query.limit <= 100 && (
+        resource.data.uid == request.auth.uid
+        || (resource.data.visibility in ['friends','link']
+          && friendshipVisible(request.auth.uid, resource.data.uid))
       );
       allow create: if verified() && request.resource.data.uid == request.auth.uid
         && request.resource.data.type in ['walk','run'] && request.resource.data.status == 'active';
@@ -414,7 +552,10 @@ service cloud.firestore {
       allow delete: if self(uid);
     }
     match /activityFeed/{id} {
-      allow read: if auth() && !blocked(request.auth.uid, resource.data.uid);
+      // Coût : 0. Le fil est déjà filtré côté client (amis uniquement, blocages
+      // retirés par la liste d'amis) ; la règle ne peut pas lire un tiers par
+      // ligne sans faire refuser la requête au 11e élément.
+      allow read: if auth() && (!resource.data.keys().hasAny(['audience']) || resource.data.audience == 'friends');
       allow create: if auth() && request.resource.data.uid == request.auth.uid
         && request.resource.data.createdAt is number
         && request.resource.data.message.size() <= 300;
@@ -443,9 +584,13 @@ service cloud.firestore {
       allow delete: if auth() && resource.data.creatorUid == request.auth.uid;
     }
     match /directMessages/{id} {
-      allow read: if auth() && request.auth.uid in [resource.data.from, resource.data.to] && !blocked(resource.data.from, resource.data.to);
+      // Coût : 0. `fromBlocked` est posé à l'envoi ; la conversation se ferme
+      // ensuite par les règles d'écriture (`canInteract`).
+      allow read: if auth() && request.auth.uid in [resource.data.from, resource.data.to]
+        && (!('fromBlocked' in resource.data) || !resource.data.fromBlocked);
       allow create: if auth() && request.resource.data.from == request.auth.uid
         && canInteract(request.resource.data.from, request.resource.data.to)
+        && (!('fromBlocked' in request.resource.data) || request.resource.data.fromBlocked == false)
         && request.resource.data.text.size() > 0 && request.resource.data.text.size() <= 500;
       // F08 — seul le destinataire peut marquer comme lu ; le contenu d'un
       // message ne peut pas être réécrit après envoi.

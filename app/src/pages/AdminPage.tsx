@@ -24,9 +24,9 @@ import { getChallengeDefinitions } from '../lib/constants';
 import { closeChallengeCatalogEntry, describeCatalogState, publishChallengeCatalog, setChallengeCatalogEntry, type ChallengeCatalogEntry } from '../lib/challenges';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { reviewReport, watchReports } from '../lib/safety';
+import { backfillBlockedUsers, reviewReport, watchReports } from '../lib/safety';
 
-type Tab = 'partners' | 'withdrawals' | 'establishments' | 'reports' | 'challenges';
+type Tab = 'partners' | 'withdrawals' | 'establishments' | 'reports' | 'challenges' | 'maintenance';
 
 export default function AdminPage() {
   const { profile } = useAuth();
@@ -94,6 +94,27 @@ export default function AdminPage() {
     }
   };
 
+  // Migration des listes de blocage (F12) : les profils créés avant la 2.2.2
+  // n'ont pas `blockedUsers`/`blockedBy`, donc un blocage ancien ne filtre pas
+  // les listes tant que la migration n'a pas tourné. L'opération est idempotente.
+  const runBlockedBackfill = async () => {
+    if (!profile) return;
+    setBackfillBusy(true);
+    try {
+      const result = await backfillBlockedUsers(profile.uid);
+      toast(
+        result.updated
+          ? `${result.updated} profil(s) mis à jour, ${result.skipped} déjà à jour.`
+          : 'Tous les profils sont déjà à jour.',
+        'success',
+      );
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setBackfillBusy(false);
+    }
+  };
+
   const publishCatalog = async () => {
     if (!profile) return;
     setCatalogBusy(true);
@@ -120,6 +141,7 @@ export default function AdminPage() {
   const [estDescription, setEstDescription] = useState('');
   const [estLogo, setEstLogo] = useState<string | null>(null);
   const [estBusy, setEstBusy] = useState(false);
+  const [backfillBusy, setBackfillBusy] = useState(false);
 
   const isAdmin = isPresidentUid(profile?.uid);
 
@@ -262,6 +284,13 @@ export default function AdminPage() {
         >
           Barème des défis
         </button>
+        <button
+          className={`chip ${tab === 'maintenance' ? 'chip-active' : ''}`}
+          onClick={() => setTab('maintenance')}
+          data-testid="admin-tab-maintenance"
+        >
+          Maintenance
+        </button>
       </div>
 
       {loading ? (
@@ -340,6 +369,31 @@ export default function AdminPage() {
               </div>
             ))
           )}
+        </div>
+      ) : tab === 'maintenance' ? (
+        <div className="card" data-testid="admin-maintenance">
+          <div className="card-title">Migration des blocages</div>
+          <p className="card-help">
+            Les profils créés avant la 2.2.2 n’ont pas les listes{' '}
+            <code>blockedUsers</code> / <code>blockedBy</code>. Tant qu’elles manquent,
+            un blocage ancien reste actif (lectures unitaires, messages, demandes
+            d’ami refusés) mais le compte bloqué apparaît encore dans les listes
+            et le classement. Cette migration les renseigne depuis la table de
+            référence <code>blockedAccounts</code>.
+          </p>
+          <p className="card-help">
+            Opération <strong>idempotente</strong> : seuls les profils à qui il manque
+            une liste sont touchés, aucune liste existante n’est écrasée. Elle peut
+            être relancée sans risque.
+          </p>
+          <button
+            className="btn btn-gold"
+            onClick={runBlockedBackfill}
+            disabled={backfillBusy}
+            data-testid="run-blocked-backfill"
+          >
+            {backfillBusy ? 'Migration…' : 'Renseigner les profils existants'}
+          </button>
         </div>
       ) : tab === 'challenges' ? (
         <div className="card" data-testid="admin-challenge-catalog">

@@ -260,6 +260,58 @@ règles actives sont encore les anciennes :
 firebase deploy --only firestore:rules
 ```
 
+### 2.2.2 — la dénormalisation est en place
+
+Le paragraphe ci-dessus annonçait la seule issue praticable : dénormaliser le
+blocage dans le document lu. C'est fait en 2.2.2 — un `get()` par ligne restant
+un appel par ligne, il a fallu aller jusqu'à **zéro** appel de document dans les
+règles de liste.
+
+| Où | Quoi | Coût règle |
+| --- | --- | --- |
+| `users/{uid}` | `blockedUsers` (que j'ai bloqué), `blockedBy` (qui m'a bloqué) | `list` : 0 |
+| `friendships/{id}` | `hiddenFor` (amitié masquée par un blocage) | `list` : 0 |
+| `friendRequests/{id}` | `fromBlocked`, figé à l'envoi | `list` : 0 |
+| `directMessages/{id}` | `fromBlocked`, figé à l'envoi | `list` : 0 |
+| `activityFeed/{id}` | `audience` (`friends`) | `list` : 0 |
+| `activitySessions/{id}` | `allow list` borné à 100, amitié via 1 `get` à clé fixe | 1 |
+
+`blockedAccounts/{owner}_{blocked}` reste la **source de vérité** (elle porte le
+nom affiché dans les réglages) et sert aux contrôles d'écriture
+(`canInteract`, 2 `exists`) : aucune écriture n'est autorisée sur la seule foi
+d'un champ répliqué.
+
+- `blockAccount` / `unblockAccount` écrivent les quatre représentations dans un
+  **même lot atomique** : le blocage, `blockedUsers` chez soi, `blockedBy` chez
+  l'autre et `hiddenFor` sur l'amitié. Deux écritures séparées laisseraient un
+  état où le blocage existe sans être vu des listes — l'utilisateur bloqué
+  réapparaîtrait le temps d'un rafraîchissement.
+- **À faire une fois après déploiement** : renseigner les profils créés avant la
+  2.2.2, sans quoi un blocage ancien ne filtre pas les listes (les lectures
+  unitaires et les interactions restent, elles, bloquées par la table de
+  référence). Depuis l'espace admin ou la console :
+
+  Depuis l'application : **Admin → Maintenance → « Renseigner les profils
+  existants »** (réservé au président). En console, l'appel équivalent est :
+
+  ```js
+  // Une seule fois, avec un compte président
+  await backfillBlockedUsers('UID_PRESIDENT');
+  ```
+
+  Idempotent : seuls les profils à qui il manque `blockedUsers` ou `blockedBy`
+  sont touchés, aucune liste existante n'est écrasée. La règle de lecture de
+  `blockedAccounts` autorise le président pour cette raison précise.
+- Les nouveaux comptes sont créés avec `blockedUsers: []` et `blockedBy: []` ;
+  la règle de `create` n'accepte rien d'autre.
+
+Si l'écran Amis reste en chargement après ce déploiement, c'est que les règles
+actives sont encore celles de la 2.2.1 :
+
+```bash
+firebase deploy --only firestore:rules,firestore:indexes
+```
+
 ## Notes privées et audiences — migration 2.2.0
 
 `activitySessions.note` n'existe plus : la règle Firestore refuse désormais ce

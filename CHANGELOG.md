@@ -1,5 +1,73 @@
 # Changelog
 
+## 2.2.2 — 2026-11-12
+
+### « Les amis chargent en boucle » — corrigé
+
+**Cause.** La 2.2.1 avait retiré le contrôle de blocage des **listes** du
+classement, mais pas des autres collections lues en liste. `friendships`,
+`friendRequests`, `friendReactions`, `directMessages` et `activityFeed`
+vérifiaient encore le blocage par `exists()`, soit 2 appels de document par
+ligne. Firestore plafonne une requête à **10 appels de document au total** : dès
+le 6ᵉ ami, la requête entière était refusée. `onSnapshot` n'avait **aucun
+gestionnaire d'erreur** : le refus ne remontait nulle part, le callback de
+succès n'était jamais appelé et `setLoading(false)` ne s'exécutait pas. D'où le
+squelette « Chargement de vos amis » permanent, et des messages, demandes d'ami
+et encouragements qui ne s'affichaient jamais.
+
+**Correctif — le coût des règles de liste ne dépend plus du nombre de résultats.**
+- Le blocage est répliqué dans les documents lus, en identifiants uniquement :
+  `users.blockedUsers` (ce que j'ai bloqué) et `users.blockedBy` (qui m'a
+  bloqué), `friendships.hiddenFor`, `friendRequests.fromBlocked`,
+  `directMessages.fromBlocked`. `blockAccount` / `unblockAccount` écrivent les
+  quatre représentations **dans un seul lot atomique** avec
+  `blockedAccounts/{owner}_{blocked}`, qui reste la source de vérité (avec le
+  nom). Aucun état intermédiaire où le blocage existe sans être vu des listes.
+- Les règles de liste n'effectuent **aucun appel de document** : 25 amis, 60
+  profils de classement ou 25 messages passent sans refus. Les lectures
+  unitaires (`allow get`) et **toutes** les écritures conservent le contrôle
+  bilatéral complet via la table de référence (`canInteract`, 2 `exists`).
+- `blockedBy` est écrit **chez l'autre**, et la règle n'autorise qu'un seul
+  identifiant : celui de l'auteur de l'écriture. Impossible de se déclarer
+  bloqué par quelqu'un d'autre, ou de retirer le blocage d'un tiers.
+- Les amitiés ne sont plus lisibles quand elles sont masquées, sans perdre la
+  date de départ : le déblocage restitue la ligne intacte.
+- `shareUrlForPath` et l'API de partage restent inchangés, mais les liens
+  partagés passent tous par le domaine public (voir ci-dessous).
+- Tous les abonnements du fil d'amis acceptent un gestionnaire d'erreur
+  (`watchFriendships`, `watchIncomingRequests`, `watchOutgoingRequests`,
+  `watchFriendReactions`, fil d'activité). Un refus de règle affiche un message
+  clair au lieu de laisser l'écran en chargement.
+- Le bouton « Réessayer » relance réellement les abonnements (il ne faisait que
+  masquer l'erreur) ; les listes secondaires (demandes envoyées, encouragements)
+  se vident proprement au lieu de rester figées.
+- `backfillBlockedUsers(uid)` (réservé au président) renseigne les deux listes
+  des profils créés avant cette version, sans écraser celles déjà écrites. Il se
+  lance depuis **Admin → Maintenance**, dans l'application : pas de manipulation
+  en console Firebase (une faute de frappe y laisse des blocages invisibles).
+
+### Lien de parrainage `https://localhost/?ref=CODE` — corrigé
+
+**Cause.** Le code source utilisait déjà le domaine public, mais l'APK 2.2.1
+embarquait un bundle web **périmé** (`assets/public/assets/index-*.js`),
+généré avant le correctif et contenant encore `location.origin}/?ref=…`. Dans
+la WebView Capacitor, `location.origin` vaut `https://localhost` : le lien
+partagé ne menait nulle part.
+
+**Correctif.**
+- Le domaine partageable est construit depuis l'identifiant de projet Firebase
+  (`https://elywalk-2f7ba.web.app`), sans aucune lecture de `location`.
+- `shareUrlForPath` repart systématiquement de ce domaine : même une URL locale
+  passée par erreur (`https://localhost/…`, `capacitor://localhost`, IP LAN) est
+  réécrite vers le domaine public.
+- `isUnshareableOrigin` bloque l'envoi d'un lien non partageable et affiche un
+  message au lieu de copier une adresse inutilisable ; `navigator.share` reçoit
+  l'`url` séparément du texte (certaines applications Android la tronquaient).
+- Les ressources web Android sont régénérées (`npx cap copy android`) : c'était
+  la cause directe du lien localhost dans l'application installée.
+
+**Version** 2.2.2, `versionCode` **20202**.
+
 ## 2.2.1 — 2026-11-12
 
 ### Classement : « je ne vois pas les autres » — corrigé

@@ -21,7 +21,7 @@ import {
   listRecentMessages,
   watchDirectMessages,
 } from '../lib/db';
-import { shareUrlForReferral } from '../lib/share';
+import { isUnshareableOrigin, shareUrlForReferral } from '../lib/share';
 import Avatar from '../components/Avatar';
 import { EmptyState, ErrorState, Skeleton } from '../components/AsyncState';
 import ActivityFeed from '../components/ActivityFeed';
@@ -44,6 +44,9 @@ export default function FriendsPage() {
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<unknown>(null);
+  // Incrémenter cette clé relance réellement les abonnements (le bouton
+  // « Réessayer » ne faisait auparavant que masquer l'erreur).
+  const [reloadKey, setReloadKey] = useState(0);
   const [tab, setTab] = useState<'friends'|'feed'|'messages'>('friends');
   const [qrOpen, setQrOpen] = useState(false);
   const [messages, setMessages] = useState<DirectMessage[]>([]);
@@ -56,25 +59,34 @@ export default function FriendsPage() {
   useEffect(() => {
     if (!profile) return;
     const unsub1 = watchIncomingRequests(profile.uid, setRequests);
-    const unsub2 = watchFriendships(profile.uid, async (uids) => {
-      // F10 — une lecture de profils refusée laissait auparavant la liste en
-      // « Chargement… » indéfiniment : on sort explicitement de l'état chargement
-      // et on l'expose pour pouvoir réessayer.
-      try {
-        const profiles = await getProfiles(uids);
-        setFriends(profiles);
-        setLoadError(null);
-      } catch (e) {
-        setLoadError(e);
-      } finally {
+    const unsub2 = watchFriendships(
+      profile.uid,
+      async (uids) => {
+        // F10 — une lecture de profils refusée laissait auparavant la liste en
+        // « Chargement… » indéfiniment : on sort explicitement de l'état
+        // chargement et on expose l'erreur pour pouvoir réessayer.
+        try {
+          const profiles = await getProfiles(uids);
+          setFriends(profiles);
+          setLoadError(null);
+        } catch (e) {
+          setLoadError(e);
+        } finally {
+          setLoading(false);
+        }
+      },
+      // Refus de règle ou coupure réseau : sans ce gestionnaire, le callback
+      // n'était jamais appelé et l'écran restait bloqué sur le squelette.
+      (error) => {
+        setLoadError(error);
         setLoading(false);
-      }
-    });
-    const unsub3 = watchOutgoingRequests(profile.uid, setOutgoing);
-    const unsub4 = watchFriendReactions(profile.uid, setReactions);
+      },
+    );
+    const unsub3 = watchOutgoingRequests(profile.uid, setOutgoing, () => setOutgoing([]));
+    const unsub4 = watchFriendReactions(profile.uid, setReactions, () => setReactions([]));
     const unsub5 = watchRecentMessages(profile.uid, setMessages);
     return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); };
-  }, [profile?.uid]);
+  }, [profile?.uid, reloadKey]);
 
   const onAdd = async () => {
     if (!profile || !code.trim()) return;
@@ -110,10 +122,31 @@ export default function FriendsPage() {
 
   const doSearch = async () => { setSearchResults(await searchUsersByName(code)); };
   const remove = async (uid:string) => { if(!profile||!confirm('Supprimer cet ami ?'))return; await removeFriendship(profile.uid,uid); toast('Ami supprimé.','info'); };
-  // Domaine canonique (elywalk-2f7ba.web.app) et non `location.origin`, qui
-  // vaut `http://localhost` dans la WebView Capacitor : le lien partagé doit
-  // ouvrir l'application chez le destinataire (F11).
-  const share = async () => { if(!profile)return; const text=`Rejoins-moi sur ElyWalk : ${shareUrlForReferral(profile.referralCode)}`; if(navigator.share)await navigator.share({text});else{await navigator.clipboard.writeText(text);toast('Lien copié !','success')} };
+  /**
+   * Partage du code de parrainage.
+   *
+   * Le lien est construit sur le domaine public (jamais `location.origin`, qui
+   * vaut `https://localhost` dans la WebView) et vérifié **avant** l'envoi : un
+   * lien non partageable est refusé avec un message clair plutôt que copié tel
+   * quel dans une conversation. `navigator.share` reçoit `url` séparément de
+   * `text` : sur Android, `text` seul est parfois tronqué par certaines
+   * applications et l'URL devenait locale.
+   */
+  const share = async () => {
+    if (!profile) return;
+    const url = shareUrlForReferral(profile.referralCode);
+    if (isUnshareableOrigin(url)) {
+      toast('Lien indisponible : réessayez depuis une version à jour de l’application.', 'error');
+      return;
+    }
+    const text = `Rejoins-moi sur ElyWalk avec le code ${profile.referralCode}`;
+    try {
+      if (navigator.share) await navigator.share({ title: 'ElyWalk', text, url });
+      else { await navigator.clipboard.writeText(`${text} ${url}`); toast('Lien copié !', 'success'); }
+    } catch (e) {
+      if ((e as Error).name !== 'AbortError') toast((e as Error).message || 'Partage impossible.', 'error');
+    }
+  };
   const shareQR = async()=>{ if(!profile)return; try{ const r=await shareFriendCode(profile.referralCode, profile.displayName); toast(r==='shared'?'QR partagé !':'Image enregistrée.','success'); }catch(e){toast((e as Error).message,'error')} };
   const today = dateStr();
 
@@ -212,7 +245,7 @@ export default function FriendsPage() {
           <ErrorState
             title="Vos amis n’ont pas pu être chargés"
             error={loadError}
-            onRetry={() => { setLoading(true); setLoadError(null); }}
+            onRetry={() => { setLoading(true); setLoadError(null); setReloadKey((k) => k + 1); }}
           />
         ) : friends.length === 0 ? (
           <EmptyState

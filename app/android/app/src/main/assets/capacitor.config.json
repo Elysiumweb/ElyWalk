@@ -11,6 +11,10 @@
 			"providers": [
 				"google.com"
 			]
+		},
+		"LocalNotifications": {
+			"smallIcon": "ic_stat_elywalk",
+			"iconColor": "#D8CA82"
 		}
 	}
 }

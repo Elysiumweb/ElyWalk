@@ -15,7 +15,7 @@ import BlockedAccounts from '../components/BlockedAccounts';
 import { useI18n, type Locale } from '../context/LocaleContext';
 import { ACCOUNT_DELETION_URL, DATA_DELETION_URL, BADGE_DEFINITIONS } from '../lib/constants';
 import { openAdPrivacyOptions } from '../lib/ads';
-import { shareUrlForReferral } from '../lib/share';
+import { isUnshareableOrigin, shareUrlForReferral } from '../lib/share';
 import { exportFilename, findResidualData } from '../lib/account';
 import { shareJsonFile } from '../lib/export';
 import { useAppearance, APPEARANCE_OPTIONS } from '../lib/appearance';
@@ -293,7 +293,22 @@ export default function ProfilePage() {
     finally { setBusy(false); setExportStep(''); }
   };
   const copyText = async (value: string, label: string) => { await navigator.clipboard.writeText(value); toast(`${label} copié !`, 'success'); };
-  const onShare = async () => { if(!profile)return; const url=shareUrlForReferral(profile.referralCode); const text=`Rejoins-moi sur ElyWalk avec le code ${profile.referralCode}`; if(navigator.share) await navigator.share({title:'ElyWalk',text,url}); else {await navigator.clipboard.writeText(`${text} ${url}`);toast('Lien copié !','success')} };
+  const onShare = async () => {
+    if (!profile) return;
+    const url = shareUrlForReferral(profile.referralCode);
+    // Garde-fou : un lien local n'est jamais partagé (voir `lib/share`).
+    if (isUnshareableOrigin(url)) {
+      toast('Lien indisponible : réessayez depuis une version à jour de l’application.', 'error');
+      return;
+    }
+    const text = `Rejoins-moi sur ElyWalk avec le code ${profile.referralCode}`;
+    try {
+      if (navigator.share) await navigator.share({ title: 'ElyWalk', text, url });
+      else { await navigator.clipboard.writeText(`${text} ${url}`); toast('Lien copié !', 'success'); }
+    } catch (e) {
+      if ((e as Error).name !== 'AbortError') toast((e as Error).message || 'Partage impossible.', 'error');
+    }
+  };
   const onShareQR = async () => {
     if(!profile) return;
     try {
