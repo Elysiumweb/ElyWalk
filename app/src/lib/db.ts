@@ -134,6 +134,12 @@ export async function ensureUserDoc(
     streakFreezes: 1,
     health: { unitSystem: 'metric' },
     unitSystem: 'metric',
+    // F01/F07/F12 — listes de blocage portées par le profil. Les règles de liste
+    // n'effectuent aucun appel de document : le coût ne dépend plus du nombre de
+    // résultats, donc classement et liste d'amis ne sont plus refusés au 6e
+    // document. Vides à l'inscription, maintenues par `blockAccount`.
+    blockedUsers: [],
+    blockedBy: [],
   };
   await setDoc(ref, profile);
   await setDoc(doc(db, 'referralCodes', code), { uid: user.uid }).catch(() => undefined);
@@ -146,9 +152,19 @@ export function watchUserProfile(uid: string, cb: (p: UserProfile | null) => voi
   });
 }
 
+/**
+ * Profil public d'un compte.
+ *
+ * `blockedUsers` et `blockedBy` ne quittent jamais la base : ce sont des listes
+ * d'identifiants lues par les règles Firestore, sans intérêt pour l'interface,
+ * et leur exposer n'apporte qu'un risque de fuite. Les écrans qui ont besoin de
+ * savoir *qui* est bloqué utilisent `watchBlockedAccounts` (noms compris).
+ */
 export async function getUserProfile(uid: string): Promise<UserProfile | null> {
   const snap = await getDoc(doc(db, 'users', uid));
-  return snap.exists() ? (snap.data() as UserProfile) : null;
+  if (!snap.exists()) return null;
+  const { blockedUsers: _blockedUsers, blockedBy: _blockedBy, ...publicProfile } = snap.data() as UserProfile;
+  return publicProfile as UserProfile;
 }
 
 export async function updateUserFields(uid: string, fields: Partial<UserProfile>): Promise<void> {
@@ -964,21 +980,29 @@ export async function sendFriendRequest(me: UserProfile, target: UserProfile): P
     status: 'pending',
     createdAt: Date.now(),
     notified: false,
+    // F12 — figé à l'envoi : une demande d'un compte bloqué n'est jamais lisible
+    // (coût nul côté règle, pas de `get` par ligne).
+    fromBlocked: false,
   } satisfies FriendRequest);
 }
 
 export function watchIncomingRequests(
   uid: string,
-  cb: (reqs: FriendRequest[]) => void
+  cb: (reqs: FriendRequest[]) => void,
+  onError?: (error: unknown) => void
 ): Unsubscribe {
   const q = query(
     collection(db, 'friendRequests'),
     where('to', '==', uid),
     where('status', '==', 'pending')
   );
-  return onSnapshot(q, (snaps) => {
-    cb(snaps.docs.map((d) => ({ id: d.id, ...(d.data() as FriendRequest) })));
-  });
+  return onSnapshot(
+    q,
+    (snaps) => {
+      cb(snaps.docs.map((d) => ({ id: d.id, ...(d.data() as FriendRequest) })));
+    },
+    (error) => onError?.(error),
+  );
 }
 
 export async function respondFriendRequest(req: FriendRequest, accept: boolean): Promise<void> {
@@ -990,21 +1014,45 @@ export async function respondFriendRequest(req: FriendRequest, accept: boolean):
     await addDoc(collection(db, 'friendships'), {
       members: [req.from, req.to],
       createdAt: Date.now(),
+      // F12 — `hiddenFor` est obligatoire à la création (règle Firestore) et
+      // toujours vide : une amitié naissante n'est masquée pour personne.
+      hiddenFor: [],
     } satisfies Friendship);
   }
 }
 
+/**
+ * Abonnement à la liste d'amis.
+ *
+ * `onError` est indispensable : sans gestionnaire d'erreur, une règle refusée
+ * laisse l'abonnement muet. L'écran restait alors en « chargement » permanent
+ * (le callback n'était jamais appelé) — c'était le « les amis chargent en
+ * boucle ». Le `catch` protège aussi la lecture des profils : une promesse
+ * rejetée dans un callback `async` d'`onSnapshot` devenait un rejet non géré.
+ */
 export function watchFriendships(
   uid: string,
-  cb: (friendUids: string[]) => void
+  cb: (friendUids: string[]) => void,
+  onError?: (error: unknown) => void
 ): Unsubscribe {
   const q = query(collection(db, 'friendships'), where('members', 'array-contains', uid));
-  return onSnapshot(q, (snaps) => {
-    const uids = snaps.docs
-      .map((d) => (d.data() as Friendship).members.find((m) => m !== uid))
-      .filter((m): m is string => !!m);
-    cb(uids);
-  });
+  return onSnapshot(
+    q,
+    (snaps) => {
+      try {
+        const uids = snaps.docs
+          // Une amitié masquée (blocage) ne disparaît pas du document : elle est
+          // simplement ignorée, pour ne pas perdre l'historique de la relation.
+          .filter((d) => !((d.data() as Friendship).hiddenFor || []).includes(uid))
+          .map((d) => (d.data() as Friendship).members.find((m) => m !== uid))
+          .filter((m): m is string => !!m);
+        cb(Array.from(new Set(uids)));
+      } catch (e) {
+        onError?.(e);
+      }
+    },
+    (error) => onError?.(error),
+  );
 }
 
 export async function getProfiles(uids: string[]): Promise<UserProfile[]> {
@@ -1123,9 +1171,16 @@ export async function getBestStreak(uid: string, days = 370): Promise<number> {
   return computeBestStreak(history.map((d) => d.date));
 }
 
-export function watchOutgoingRequests(uid: string, cb: (reqs: FriendRequest[]) => void): Unsubscribe {
-  return onSnapshot(query(collection(db, 'friendRequests'), where('from', '==', uid), where('status', '==', 'pending')),
-    s => cb(s.docs.map(d => ({ id: d.id, ...(d.data() as FriendRequest) }))));
+export function watchOutgoingRequests(
+  uid: string,
+  cb: (reqs: FriendRequest[]) => void,
+  onError?: (error: unknown) => void,
+): Unsubscribe {
+  return onSnapshot(
+    query(collection(db, 'friendRequests'), where('from', '==', uid), where('status', '==', 'pending')),
+    (s) => cb(s.docs.map((d) => ({ id: d.id, ...(d.data() as FriendRequest) }))),
+    (error) => onError?.(error),
+  );
 }
 
 /**
@@ -1167,8 +1222,16 @@ export async function sendFriendReaction(from: UserProfile, toUid: string, emoji
   await addDoc(collection(db, 'friendReactions'), { from: from.uid, fromName: from.displayName, to: toUid, emoji, message: message.slice(0, 160), createdAt: Date.now() });
 }
 
-export function watchFriendReactions(uid: string, cb: (items: {id:string;fromName:string;emoji:string;message:string}[]) => void): Unsubscribe {
-  return onSnapshot(query(collection(db, 'friendReactions'), where('to','==',uid), limit(20)), s => cb(s.docs.map(d => ({id:d.id,...d.data()} as {id:string;fromName:string;emoji:string;message:string}))));
+export function watchFriendReactions(
+  uid: string,
+  cb: (items: { id: string; fromName: string; emoji: string; message: string }[]) => void,
+  onError?: (error: unknown) => void,
+): Unsubscribe {
+  return onSnapshot(
+    query(collection(db, 'friendReactions'), where('to', '==', uid), limit(20)),
+    (s) => cb(s.docs.map((d) => ({ id: d.id, ...d.data() } as { id: string; fromName: string; emoji: string; message: string }))),
+    (error) => onError?.(error),
+  );
 }
 
 export async function removeFriendship(uid: string, friendUid: string): Promise<void> {
@@ -1299,6 +1362,11 @@ export async function createFeedItem(me: UserProfile, type: ActivityFeedType, me
     message,
     metadata: metadata || undefined,
     createdAt: Date.now(),
+    // F12 — audience portée par le document : la règle de liste ne peut pas
+    // vérifier l'amitié ni le blocage ligne par ligne (10 appels de document au
+    // total). Le fil est de fait réservé aux amis, et le client retire les
+    // comptes bloqués de la liste d'amis qui l'alimente.
+    audience: 'friends',
   } satisfies ActivityFeedItem);
 }
 export async function listFriendFeed(uid: string, max = 30): Promise<ActivityFeedItem[]> {
@@ -1328,12 +1396,16 @@ export function watchFriendFeed(uid: string, cb: (items: ActivityFeedItem[]) => 
     // Firestore limitation: we can only use 'in' with 10, so watch first 10 for realtime, else fallback
     const chunk = ids.slice(0,10);
     const q = query(collection(db,'activityFeed'), where('uid','in',chunk), limit(30));
+    // Gestionnaire d'erreur obligatoire : sans lui, un refus de règle laissait
+    // le fil vide sans explication (et l'écran en chargement).
     feedUnsub = onSnapshot(q, snap=>{
-      const items=snap.docs.map(d=>({id:d.id,...(d.data() as ActivityFeedItem)}));
-      items.sort((a,b)=>b.createdAt-a.createdAt);
-      cb(items);
-    });
-  });
+      try {
+        const items=snap.docs.map(d=>({id:d.id,...(d.data() as ActivityFeedItem)}));
+        items.sort((a,b)=>b.createdAt-a.createdAt);
+        cb(items);
+      } catch { cb([]); }
+    }, () => cb([]));
+  }, () => cb([]));
   return ()=>{ unsubFriends(); if(feedUnsub) feedUnsub(); };
 }
 
@@ -1689,6 +1761,8 @@ export async function sendDirectMessage(from: UserProfile, toUid: string, text: 
     createdAt: Date.now(),
     activityId: activityId||null,
     read: false,
+    // F12 — figé à l'envoi (voir `FriendRequest.fromBlocked`).
+    fromBlocked: false,
   } satisfies DirectMessage);
 }
 export function watchDirectMessages(uid: string, friendUid: string, cb: (msgs: DirectMessage[])=>void): Unsubscribe {

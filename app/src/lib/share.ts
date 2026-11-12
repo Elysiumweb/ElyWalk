@@ -16,13 +16,51 @@ export type ShareResult = 'shared' | 'downloaded';
 /**
  * Domaine public canonique de l'application.
  *
- * `location.origin` vaut `https://localhost` (ou `capacitor://localhost`) dans
- * la WebView Android : les liens de parrainage et les QR codes partagés depuis
- * l'application étaient donc inutilisables (F11). Le domaine Firebase Hosting
- * reste la seule source de vérité pour le web, les liens universels et
- * `assetlinks.json`.
+ * ⚠️ **Jamais `location.origin`.** Dans la WebView Capacitor, il vaut
+ * `https://localhost` (ou `capacitor://localhost`) : un lien de parrainage
+ * partagé depuis l'application pointait donc vers `https://localhost/?ref=…`,
+ * c'est-à-dire nulle part. Le domaine est construit à partir du projet Firebase
+ * (`<projet>.web.app`), seule source de vérité pour le web, les liens
+ * universels et `assetlinks.json`.
  */
-export const CANONICAL_SHARE_ORIGIN = 'https://elywalk-2f7ba.web.app';
+const FIREBASE_PROJECT_ID = 'elywalk-2f7ba';
+export const CANONICAL_SHARE_ORIGIN = `https://${FIREBASE_PROJECT_ID}.web.app`;
+
+/** Hôtes qui ne peuvent pas être partagés : WebView locale, réseau local. */
+export function isUnshareableOrigin(origin: string): boolean {
+  const value = String(origin || '').trim().toLowerCase();
+  if (!value) return true;
+  return (
+    value.startsWith('capacitor://') ||
+    value.startsWith('file://') ||
+    /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:|\/|$)/.test(value) ||
+    /^https?:\/\/(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(value)
+  );
+}
+
+/**
+ * Construit une URL partageable en repartant toujours du domaine public.
+ *
+ * Même si un chemin contenait une origine locale (`https://localhost/…`), le
+ * résultat reste sur le domaine canonique : c'est la dernière barrière avant
+ * l'envoi, et elle est testée.
+ */
+function shareUrl(rawPath: string): string {
+  const value = String(rawPath || '').trim();
+  if (!value) return CANONICAL_SHARE_ORIGIN;
+  // Origine locale ou relative : on ne conserve que chemin + requête.
+  let path = value;
+  try {
+    if (/^[a-z]+:\/\//i.test(value)) {
+      const parsed = new URL(value);
+      path = `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    }
+  } catch {
+    path = value.replace(/^[a-z]+:\/\/[^/]+/i, '');
+  }
+  if (!path.startsWith('/')) path = `/${path}`;
+  return `${CANONICAL_SHARE_ORIGIN}${path}`;
+}
 
 /** Lien de parrainage partageable, toujours sur le domaine public. */
 export function shareUrlForReferral(code: string): string {
@@ -32,8 +70,7 @@ export function shareUrlForReferral(code: string): string {
 
 /** Lien partageable vers une ressource interne (sortie, rencontre, profil). */
 export function shareUrlForPath(path: string): string {
-  const clean = path.startsWith('/') ? path : `/${path}`;
-  return `${CANONICAL_SHARE_ORIGIN}${clean}`;
+  return shareUrl(path);
 }
 
 

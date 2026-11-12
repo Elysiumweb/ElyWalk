@@ -84,6 +84,10 @@ export default function LeaderboardPage() {
     const unsub = watchFriendships(profile.uid, (ids) => {
       setFriendIds(ids);
       void load();
+    }, () => {
+      // Refus de règle : le classement public reste affiché, seul l'onglet
+      // « Mes amis » se limite à l'utilisateur courant.
+      setFriendIds([]);
     });
     return unsub;
     // eslint-disable-next-line react-hooks/exhaustive-deps

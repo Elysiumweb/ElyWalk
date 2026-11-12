@@ -14,6 +14,16 @@ export default function WhatsNewPage() {
       </div>
 
       <div className="card">
+        <div className="card-title">Novembre 2026 — 2.2.2</div>
+        <ul className="whats-new">
+          <li>👥 <strong>Vos amis s’affichent enfin</strong> : la liste ne reste plus bloquée sur « Chargement… », même avec beaucoup d’amis — une règle de sécurité trop coûteuse faisait refuser la lecture</li>
+          <li>🔁 Messages, demandes d’ami et encouragements se chargent de nouveau, avec un message clair si le réseau refuse et un bouton <strong>Réessayer</strong> qui relance vraiment</li>
+          <li>🔗 <strong>Lien de parrainage corrigé</strong> : le partage envoie bien <em>elywalk-2f7ba.web.app/?ref=…</em> et non plus une adresse <em>localhost</em> inutilisable pour votre destinataire</li>
+          <li>📤 Le partage propose le lien séparément du texte : il n’est plus tronqué par les applications de messagerie</li>
+        </ul>
+      </div>
+
+      <div className="card">
         <div className="card-title">Novembre 2026 — 2.2.1</div>
         <ul className="whats-new">
           <li>🏆 <strong>Classement à nouveau complet</strong> : les autres marcheurs s’affichent réellement (podium, top 100) au lieu de votre seule ligne — une règle de sécurité trop coûteuse faisait refuser toute la requête</li>
