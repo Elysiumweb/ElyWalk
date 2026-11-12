@@ -33,11 +33,6 @@ service cloud.firestore {
     // Champs strictement privés : jamais exposés par le document `users`.
     // (Les signaux antifraude vivent dans `users/{uid}/private/signals`.)
     //
-    // F01 — un lien de partage est matérialisé par un jeton écrit sous
-    // `activitySessions/{id}/shareTokens/{jeton}`. Une règle ne peut pas
-    // interroger une collection sur un champ : passer par un sous-document
-    // d'identifiant connu rend la vérification possible (et sa suppression
-    // révoque l'accès immédiatement).
     // F01 — un lien de partage est un document `shareLinks/<sessionId>_<uid>` :
     // l'identifiant est déterministe, ce qui permet de le lire sans requête sur
     // un champ, et sa suppression révoque l'accès immédiatement. Il ne contient
@@ -139,9 +134,13 @@ service cloud.firestore {
     function blockedListDeltaOk() {
       // Un seul ajout **et** un seul retrait par écriture : impossible de
       // réécrire la liste d'un coup pour masquer un blocage existant.
+      // `keys().hasAny` avant toute lecture : un profil créé avant la 2.2.2 n'a
+      // pas `blockedUsers`, et lire une clé absente fait échouer l'évaluation
+      // (donc refuser l'écriture) au lieu de renvoyer `false`.
+      let before = resource.data.keys().hasAny(['blockedUsers']) ? resource.data.blockedUsers : [];
       return request.resource.data.blockedUsers.size() <= 200
-        && resource.data.blockedUsers.toSet().difference(request.resource.data.blockedUsers.toSet()).size() <= 1
-        && request.resource.data.blockedUsers.toSet().difference(resource.data.blockedUsers.toSet()).size() <= 1;
+        && before.toSet().difference(request.resource.data.blockedUsers.toSet()).size() <= 1
+        && request.resource.data.blockedUsers.toSet().difference(before.toSet()).size() <= 1;
     }
     function safeBlockedUsersSync() {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['blockedUsers'])
@@ -151,8 +150,14 @@ service cloud.firestore {
     // `blockedBy` est écrit **chez l'autre** : il ne peut recevoir qu'un seul
     // identifiant, celui de l'auteur de l'écriture. On ne peut donc pas accuser
     // quelqu'un d'avoir bloqué, seulement déclarer son propre blocage.
-    function safeBlockedBySync() {
-      return request.auth.uid != uid
+    function safeBlockedBySync(targetUid) {
+      // L'identifiant est passé en paramètre : s'appuyer sur la variable `{uid}`
+      // du `match` englobant déclenche l'avertissement de compilation
+      // « Invalid variable name: uid » et rend la règle illisible.
+      // `blockedBy` est absent des profils créés avant la 2.2.2 : on exige qu'il
+      // existe déjà, pour n'autoriser qu'un ajout ou un retrait.
+      return request.auth.uid != targetUid
+        && resource.data.keys().hasAny(['blockedBy'])
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['blockedBy'])
         && request.resource.data.blockedBy is list
         && request.resource.data.blockedBy.size() <= 200
@@ -169,8 +174,9 @@ service cloud.firestore {
     // pourrait se déclarer bloqué par quelqu'un d'autre. Il n'est modifiable que
     // par `safeBlockedBySync`, dans une écriture qui ne touche que lui.
     function withoutBlockedBy() {
+      let before = resource.data.keys().hasAny(['blockedBy']) ? resource.data.blockedBy : [];
       return !('blockedBy' in request.resource.data)
-        || request.resource.data.blockedBy == resource.data.blockedBy;
+        || request.resource.data.blockedBy == before;
     }
     function safeProfileEdit() {
       // `blockedUsers` rejoint la liste des champs autorisés : `blockAccount`
@@ -298,7 +304,7 @@ service cloud.firestore {
       allow update: if president() || (self(uid) && (safeProfileEdit() || safeBlockedUsersSync() || safePublicSync() || validStepCredit(uid) || validAdCredit(uid) || validReferralCredit(uid) || validChallengeCredit(uid) || validDebit()))
         // Un tiers ne peut écrire que `blockedBy`, et seulement son propre
         // identifiant : c'est ainsi qu'un blocage devient visible des listes.
-        || (auth() && safeBlockedBySync());
+        || (auth() && safeBlockedBySync(uid));
       allow delete: if self(uid);
       match /dailySteps/{day} {
         // F01 — les pas quotidiens ne sont plus librement énumérables.
@@ -442,16 +448,16 @@ service cloud.firestore {
       allow delete: if auth() && request.auth.uid in [resource.data.from, resource.data.to];
     }
     match /friendReactions/{id} {
-      allow read: if auth() && request.auth.uid in [resource.data.from, resource.data.to];
-      // Coût : 0. Un encouragements d'un compte bloqué n'est jamais lisible, et
+      // Coût : 0. Un encouragement d'un compte bloqué n'est jamais lisible, et
       // `fromBlocked` est figé à la création.
+      allow read: if auth() && request.auth.uid in [resource.data.from, resource.data.to];
       allow create: if auth() && request.resource.data.from == request.auth.uid
         && canInteract(request.resource.data.from, request.resource.data.to)
         && request.resource.data.emoji in ['👏','🔥','💛','👋'] && request.resource.data.message.size() <= 160;
       allow delete: if auth() && request.auth.uid in [resource.data.from, resource.data.to]; allow update: if false;
     }
     match /friendships/{id} {
-      // Coût : 0. `hiddenFor` est écrit par le service de blocage sur les deux
+      // Coût : 0. `hiddenFor` est écrit par le service de blocage sur les
       // amitiés concernées ; une amitié non actualisée reste lisible une fois.
       // (`hiddenFor` peut manquer sur une amitié créée avant la 2.2.2.)
       allow read: if auth() && request.auth.uid in resource.data.members
@@ -517,7 +523,7 @@ service cloud.firestore {
       allow create: if verified() && request.resource.data.uid == request.auth.uid
         && request.resource.data.type in ['walk','run'] && request.resource.data.status == 'active';
       // pausedSec est exclu de durationSec (durée active) et borné à 24 h.
-      // title / note / weather : bornes alignées sur l'interface.
+      // title / caption / weather : bornes alignées sur l'interface.
       allow update: if verified() && resource.data.uid == request.auth.uid
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.points.size() <= 20000
