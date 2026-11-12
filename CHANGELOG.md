@@ -41,6 +41,12 @@ Firestore, parce qu'un correctif d'interface seul ne ferme pas une faille.
   `challengeCatalog/{id}` (écrit par l'administration seule). Un défi inventé,
   inactif, expiré ou déjà réclamé ne crédite rien, et le montant doit être
   **égal** à celui du catalogue — la progression reste bornée.
+- **Publication depuis l'application.** Profil → Administration → *Barème des
+  défis* : un bouton ouvre les défis du jour au versement. Les identifiants de
+  défi sont datés (semaine, mois, jour), donc une saisie manuelle dans la
+  console crée des lignes orphelines dès la semaine suivante. L'écran affiche
+  l'état réel de chaque défi (`ouvert` / `fermé` / `objectif seul`) et
+  n'écrase jamais un montant déjà ajusté.
 
 ### F03 — Suppression et export du compte
 

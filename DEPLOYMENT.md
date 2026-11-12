@@ -174,29 +174,54 @@ l'application au moment de l'erreur.
 
 ## Catalogue des défis (`challengeCatalog`) — 2.2.0
 
-Depuis la 2.2.0, un client ne peut plus s'attribuer une récompense de défi :
-le montant est lu dans la collection **`challengeCatalog/{challengeId}`**, écrite
-uniquement par l'administration (règle `allow write: if president()`).
+### Où écrire ?
 
-Créer un document par défi ouvert, avec exactement ces champs :
+Collection **`challengeCatalog`** de la base Firestore du projet
+**`elywalk-2f7ba`** — un document par défi ouvert.
 
-```json
-{
-  "active": true,
-  "reward": 5,
-  "target": 50000,
-  "startsAt": "2026-11-01",
-  "endsAt": "2026-11-30"
-}
+**Ne rien écrire à la main.** Deux chemins, dans cet ordre de préférence :
+
+1. **Dans l'application** (recommandé) : se connecter avec un compte président
+   (`isPresidentUid`), puis **Profil → Administration → « Barème des défis » →
+   « Ouvrir les défis du jour au versement »**. L'écran affiche aussi, pour chaque
+   défi : `ouvert`, `fermé` ou `objectif seul`. Cette voie calcule les
+   identifiants exacts du jour — c'est le point qui casse en saisie manuelle,
+   puisque les identifiants changent **chaque semaine** (`week-steps-2026-11-09`)
+   et **chaque jour** (`streak-2026-11-12`).
+2. **Console Firebase** → `challengeCatalog` → *Ajouter un document*, seulement
+   pour ajuster un montant à la main. Reprendre l'identifiant tel qu'affiché dans
+   la liste « Barème des défis » de l'app.
+
+### Ce que contient un document
+
+```
+challengeCatalog/week-steps-2026-11-09
+  active:    true          // false ou absent = défi non rémunéré
+  reward:    25            // 1 à 50 EC, doit correspondre au versement
+  target:    250000        // objectif (pas / jours actifs / série)
+  startsAt:  "2026-11-09"  // AAAA-MM-JJ
+  endsAt:    "2026-11-15"
+  title:     "Sprint collectif"   // memorandum, facultatif
+  updatedAt: 1762900000000
 ```
 
-- `reward` est **obligatoire** et borné à 50 EC : la règle compare le montant
-  réclamé au montant du catalogue (`after.reward == catalog.reward`). Un défi
-  absent ou `active: false` ne crédite rien et l'application l'indique.
-- `endsAt` (AAAA-MM-JJ) ferme automatiquement la réclamation à la date indiquée.
-- Sans ce catalogue, les défis restent jouables mais **aucune récompense n'est
-  versée** : c'est volontaire (mieux vaut un défi non payé qu'un crédit
-  illimité).
+Sans ligne de catalogue, le défi reste jouable mais **aucune récompense n'est
+versée** : c'est volontaire, mieux vaut un défi non payé qu'un crédit illimité.
+La règle `validChallengeCredit` exige `active == true`, une date de fin non
+dépassée et `reward` **strictement égal** au montant réclamé.
+
+### Rythme
+
+Les défis sont datés. Republication nécessaire au minimum :
+
+- **chaque lundi** pour `week-steps-<lundi>` (Sprint collectif) ;
+- **le 1er du mois** pour `season-<AAAA-MM>` (Saison des foulées) ;
+- **chaque jour** pour `streak-<AAAA-MM-JJ>` (Feu sacré) et
+  `dated-active-<début>` (7 jours en mouvement) — ces deux-là sont visibles une
+  quinzaine de jours, une republication tous les 3-4 jours suffit en pratique.
+
+Le bouton est idempotent : une ligne déjà valide n'est **jamais** écrasée (vos
+ajustements de montant survivent).
 
 ## Notes privées et audiences — migration 2.2.0
 

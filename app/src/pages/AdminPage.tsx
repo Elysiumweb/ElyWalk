@@ -20,9 +20,13 @@ import {
 import { isPresidentUid } from '../lib/constants';
 import { fmtCoins, fmtEuros } from '../lib/coins';
 import type { ContentReport, PartnerRequest, ReportStatus, Withdrawal } from '../lib/types';
+import { getChallengeDefinitions } from '../lib/constants';
+import { describeCatalogState, publishChallengeCatalog, type ChallengeCatalogEntry } from '../lib/challenges';
+import { collection, getDocs } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 import { reviewReport, watchReports } from '../lib/safety';
 
-type Tab = 'partners' | 'withdrawals' | 'establishments' | 'reports';
+type Tab = 'partners' | 'withdrawals' | 'establishments' | 'reports' | 'challenges';
 
 export default function AdminPage() {
   const { profile } = useAuth();
@@ -36,6 +40,40 @@ export default function AdminPage() {
   const [establishments, setEstablishments] = useState<Establishment[]>([]);
   const [loading, setLoading] = useState(true);
   const [reports,setReports]=useState<ContentReport[]>([]);
+  // F02 — le barème des défis vit dans `challengeCatalog` (écriture réservée aux
+  // présidents). Cet écran évite d'avoir à saisir les identifiants à la main
+  // dans la console Firebase, où une faute de frappe crée une ligne orpheline.
+  const [catalog,setCatalog] = useState<Map<string, ChallengeCatalogEntry>>(new Map());
+  const [catalogBusy,setCatalogBusy] = useState(false);
+  const reloadCatalog = async () => {
+    try {
+      const snaps = await getDocs(collection(db, 'challengeCatalog'));
+      const next = new Map<string, ChallengeCatalogEntry>();
+      snaps.docs.forEach((d) => next.set(d.id, d.data() as ChallengeCatalogEntry));
+      setCatalog(next);
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    }
+  };
+  useEffect(() => { if (isPresidentUid(profile?.uid)) void reloadCatalog(); }, [profile?.uid]); // eslint-disable-line react-hooks/exhaustive-deps
+  const publishCatalog = async () => {
+    if (!profile) return;
+    setCatalogBusy(true);
+    try {
+      const result = await publishChallengeCatalog(profile.uid);
+      await reloadCatalog();
+      toast(
+        result.written.length
+          ? `${result.written.length} défi(s) ouvert(s) au versement${result.skipped.length ? ` · ${result.skipped.length} déjà réglé(s)` : ''}.`
+          : 'Tous les défis du jour ont déjà un barème valide.',
+        'success',
+      );
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setCatalogBusy(false);
+    }
+  };
   useEffect(()=>isPresidentUid(profile?.uid)?watchReports(setReports):undefined,[profile?.uid]);
 
   // Formulaire établissement
@@ -179,6 +217,13 @@ export default function AdminPage() {
         >
           Établissements ({establishments.length})
         </button>
+        <button
+          className={`chip ${tab === 'challenges' ? 'chip-active' : ''}`}
+          onClick={() => setTab('challenges')}
+          data-testid="admin-tab-challenges"
+        >
+          Barème des défis
+        </button>
       </div>
 
       {loading ? (
@@ -257,6 +302,38 @@ export default function AdminPage() {
               </div>
             ))
           )}
+        </div>
+      ) : tab === 'challenges' ? (
+        <div className="card" data-testid="admin-challenge-catalog">
+          <div className="card-title">Barème des défis</div>
+          <p className="card-help">
+            Un défi n’est rémunéré que si son identifiant existe dans
+            <code> challengeCatalog</code>. Les identifiants changent chaque
+            semaine (« Sprint collectif ») et chaque jour (« Feu sacré ») :
+            utilisez le bouton ci-dessous plutôt que la console Firebase.
+          </p>
+          <button className="btn btn-gold" onClick={publishCatalog} disabled={catalogBusy} data-testid="publish-challenge-catalog">
+            {catalogBusy ? 'Publication…' : 'Ouvrir les défis du jour au versement'}
+          </button>
+          <div className="section-gap" />
+          <ul className="diagnostics-list">
+            {describeCatalogState(getChallengeDefinitions(), catalog).map(({ challenge, state, reward }) => (
+              <li key={challenge.id}>
+                <span>{challenge.icon} {challenge.title}</span>
+                <strong>
+                  {state === 'paid'
+                    ? `+${reward} EC · ouvert`
+                    : state === 'closed'
+                      ? 'fermé (aucun versement)'
+                      : 'objectif seul (aucun versement)'}
+                </strong>
+              </li>
+            ))}
+          </ul>
+          <p className="muted-xs">
+            Une ligne existante avec un barème valide n’est jamais écrasée : vos
+            ajustements manuels survivent à une republication.
+          </p>
         </div>
       ) : tab === 'reports' ? (
         <div className="card" data-testid="moderation-queue"><div className="card-title">File de modération</div><p className="card-help">Chaque décision est datée et conservée dans l’historique du signalement.</p>{reports.length===0?<div className="empty-state">Aucun signalement.</div>:reports.map(report=><article key={report.id} style={{padding:'12px 0',borderBottom:'1px solid var(--gold-border)'}} data-testid="report-row"><div style={{display:'flex',justifyContent:'space-between',gap:8}}><strong>{report.targetType} · {report.reason}</strong><span className="badge">{report.status}</span></div><div className="row-sub">Contenu {report.targetId} · signalé le {new Date(report.createdAt).toLocaleString('fr-FR')}</div>{report.details&&<p>{report.details}</p>}<div className="route-actions">{report.status==='open'&&<button className="btn btn-outline btn-sm" onClick={()=>moderate(report,'reviewing')}>Prendre en charge</button>}<button className="btn btn-gold btn-sm" onClick={()=>moderate(report,'resolved')}>Résoudre</button><button className="btn btn-ghost btn-sm" onClick={()=>moderate(report,'dismissed')}>Classer sans suite</button></div>{report.history.length>0&&<div className="moderation-history">{report.history.map((action,index)=><div key={index}>{new Date(action.createdAt).toLocaleString('fr-FR')} · {action.status} · {action.note||'Sans note'}</div>)}</div>}</article>)}</div>
