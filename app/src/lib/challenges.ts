@@ -99,6 +99,41 @@ export async function publishChallengeCatalog(uid: string, now = new Date()): Pr
   return { written, skipped };
 }
 
+/**
+ * Règle le montant d'un défi (ou le ferme) depuis l'espace d'administration.
+ *
+ * Bornes alignées sur la règle Firestore : `reward` entre 1 et 50, `target`
+ * positive, dates AAAA-MM-JJ cohérentes. Un montant hors bornes serait refusé
+ * par la règle ; on l'empêche ici pour donner un message clair plutôt qu'un
+ * `permission-denied`.
+ */
+export async function setChallengeCatalogEntry(
+  uid: string,
+  challengeId: string,
+  patch: { reward?: number; target?: number; active?: boolean; startsAt?: string; endsAt?: string; title?: string }
+): Promise<void> {
+  if (!isPresidentUid(uid)) throw new Error('Action réservée à l’administration.');
+  if (patch.reward != null && (!Number.isFinite(patch.reward) || patch.reward < 1 || patch.reward > 50)) {
+    throw new Error('Le montant doit être compris entre 1 et 50 EC.');
+  }
+  if (patch.target != null && (!Number.isFinite(patch.target) || patch.target <= 0)) {
+    throw new Error('L’objectif doit être supérieur à zéro.');
+  }
+  const iso = /^\d{4}-\d{2}-\d{2}$/;
+  if (patch.startsAt && !iso.test(patch.startsAt)) throw new Error('Date de début invalide (AAAA-MM-JJ).');
+  if (patch.endsAt && !iso.test(patch.endsAt)) throw new Error('Date de fin invalide (AAAA-MM-JJ).');
+  const row = catalogEntriesForToday().find((r) => r.id === challengeId);
+  const base: ChallengeCatalogEntry = row?.entry || {
+    active: true, reward: 1, target: 1, startsAt: '', endsAt: '', updatedAt: Date.now(),
+  };
+  await setDoc(doc(db, 'challengeCatalog', challengeId), {
+    ...base,
+    ...patch,
+    updatedAt: Date.now(),
+    updatedBy: uid,
+  });
+}
+
 /** Retire une ligne de catalogue : le défi cesse immédiatement de rémunérer. */
 export async function closeChallengeCatalogEntry(uid: string, challengeId: string): Promise<void> {
   if (!isPresidentUid(uid)) throw new Error('Action réservée à l’administration.');

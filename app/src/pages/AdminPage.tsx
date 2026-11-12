@@ -18,10 +18,10 @@ import {
   type Establishment,
 } from '../lib/establishments';
 import { isPresidentUid } from '../lib/constants';
-import { fmtCoins, fmtEuros } from '../lib/coins';
+import { fmtCoins, fmtEuros, fmtNumber } from '../lib/coins';
 import type { ContentReport, PartnerRequest, ReportStatus, Withdrawal } from '../lib/types';
 import { getChallengeDefinitions } from '../lib/constants';
-import { describeCatalogState, publishChallengeCatalog, type ChallengeCatalogEntry } from '../lib/challenges';
+import { closeChallengeCatalogEntry, describeCatalogState, publishChallengeCatalog, setChallengeCatalogEntry, type ChallengeCatalogEntry } from '../lib/challenges';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { reviewReport, watchReports } from '../lib/safety';
@@ -45,6 +45,9 @@ export default function AdminPage() {
   // dans la console Firebase, où une faute de frappe crée une ligne orpheline.
   const [catalog,setCatalog] = useState<Map<string, ChallengeCatalogEntry>>(new Map());
   const [catalogBusy,setCatalogBusy] = useState(false);
+  // Montants en cours de saisie, par identifiant de défi (chaîne pour laisser
+  // l'utilisateur taper « 1 » avant « 15 » sans reformatage intempestif).
+  const [rewardDrafts,setRewardDrafts] = useState<Record<string, string>>({});
   const reloadCatalog = async () => {
     try {
       const snaps = await getDocs(collection(db, 'challengeCatalog'));
@@ -56,6 +59,41 @@ export default function AdminPage() {
     }
   };
   useEffect(() => { if (isPresidentUid(profile?.uid)) void reloadCatalog(); }, [profile?.uid]); // eslint-disable-line react-hooks/exhaustive-deps
+  const saveReward = async (challengeId: string, fallback: number) => {
+    if (!profile) return;
+    const raw = rewardDrafts[challengeId];
+    const reward = Number(raw ?? fallback);
+    setCatalogBusy(true);
+    try {
+      await setChallengeCatalogEntry(profile.uid, challengeId, { reward, active: true });
+      await reloadCatalog();
+      setRewardDrafts((d) => { const { [challengeId]: _omit, ...rest } = d; return rest; });
+      toast(`Barème enregistré : ${reward} EC.`, 'success');
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setCatalogBusy(false);
+    }
+  };
+
+  const toggleCatalogEntry = async (challengeId: string, open: boolean) => {
+    if (!profile) return;
+    setCatalogBusy(true);
+    try {
+      if (open) {
+        await publishChallengeCatalog(profile.uid);
+      } else {
+        await closeChallengeCatalogEntry(profile.uid, challengeId);
+      }
+      await reloadCatalog();
+      toast(open ? 'Défi ouvert au versement.' : 'Défi fermé : plus aucun versement.', 'success');
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setCatalogBusy(false);
+    }
+  };
+
   const publishCatalog = async () => {
     if (!profile) return;
     setCatalogBusy(true);
@@ -307,32 +345,80 @@ export default function AdminPage() {
         <div className="card" data-testid="admin-challenge-catalog">
           <div className="card-title">Barème des défis</div>
           <p className="card-help">
-            Un défi n’est rémunéré que si son identifiant existe dans
-            <code> challengeCatalog</code>. Les identifiants changent chaque
-            semaine (« Sprint collectif ») et chaque jour (« Feu sacré ») :
-            utilisez le bouton ci-dessous plutôt que la console Firebase.
+            Un défi n’est rémunéré que s’il possède une ligne de catalogue
+            <code> challengeCatalog/&lt;identifiant&gt;</code>. Les identifiants sont
+            datés : « Sprint collectif » change chaque lundi, « Feu sacré » chaque
+            jour. Le bouton ci-dessous crée les lignes du jour avec les montants
+            ci-dessous — ajustez un montant puis validez-le défi par défi.
           </p>
-          <button className="btn btn-gold" onClick={publishCatalog} disabled={catalogBusy} data-testid="publish-challenge-catalog">
+          <button
+            className="btn btn-gold"
+            onClick={publishCatalog}
+            disabled={catalogBusy}
+            data-testid="publish-challenge-catalog"
+          >
             {catalogBusy ? 'Publication…' : 'Ouvrir les défis du jour au versement'}
           </button>
           <div className="section-gap" />
-          <ul className="diagnostics-list">
-            {describeCatalogState(getChallengeDefinitions(), catalog).map(({ challenge, state, reward }) => (
-              <li key={challenge.id}>
-                <span>{challenge.icon} {challenge.title}</span>
-                <strong>
-                  {state === 'paid'
-                    ? `+${reward} EC · ouvert`
-                    : state === 'closed'
-                      ? 'fermé (aucun versement)'
-                      : 'objectif seul (aucun versement)'}
-                </strong>
-              </li>
-            ))}
+          <ul className="challenge-catalog-list">
+            {describeCatalogState(getChallengeDefinitions(), catalog).map(({ challenge, state, reward }) => {
+              const draft = rewardDrafts[challenge.id];
+              const value = draft ?? String(reward);
+              const dirty = draft != null && Number(draft) !== reward;
+              return (
+                <li key={challenge.id} data-testid={`catalog-row-${challenge.id}`}>
+                  <div className="catalog-row-head">
+                    <span className="catalog-row-title">
+                      {challenge.icon} <strong>{challenge.title}</strong>
+                    </span>
+                    <span className={`catalog-state is-${state}`}>
+                      {state === 'paid' ? 'ouvert' : state === 'closed' ? 'fermé' : 'objectif seul'}
+                    </span>
+                  </div>
+                  <div className="catalog-row-meta">
+                    {challenge.startsAt} → {challenge.endsAt} · objectif{' '}
+                    {challenge.metric === 'steps' ? fmtNumber(challenge.target) : challenge.target}
+                    {challenge.metric === 'steps' ? ' pas' : challenge.metric === 'activeDays' ? ' jours actifs' : ' jours de série'}
+                  </div>
+                  <div className="catalog-row-actions">
+                    <label className="catalog-reward">
+                      <span>EC</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={50}
+                        inputMode="numeric"
+                        value={value}
+                        onChange={(e) => setRewardDrafts((d) => ({ ...d, [challenge.id]: e.target.value }))}
+                        aria-label={`Montant en ElyCoins pour ${challenge.title}`}
+                        data-testid={`catalog-reward-${challenge.id}`}
+                      />
+                    </label>
+                    <button
+                      className="btn btn-outline btn-sm"
+                      onClick={() => void saveReward(challenge.id, challenge.reward)}
+                      disabled={catalogBusy || !dirty}
+                      data-testid={`catalog-save-${challenge.id}`}
+                    >
+                      Enregistrer
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => void toggleCatalogEntry(challenge.id, state !== 'paid')}
+                      disabled={catalogBusy}
+                      data-testid={`catalog-toggle-${challenge.id}`}
+                    >
+                      {state === 'paid' ? 'Fermer' : 'Ouvrir'}
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
           </ul>
           <p className="muted-xs">
-            Une ligne existante avec un barème valide n’est jamais écrasée : vos
-            ajustements manuels survivent à une republication.
+            Montant autorisé : 1 à 50 EC. Une ligne déjà valide n’est jamais
+            écrasée par « Ouvrir les défis du jour » : vos ajustements survivent
+            à une republication. Fermer un défi coupe tout versement immédiatement.
           </p>
         </div>
       ) : tab === 'reports' ? (

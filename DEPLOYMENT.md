@@ -174,23 +174,37 @@ l'application au moment de l'erreur.
 
 ## Catalogue des défis (`challengeCatalog`) — 2.2.0
 
-### Où écrire ?
+### Où ?
 
-Collection **`challengeCatalog`** de la base Firestore du projet
-**`elywalk-2f7ba`** — un document par défi ouvert.
+**Uniquement dans l'espace d'administration de l'application** :
+*Profil → 👑 Administration Elysium → onglet « Barème des défis »*.
 
-**Ne rien écrire à la main.** Deux chemins, dans cet ordre de préférence :
+Aucune saisie dans la console Firebase n'est nécessaire (ni souhaitée) : les
+identifiants de défi sont **datés** — `week-steps-2026-11-09` change chaque
+lundi, `streak-2026-11-12` chaque jour — et une ligne recopiée à la main devient
+orpheline la semaine suivante, donc un défi qui ne paie plus silencieusement.
+L'écran calcule les identifiants du jour et écrit la collection à votre place
+(écriture réservée aux présidents par la règle `allow write: if president()`).
 
-1. **Dans l'application** (recommandé) : se connecter avec un compte président
-   (`isPresidentUid`), puis **Profil → Administration → « Barème des défis » →
-   « Ouvrir les défis du jour au versement »**. L'écran affiche aussi, pour chaque
-   défi : `ouvert`, `fermé` ou `objectif seul`. Cette voie calcule les
-   identifiants exacts du jour — c'est le point qui casse en saisie manuelle,
-   puisque les identifiants changent **chaque semaine** (`week-steps-2026-11-09`)
-   et **chaque jour** (`streak-2026-11-12`).
-2. **Console Firebase** → `challengeCatalog` → *Ajouter un document*, seulement
-   pour ajuster un montant à la main. Reprendre l'identifiant tel qu'affiché dans
-   la liste « Barème des défis » de l'app.
+### Comment ?
+
+1. Se connecter avec un compte président (`isPresidentUid`).
+2. *Profil → 👑 Administration Elysium → Barème des défis*.
+3. Ajuster au besoin le montant de chaque défi (1 à 50 EC), puis
+   **« Ouvrir les défis du jour au versement »**.
+4. Pour chaque défi, le badge indique l'état réel :
+   `ouvert` (versement actif), `fermé` (aucun versement), `objectif seul`
+   (aucune ligne de catalogue).
+5. « Enregistrer » fige un montant défi par défi ; « Fermer » coupe
+   immédiatement tout versement sur ce défi (suppression de la ligne).
+
+### Rythme
+
+Republier régulièrement, l'écran le rappelle :
+
+- **chaque lundi** → `week-steps-<lundi>` (Sprint collectif) ;
+- **le 1er du mois** → `season-<AAAA-MM>` (Saison des foulées) ;
+- **tous les 3-4 jours** → `streak-<date>` et `dated-active-<date>`.
 
 ### Ce que contient un document
 
