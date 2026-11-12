@@ -44,9 +44,28 @@ export async function changeEmail(currentPassword: string, nextEmail: string): P
   await updateEmail(user, email);
   await sendEmailVerification(user);
 }
-export async function reauthenticateAccount(currentPassword: string): Promise<void> {
+/**
+ * Réauthentification avant une opération sensible (suppression de compte,
+ * changement d'e-mail).
+ *
+ * Sans mot de passe, on rafraîchit simplement la session : les comptes Google
+ * n'ont pas de mot de passe, et `deleteUser` exige une connexion récente plutôt
+ * qu'un mot de passe. Un compte e-mail/mot de passe sans mot de passe fourni
+ * échoue explicitement au lieu de laisser Firebase renvoyer `requires-recent-login`.
+ */
+export async function reauthenticateAccount(currentPassword?: string): Promise<void> {
   const user = auth.currentUser;
-  if (!user?.email) return;
+  if (!user) throw new Error('Aucune session active.');
+  if (!currentPassword) {
+    const isPasswordUser = user.providerData.some((p) => p.providerId === 'password');
+    if (isPasswordUser) throw new Error('Saisissez votre mot de passe pour confirmer la suppression.');
+    // Compte fédéré (Google) : on peut rafraîchir la session, un jeton valide
+    // suffit pour `deleteUser`. Si Firebase exige une réauthentification, le
+    // message d'erreur invite l'utilisateur à se reconnecter.
+    await user.getIdToken(true);
+    return;
+  }
+  if (!user.email) throw new Error('Ce compte n’a pas d’adresse e-mail associée.');
   await reauthenticateWithCredential(user, EmailAuthProvider.credential(user.email, currentPassword));
 }
 export async function deleteAuthAccount(currentPassword?: string): Promise<void> {
@@ -57,14 +76,72 @@ export async function deleteAuthAccount(currentPassword?: string): Promise<void>
   }
   await deleteUser(user);
 }
+/**
+ * Connexion Google.
+ *
+ * **Bug « User cancel activity »** : sur Android, le plugin utilise la
+ * *Credential Manager API* par défaut. L'appareil compose sa demande à partir de
+ * `R.string.default_web_client_id`, la chaîne générée par le plugin
+ * `google-services` à partir des `oauth_client` de `google-services.json`. Ce
+ * fichier ne contient ici qu'un client **Android** : la chaîne reste sur sa
+ * valeur de remplacement (`WILL_BE_OVERRIDDEN`), Credential Manager ne trouve
+ * aucune application Google compatible et termine par « User cancel activity »,
+ * c'est-à-dire un échec d'appel et non un refus de l'utilisateur.
+ *
+ * Correctifs :
+ * 1. `useCredentialManager: false` → flux `GoogleSignIn` historique, plus
+ *    tolérant, qui reste fonctionnel même sans client web correctement résolu
+ *    (et qui n'affiche pas de faux « annulé ») ;
+ * 2. en cas d'échec, seconde tentative via le flux complet du SDK (le plugin
+ *    retente une fois avec l'ancien chemin) ;
+ * 3. messages explicites : un vrai refus utilisateur n'est pas présenté comme
+ *    une panne, et une erreur de configuration est nommée pour être corrigée
+ *    dans la console Firebase / le fichier `google-services.json`.
+ */
 export async function loginWithGoogle(): Promise<UserCredential> {
   if (isNative()) {
-    const result = await FirebaseAuthentication.signInWithGoogle();
+    const result = await signInWithGoogleNative();
     const idToken = result.credential?.idToken;
-    if (!idToken) throw new Error('Connexion Google annulée.');
+    if (!idToken) throw new Error('La connexion Google n’a pas renvoyé de jeton. Réessayez.');
     return signInWithCredential(auth, GoogleAuthProvider.credential(idToken));
   }
   return signInWithPopup(auth, new GoogleAuthProvider());
+}
+
+/** Tente la connexion Google native, puis le repli `GoogleSignIn` si besoin. */
+async function signInWithGoogleNative() {
+  const attempts: Array<() => Promise<Awaited<ReturnType<typeof FirebaseAuthentication.signInWithGoogle>>>> = [
+    () => FirebaseAuthentication.signInWithGoogle({ useCredentialManager: false }),
+    () => FirebaseAuthentication.signInWithGoogle(),
+  ];
+  let lastError: unknown = null;
+  for (const attempt of attempts) {
+    try {
+      return await attempt();
+    } catch (e) {
+      // Un refus explicite de l'utilisateur ne doit pas être retenté.
+      if (isGoogleCancellation(e)) throw new Error('Connexion Google annulée.');
+      lastError = e;
+    }
+  }
+  throw new Error(googleErrorHint(lastError));
+}
+
+/** Détecte une annulation réelle (et non un échec de configuration Android). */
+function isGoogleCancellation(error: unknown): boolean {
+  const message = `${(error as { message?: string })?.message || ''} ${(error as { errorMessage?: string })?.errorMessage || ''}`.toLowerCase();
+  if (/user cancel activity/.test(message)) return false; // échec Credential Manager
+  return /cancel|cancell?ed|12501|dismiss/.test(message);
+}
+
+/** Message actionnable pour les échecs de configuration Google Sign-In. */
+function googleErrorHint(error: unknown): string {
+  const message = `${(error as { message?: string })?.message || ''}`;
+  if (/user cancel activity|no credentials|28444|10:|sign in failed/i.test(message)) {
+    return 'La connexion Google n’a pas pu démarrer sur cet appareil. Vérifiez que l’empreinte SHA-1 de la version installée est déclarée dans la console Firebase (Paramètres du projet → Vos applications Android) et que « Google » est activé dans Authentication → Méthode de connexion.';
+  }
+  if (/network|timeout/i.test(message)) return 'Connexion Google impossible : vérifiez votre connexion réseau.';
+  return message || 'La connexion Google a échoué. Réessayez.';
 }
 export async function updateAuthProfile(fields: { displayName?: string; photoURL?: string }): Promise<void> {
   if (auth.currentUser) await updateProfile(auth.currentUser, fields);

@@ -18,12 +18,16 @@ import {
   deleteField,
   writeBatch,
   startAfter,
+  startAt,
   type QueryConstraint,
+  type QueryDocumentSnapshot,
   type Unsubscribe,
 } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
 import { assertNotBlocked } from './safety';
 import { db } from './firebase';
+import { exportAccountComplete, purgeAccountData } from './account';
+import { registerSyncHandler } from './syncQueue';
 import {
   isPresidentUid,
   PRESIDENT_UID,
@@ -33,6 +37,7 @@ import {
   BADGE_DEFINITIONS,
 } from './constants';
 import { coinsForSteps, caloriesForSteps, dateStr, yesterdayStr } from './coins';
+import { bestStreakFromDates as computeBestStreak } from './streak';
 import { getDeviceSignals } from './device';
 import type {
   UserProfile,
@@ -59,6 +64,7 @@ import type {
   DirectMessage,
   CommunityEvent,
   ActivityPrivacySettings,
+  ShareLink,
 } from './types';
 
 // ============ Profil utilisateur ============
@@ -395,6 +401,39 @@ function challengeIsActive(challenge: ChallengeDefinition, today = dateStr()): b
 }
 
 /** Lit les défis actifs et la progression personnelle enregistrée. */
+/**
+ * État des défis d'un utilisateur (F02 / F09).
+ *
+ * Deux corrections par rapport à la version précédente :
+ *  • la progression et la récompense ne sont plus écrites sur le document de
+ *    suivi à chaque affichage : les règles n'autorisent plus à réécrire un
+ *    montant, et l'écriture était de toute façon faite dans un contexte où elle
+ *    pouvait échouer silencieusement ;
+ *  • le défi collectif ne relisait plus les 370 derniers jours de **200
+ *    utilisateurs** à chaque ouverture de l'écran (≈ 74 000 lectures DOM). La
+ *    contribution de chaque membre est bornée à la fenêtre du défi (≤ 31 jours),
+ *    mise en cache une minute, et seuls les 40 premiers marcheurs sont agrégés.
+ */
+const COLLECTIVE_WINDOW_DAYS = 31;
+let collectiveCache: { at: number; total: number } | null = null;
+
+async function collectiveProgress(challenge: ChallengeDefinition): Promise<number> {
+  const now = Date.now();
+  if (collectiveCache && now - collectiveCache.at < 60_000) return collectiveCache.total;
+  const users = await getLeaderboard(40, 'steps');
+  const perUser = await Promise.all(
+    users.map(async (u) => {
+      const days = await listDailySteps(u.uid, COLLECTIVE_WINDOW_DAYS).catch(() => []);
+      return days
+        .filter((d) => d.date >= challenge.startsAt && d.date <= challenge.endsAt)
+        .reduce((sum, d) => sum + d.steps, 0);
+    })
+  );
+  const total = perUser.reduce((sum, value) => sum + value, 0);
+  collectiveCache = { at: now, total };
+  return total;
+}
+
 export async function listMyChallenges(uid: string, challenges: ChallengeDefinition[]): Promise<UserChallenge[]> {
   const active = challenges.filter((c) => challengeIsActive(c));
   const [daily, profile] = await Promise.all([listDailySteps(uid, 370), getUserProfile(uid)]);
@@ -407,36 +446,61 @@ export async function listMyChallenges(uid: string, challenges: ChallengeDefinit
     if (challenge.metric === 'steps') progress = ownDays.reduce((sum, d) => sum + d.steps, 0);
     if (challenge.metric === 'activeDays') progress = ownDays.filter((d) => d.steps > 0).length;
     if (challenge.metric === 'streak') progress = profile?.streak || 0;
-    // Collective challenges are deliberately based on the same daily records
-    // as personal challenges; the server can later replace this with an aggregate.
-    if (challenge.kind === 'collective') {
-      const users = await getLeaderboard(200);
-      const all = await Promise.all(users.map((u) => listDailySteps(u.uid, 370).catch(() => [])));
-      progress = all.flat().filter((d) => d.date >= challenge.startsAt && d.date <= challenge.endsAt).reduce((sum, d) => sum + d.steps, 0);
-    }
+    if (challenge.kind === 'collective') progress = await collectiveProgress(challenge);
     const old = saved.get(challenge.id);
     result.push({
-      challengeId: challenge.id, uid, progress: Math.min(progress, challenge.target),
-      completed: progress >= challenge.target, claimed: old?.claimed || false,
-      updatedAt: Date.now(), claimedAt: old?.claimedAt,
+      challengeId: challenge.id,
+      uid,
+      // La progression n'est jamais tronquée côté client : c'est la règle qui
+      // borne l'écriture (≤ 400 000), et l'affichage doit montrer le vrai chiffre.
+      progress: Math.max(0, Math.round(progress)),
+      completed: progress >= challenge.target,
+      claimed: old?.claimed || false,
+      updatedAt: Date.now(),
+      claimedAt: old?.claimedAt,
+      reward: old?.reward,
     });
   }
   return result;
 }
 
-/** Réclame une récompense une seule fois, dans la même transaction que le solde. */
+/**
+ * Réclame une récompense de défi — **une seule fois**, dans la même
+ * transaction que le solde (F02).
+ *
+ * Le montant n'est plus celui transmis par l'écran : il est lu dans le
+ * catalogue autoritaire `challengeCatalog/{id}` (écrit uniquement par
+ * l'administration). Un défi inconnu, inactif, ou déjà réclamé ne crédite rien.
+ * La règle Firestore applique le même contrôle : même en contournant ce code,
+ * un client ne peut pas s'attribuer un montant arbitraire.
+ */
 export async function claimChallengeReward(uid: string, challenge: ChallengeDefinition, progress: number): Promise<void> {
   if (progress < challenge.target) throw new Error('Défi pas encore terminé.');
+  const catalogSnap = await getDoc(doc(db, 'challengeCatalog', challenge.id));
+  if (!catalogSnap.exists()) {
+    throw new Error('Ce défi n’est pas ouvert aux récompenses. Réessayez plus tard.');
+  }
+  const catalog = catalogSnap.data() as { active?: boolean; reward?: number; endsAt?: string };
+  if (catalog.active !== true) throw new Error('Ce défi est terminé : plus aucune récompense n’est versée.');
+  if (catalog.endsAt && dateStr() > catalog.endsAt) throw new Error('Ce défi est terminé : plus aucune récompense n’est versée.');
+  const reward = Number(catalog.reward);
+  if (!Number.isFinite(reward) || reward <= 0 || reward > 50) {
+    throw new Error('Barème de récompense invalide pour ce défi.');
+  }
+
   await runTransaction(db, async (tx) => {
     const userRef = doc(db, 'users', uid);
     const claimRef = doc(db, 'users', uid, 'challenges', challenge.id);
     const [userSnap, claimSnap] = await Promise.all([tx.get(userRef), tx.get(claimRef)]);
     if (!userSnap.exists()) throw new Error('Profil introuvable.');
     if (claimSnap.exists() && (claimSnap.data() as UserChallenge).claimed) throw new Error('Récompense déjà récupérée.');
-    tx.update(userRef, { elycoins: increment(challenge.reward), lastChallengeClaim: challenge.id });
-    tx.set(claimRef, { challengeId: challenge.id, uid, progress, completed: true, claimed: true, reward: challenge.reward, updatedAt: Date.now(), claimedAt: Date.now() } satisfies UserChallenge);
+    tx.update(userRef, { elycoins: increment(reward), lastChallengeClaim: challenge.id });
+    tx.set(claimRef, {
+      challengeId: challenge.id, uid, progress: Math.min(progress, challenge.target),
+      completed: true, claimed: true, reward, updatedAt: Date.now(), claimedAt: Date.now(),
+    } satisfies UserChallenge);
     tx.set(doc(collection(db, 'users', uid, 'transactions')), {
-      type: 'challenge', coins: challenge.reward, note: `Défi : ${challenge.title}`, createdAt: Date.now(),
+      type: 'challenge', coins: reward, note: `Défi : ${challenge.title}`, createdAt: Date.now(),
     } satisfies CoinTransaction);
   });
   try {
@@ -448,13 +512,64 @@ export async function claimChallengeReward(uid: string, challenge: ChallengeDefi
   } catch {}
 }
 
-// ============ Sorties GPS ============
+/**
+ * Charge un défi depuis le catalogue autoritaire (montant et fenêtre de
+ * validité fixés par l'administration) et le fusionne avec la définition locale
+ * (titre, description, icône). Aucune récompense n'est lue depuis le client.
+ *
+ * Deux règles de cohérence, alignées sur la règle Firestore :
+ *  • un défi **absent** du catalogue n'est pas rémunéré (`rewardAllowed: false`) ;
+ *  • un défi revalorisé côté administration garde les dates de la définition
+ *    locale : remplacer `endsAt` par une valeur distante ferait diverger la
+ *    condition d'affichage (« se termine aujourd'hui ») de la condition de
+ *    crédit. Seuls le montant et la cible suivent le catalogue.
+ */
+export async function loadChallengeCatalog(local: ChallengeDefinition[]): Promise<ChallengeDefinition[]> {
+  const snaps = await getDocs(collection(db, 'challengeCatalog')).catch(() => null);
+  if (!snaps) return local.map((challenge) => ({ ...challenge, rewardAllowed: false }));
+  const catalog = new Map<string, Record<string, unknown>>();
+  for (const d of snaps.docs) catalog.set(d.id, d.data() as Record<string, unknown>);
+  return local.map((challenge) => {
+    const remote = catalog.get(challenge.id);
+    if (!remote) return { ...challenge, rewardAllowed: false };
+    const reward = Number(remote.reward);
+    const now = new Date().toISOString().slice(0, 10);
+    const expired = typeof remote.endsAt === 'string' && remote.endsAt < now;
+    return {
+      ...challenge,
+      reward: Number.isFinite(reward) && reward > 0 && reward <= 50 ? reward : challenge.reward,
+      target: Number(remote.target) > 0 ? Number(remote.target) : challenge.target,
+      rewardAllowed: remote.active === true && !expired && Number.isFinite(reward),
+    };
+  });
+}
 
-export async function createActivitySession(uid: string, type: ActivitySession['type'], route?: { id: string; name: string }): Promise<string> {
-  const ref = await addDoc(collection(db, 'activitySessions'), {
-    uid, type, startedAt: Date.now(), durationSec: 0, distanceM: 0, calories: 0, points: [], status: 'active',
+/**
+ * Crée une sortie **idempotente** (F05).
+ *
+ * L'identifiant est désormais généré côté appareil : réémettre la même sortie
+ * après une coupure réseau (file d'envoi persistante) met à jour le même
+ * document au lieu d'en créer un second. `createdOffline` / `syncedAt`
+ * traduisent l'état « enregistrée sur ce téléphone / synchronisation en
+ * attente » affiché à l'utilisateur.
+ */
+export async function createActivitySession(
+  uid: string,
+  type: ActivitySession['type'],
+  route?: { id: string; name: string },
+  options: { sessionId?: string; startedAt?: number; createdOffline?: boolean } = {}
+): Promise<string> {
+  const ref = options.sessionId
+    ? doc(db, 'activitySessions', options.sessionId)
+    : doc(collection(db, 'activitySessions'));
+  await setDoc(ref, {
+    uid, type,
+    startedAt: options.startedAt || Date.now(),
+    durationSec: 0, distanceM: 0, calories: 0, points: [], status: 'active',
     routeId: route?.id || null, routeName: route?.name || null,
-  } satisfies ActivitySession);
+    createdOffline: !!options.createdOffline,
+    syncedAt: null,
+  } satisfies ActivitySession, { merge: true });
   return ref.id;
 }
 
@@ -473,7 +588,10 @@ export async function finishActivitySession(uid: string, id: string, data: Pick<
     pausedSec: Math.max(0, Math.round(data.pausedSec || 0)),
     endedAt: Date.now(),
     status: 'completed',
+    // Par défaut la sortie reste privée : c'est l'utilisateur qui choisit son
+    // audience (F01), et ce choix n'est jamais réinitialisé ensuite.
     visibility: 'private',
+    syncedAt: Date.now(),
   });
   try {
     const profile = await getUserProfile(uid);
@@ -512,19 +630,30 @@ export async function deleteActivitySession(uid: string, sessionId: string): Pro
 export async function updateActivityMetadata(
   uid: string,
   id: string,
-  metadata: { title?: string; note?: string; weather?: ActivityWeather | null },
+  metadata: {
+    title?: string;
+    /** @deprecated la note est privée : utiliser `setPrivateActivityNote`. */
+    note?: string;
+    /** Message partageable avec l'audience de la sortie (F01). */
+    caption?: string;
+    weather?: ActivityWeather | null;
+  },
 ): Promise<void> {
   const ref = doc(db, 'activitySessions', id);
   const snap = await getDoc(ref);
   if (!snap.exists()) throw new Error('Cette sortie n’existe plus.');
   if ((snap.data() as ActivitySession).uid !== uid) throw new Error('Cette sortie ne vous appartient pas.');
   const title = (metadata.title || '').trim().slice(0, 80);
-  const note = (metadata.note || '').trim().slice(0, 500);
+  const caption = (metadata.caption || '').trim().slice(0, 500);
   const data: Record<string, unknown> = {
     title: title || deleteField(),
-    note: note || deleteField(),
+    caption: caption || deleteField(),
     weather: metadata.weather || deleteField(),
   };
+  // La note privée ne doit JAMAIS être écrite dans le document partageable :
+  // si un appelant utilise encore l'ancien paramètre, elle est redirigée vers
+  // la sous-collection privée.
+  if (metadata.note !== undefined) await setPrivateActivityNote(uid, id, metadata.note);
   await updateDoc(ref, data);
 }
 
@@ -555,41 +684,68 @@ export interface ActivityPageResult {
 /**
  * Liste paginée des sorties (« Mes sorties »).
  *
- * La pagination s'appuie sur orderBy(startedAt desc) + startAfter(startedAt, id) :
- * pas de saut, pas de doublon. Le filtre de distance minimale est appliqué côté
- * client (Firestore n'autorise qu'une seule inégalité par requête, déjà utilisée
- * pour la période).
+ * Pagination stable : `orderBy(startedAt desc)` + curseur `(startedAt, id)`,
+ * sans saut ni doublon, y compris quand plusieurs sorties partagent le même
+ * horodatage.
  *
- * Index composites requis (firestore.indexes.json) :
- *   activitySessions (uid ASC, startedAt DESC)
- *   activitySessions (uid ASC, type ASC, startedAt DESC)
- *   activitySessions (uid ASC, startedAt DESC, __name__ DESC) — ancienne version
- *   conservée pour les clients déjà installés qui triaient par documentId().
+ * **Index composites.** Firestore exige un index composite dès qu'on combine
+ * une égalité (`uid`, `type`), une inégalité (`startedAt`) et un tri. Ces index
+ * sont déclarés dans `firestore.indexes.json`, mais un déploiement partiel (ou
+ * un projet qui n'a pas reçu `firebase deploy --only firestore:indexes`) fait
+ * échouer la requête avec « The query requires an index » — l'écran « Sortie
+ * GPS » restait alors vide. La requête est donc tentée avec les filtres
+ * complets, puis **dégradée automatiquement** sur la seule contrainte
+ * `uid` + tri (index mono-champ automatique) avec filtrage en mémoire : les
+ * résultats restent corrects, seule la consommation de lecture augmente.
  */
 export async function listActivitySessionsPage(uid: string, filters: ActivityQueryFilters = {}): Promise<ActivityPageResult> {
   const pageSize = Math.min(50, Math.max(1, Math.floor(filters.pageSize || 20)));
-  const constraints: QueryConstraint[] = [where('uid', '==', uid)];
-  if (filters.type) constraints.push(where('type', '==', filters.type));
-  if (typeof filters.from === 'number') constraints.push(where('startedAt', '>=', filters.from));
-  if (typeof filters.to === 'number') constraints.push(where('startedAt', '<', filters.to));
-  constraints.push(orderBy('startedAt', 'desc'));
-  // Le tri secondaire par identifiant (pagination stable) n'a pas besoin d'un
-  // index composite : Firestore l'ajoute automatiquement à tout index de
-  // collection. `documentId()` explicite, lui, exigeait un index dédié par
-  // combinaison de filtres — d'où les « The query requires an index » sur
-  // « Mes sorties ». Le curseur est construit avec le même couple
-  // (startedAt, __name__), donc la pagination reste sans doublon ni saut.
-  if (filters.cursor) constraints.push(startAfter(filters.cursor.startedAt, filters.cursor.id));
-  constraints.push(limit(pageSize + 1));
 
-  const snaps = await getDocs(query(collection(db, 'activitySessions'), ...constraints));
-  const hasMore = snaps.docs.length > pageSize;
-  const docs = hasMore ? snaps.docs.slice(0, pageSize) : snaps.docs;
-  const page = docs.map((d) => ({ id: d.id, ...(d.data() as ActivitySession) }));
-  const items = filters.minDistanceM
-    ? page.filter((s) => (s.distanceM || 0) >= (filters.minDistanceM || 0))
-    : page;
-  const last = page[page.length - 1];
+  const build = (full: boolean): QueryConstraint[] => {
+    const constraints: QueryConstraint[] = [where('uid', '==', uid)];
+    if (full && filters.type) constraints.push(where('type', '==', filters.type));
+    if (full && typeof filters.from === 'number') constraints.push(where('startedAt', '>=', filters.from));
+    if (full && typeof filters.to === 'number') constraints.push(where('startedAt', '<', filters.to));
+    constraints.push(orderBy('startedAt', 'desc'));
+    // Deux valeurs au curseur : Firestore ajoute automatiquement `__name__` au
+    // tri, donc ce couple reste stable sans `documentId()` explicite.
+    if (filters.cursor) constraints.push(startAfter(filters.cursor.startedAt, filters.cursor.id));
+    constraints.push(limit(pageSize + 1));
+    return constraints;
+  };
+
+  let usedFullQuery = true;
+  let snaps;
+  try {
+    snaps = await getDocs(query(collection(db, 'activitySessions'), ...build(true)));
+  } catch (error) {
+    if (!filters.type && typeof filters.from !== 'number' && typeof filters.to !== 'number') throw error;
+    console.warn('[activités] index composite indisponible, filtrage local', (error as Error).message);
+    usedFullQuery = false;
+    snaps = await getDocs(query(collection(db, 'activitySessions'), ...build(false)));
+  }
+
+  const remaining = (item: ActivitySession) => {
+    if (filters.type && item.type !== filters.type) return false;
+    const startedAt = item.startedAt || 0;
+    if (typeof filters.from === 'number' && startedAt < filters.from) return false;
+    if (typeof filters.to === 'number' && startedAt >= filters.to) return false;
+    if (filters.minDistanceM && (item.distanceM || 0) < filters.minDistanceM) return false;
+    return true;
+  };
+
+  const docs = usedFullQuery
+    ? snaps.docs
+    : // La fenêtre lue est plus large quand le filtrage est local, pour ne pas
+      // renvoyer une page vide alors que des sorties correspondantes existent.
+      snaps.docs.slice(0, (pageSize + 1) * 6);
+
+  const page = docs
+    .map((d) => ({ id: d.id, ...(d.data() as ActivitySession) }))
+    .filter(remaining);
+  const hasMore = page.length > pageSize;
+  const items = hasMore ? page.slice(0, pageSize) : page;
+  const last = items[items.length - 1];
   return {
     items,
     cursor: last ? { startedAt: last.startedAt, id: last.id || '' } : null,
@@ -597,7 +753,39 @@ export async function listActivitySessionsPage(uid: string, filters: ActivityQue
   };
 }
 
-/** Liste simple (exports RGPD, usages internes), triée de la plus récente à la plus ancienne. */
+/**
+ * Recherche « Mes sorties » sur le texte (titre / note / parcours).
+ *
+ * Firestore n'indexe pas les sous-chaînes : un filtre `title` textuel combiné
+ * aux filtres de type et de période exigerait un index composite par
+ * combinaison, d'où les erreurs « The query requires an index ». On lit donc
+ * les seules sorties de l'utilisateur (requête simple, sans inégalité ni tri :
+ * aucun index composite requis) puis on filtre en mémoire. Les tracés GPS ne
+ * sont pas chargés par cette requête : la recherche reste légère.
+ */
+export async function searchActivitySessions(
+  uid: string,
+  term: string,
+  options: { type?: ActivitySession['type']; from?: number; max?: number } = {}
+): Promise<ActivitySession[]> {
+  const needle = term.trim().toLocaleLowerCase('fr');
+  if (needle.length < 2) return [];
+  const constraints: QueryConstraint[] = [where('uid', '==', uid)];
+  if (options.type) constraints.push(where('type', '==', options.type));
+  // Une seule inégalité par requête : la période est filtrée en mémoire pour
+  // rester compatible avec un filtre de type simultané sans index composite.
+  constraints.push(limit(Math.min(500, Math.max(1, options.max || 300))));
+  const snaps = await getDocs(query(collection(db, 'activitySessions'), ...constraints));
+  return snaps.docs
+    .map((d) => ({ id: d.id, ...(d.data() as ActivitySession) }))
+    .filter((session) => {
+      if (typeof options.from === 'number' && (session.startedAt || 0) < options.from) return false;
+      const haystack = `${session.title || ''} ${session.note || ''} ${session.routeName || ''} ${session.type === 'run' ? 'course' : 'marche'}`.toLocaleLowerCase('fr');
+      return haystack.includes(needle);
+    })
+    .sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
+}
+
 export async function listActivitySessions(uid: string, count = 20): Promise<ActivitySession[]> {
   const snaps = await getDocs(query(
     collection(db, 'activitySessions'),
@@ -826,10 +1014,50 @@ export async function getProfiles(uids: string[]): Promise<UserProfile[]> {
 
 // ============ Classement ============
 
-export async function getLeaderboard(top = 50): Promise<UserProfile[]> {
-  const q = query(collection(db, 'users'), orderBy('elycoins', 'desc'), limit(top));
-  const snaps = await getDocs(q);
-  return snaps.docs.map((d) => d.data() as UserProfile);
+/**
+ * Classement des marcheurs.
+ *
+ * F07 — l'ancienne version prenait systématiquement le **top 50 par solde
+ * d'ElyCoins** : un excellent marcheur (ou un ami) absent de ce groupe
+ * n'apparaissait dans aucun classement de pas, et dépenser son solde faisait
+ * changer le classement des pas. On interroge maintenant le champ de la métrique
+ * choisie, ce qui garantit que le rang affiché correspond bien à ce qui est
+ * mesuré.
+ *
+ * - `coins` : solde disponible (l'ancien comportement, nommé explicitement) ;
+ * - `today` : pas du jour **à la date du jour**, vérifiée côté client ;
+ * - `steps` : pas cumulés.
+ *
+ * Les métriques calculées sur plusieurs jours (7 et 30 jours) restent agrégées
+ * à partir des documents quotidiens : un agrégat serveur n'existe pas encore et
+ * ne peut pas être inventé côté client.
+ */
+export type LeaderboardMetric = 'coins' | 'today' | 'steps';
+
+export async function getLeaderboard(top = 50, metric: LeaderboardMetric = 'coins'): Promise<UserProfile[]> {
+  const field = metric === 'coins' ? 'elycoins' : metric === 'steps' ? 'totalSteps' : 'todaySteps';
+  const q = query(collection(db, 'users'), orderBy(field, 'desc'), limit(top));
+  let snaps;
+  try {
+    snaps = await getDocs(q);
+  } catch {
+    // Index mono-champ non encore prêt : repli trié localement sur un lot plus
+    // large, pour que l'écran reste utilisable.
+    snaps = await getDocs(query(collection(db, 'users'), limit(Math.max(top, 200))));
+  }
+  const rows = snaps.docs.map((d) => d.data() as UserProfile);
+  const today = dateStr();
+  return rows
+    .filter((row) => (metric === 'today' ? (row.todayDate || today) === today : true))
+    .sort((a, b) => scoreOf(b, metric) - scoreOf(a, metric))
+    .slice(0, top);
+}
+
+/** Valeur comparée pour une métrique donnée. */
+export function scoreOf(user: UserProfile, metric: LeaderboardMetric): number {
+  if (metric === 'coins') return user.elycoins || 0;
+  if (metric === 'steps') return user.totalSteps || 0;
+  return user.todaySteps || 0;
 }
 
 export async function listDailySteps(uid: string, count = 30): Promise<DailySteps[]> {
@@ -837,16 +1065,48 @@ export async function listDailySteps(uid: string, count = 30): Promise<DailyStep
   return snaps.docs.map(d => ({ date: d.id, ...(d.data() as Omit<DailySteps, 'date'>) })).reverse();
 }
 
+/** Meilleure série **réellement** atteinte (F07) — calcul pur dans `streak.ts`. */
+export async function getBestStreak(uid: string, days = 370): Promise<number> {
+  const history = await listDailySteps(uid, days).catch(() => [] as DailySteps[]);
+  return computeBestStreak(history.map((d) => d.date));
+}
+
 export function watchOutgoingRequests(uid: string, cb: (reqs: FriendRequest[]) => void): Unsubscribe {
   return onSnapshot(query(collection(db, 'friendRequests'), where('from', '==', uid), where('status', '==', 'pending')),
     s => cb(s.docs.map(d => ({ id: d.id, ...(d.data() as FriendRequest) }))));
 }
 
+/**
+ * Recherche par nom d'affichage.
+ *
+ * Firestore ne sait pas faire de recherche « contient ». L'ancienne version
+ * lisait les 50 premiers profils triés par nom — donc un sous-ensemble presque
+ * toujours vide de résultat et une lecture de collection complète. On balaye
+ * désormais par pages de 200, en partant d'un curseur placé autour du préfixe
+ * saisi (`startAt(term)`), avec un plafond explicite de pages : la requête reste
+ * bornée et l'index `displayName` est utilisé.
+ */
 export async function searchUsersByName(name: string): Promise<UserProfile[]> {
   const term = name.trim();
   if (term.length < 2) return [];
-  const snaps = await getDocs(query(collection(db, 'users'), orderBy('displayName'), limit(50)));
-  return snaps.docs.map(d => d.data() as UserProfile).filter(p => p.displayName.toLocaleLowerCase('fr').includes(term.toLocaleLowerCase('fr'))).slice(0, 10);
+  const lowered = term.toLocaleLowerCase('fr');
+  const matches: UserProfile[] = [];
+  let cursor: QueryDocumentSnapshot | null = null;
+  for (let page = 0; page < 5 && matches.length < 10; page += 1) {
+    const constraints: QueryConstraint[] = [orderBy('displayName')];
+    if (page === 0) constraints.push(startAt(term));
+    else if (cursor) constraints.push(startAfter(cursor));
+    constraints.push(limit(200));
+    const snaps = await getDocs(query(collection(db, 'users'), ...constraints));
+    for (const d of snaps.docs) {
+      const p = d.data() as UserProfile;
+      if ((p.displayName || '').toLocaleLowerCase('fr').includes(lowered)) matches.push(p);
+      if (matches.length >= 10) break;
+    }
+    if (snaps.docs.length < 200) break;
+    cursor = snaps.docs[snaps.docs.length - 1];
+  }
+  return matches;
 }
 
 export async function sendFriendReaction(from: UserProfile, toUid: string, emoji: string, message = ''): Promise<void> {
@@ -893,53 +1153,19 @@ export async function redeemPartnerOffer(profile: UserProfile, offer: PartnerOff
   });
 }
 
+/**
+ * F03 — export et suppression passent par `lib/account.ts`, qui porte
+ * l'inventaire complet des collections, la pagination par curseur et la
+ * reprise après panne. Les anciennes versions de ces fonctions (plafonnées à
+ * 1 000 sorties / 50 transactions, oubliant messages, badges, fil, parcours)
+ * sont supprimées : un seul chemin fait foi.
+ */
 export async function exportAccountData(uid: string): Promise<Record<string, unknown>> {
-  const [profile, daily, transactions, withdrawals, activities] = await Promise.all([
-    getUserProfile(uid), listDailySteps(uid, 3650), listMyTransactions(uid), listMyWithdrawals(uid), listActivitySessions(uid, 1000),
-  ]);
-  return { exportedAt: new Date().toISOString(), profile, dailySteps: daily, transactions, withdrawals, activities };
+  return exportAccountComplete(uid) as unknown as Record<string, unknown>;
 }
 
-export async function deleteAccountData(uid: string): Promise<void> {
-  const refs = [collection(db, 'users', uid, 'dailySteps'), collection(db, 'users', uid, 'transactions'), collection(db, 'users', uid, 'challenges')];
-  for (const ref of refs) {
-    const snaps = await getDocs(ref);
-    for (let i = 0; i < snaps.docs.length; i += 400) {
-      const batch = writeBatch(db); snaps.docs.slice(i, i + 400).forEach(d => batch.delete(d.ref)); await batch.commit();
-    }
-  }
-  const activities = await getDocs(query(collection(db, 'activitySessions'), where('uid', '==', uid)));
-  for (const activity of activities.docs) await deleteDoc(activity.ref);
-  // Jetons de notification (identifiants d'appareil) : sous-collection du profil.
-  // Firestore ne supprime PAS les sous-collections avec le document parent.
-  const tokens = await getDocs(collection(db, 'users', uid, 'notificationTokens'));
-  for (const t of tokens.docs) await deleteDoc(t.ref);
-  // Réactions entre amis : contiennent le pseudo et un message libre (160 car. max).
-  // À supprimer dans les deux sens (émises et reçues).
-  for (const field of ['from', 'to'] as const) {
-    const reactions = await getDocs(query(collection(db, 'friendReactions'), where(field, '==', uid)));
-    for (const r of reactions.docs) await deleteDoc(r.ref);
-  }
-  const friendships = await getDocs(query(collection(db, 'friendships'), where('members', 'array-contains', uid)));
-  for (const f of friendships.docs) await deleteDoc(f.ref);
-  for (const field of ['from','to'] as const) { const requests=await getDocs(query(collection(db,'friendRequests'),where(field,'==',uid))); for(const r of requests.docs) await deleteDoc(r.ref); }
-  // Retraits : on n'anonymise que les demandes déjà traitées. Une demande encore
-  // « pending » conserve son e-mail PayPal le temps d'être payée, sinon
-  // l'utilisateur perdrait à la fois ses ElyCoins (débités à la demande) et son
-  // paiement. L'adresse est effacée dès le versement effectué.
-  const withdrawals=await getDocs(query(collection(db,'withdrawals'),where('uid','==',uid)));
-  for (const w of withdrawals.docs) {
-    const data = w.data() as Withdrawal;
-    if (data.status === 'pending') {
-      await updateDoc(w.ref, { userName: 'Compte supprimé', deletedUser: true });
-    } else {
-      await updateDoc(w.ref, { userName: 'Compte supprimé', paypalEmail: null, deletedUser: true });
-    }
-  }
-  const partners=await getDocs(query(collection(db,'partnerRequests'),where('uid','==',uid))); for(const p of partners.docs) await updateDoc(p.ref,{userName:'Compte supprimé',contactEmail:'supprimé',message:'Données supprimées',deletedUser:true});
-  await deleteDoc(doc(db, 'referralClaims', uid)).catch(() => undefined);
-  await deleteDoc(doc(db, 'referralCodes', (await getUserProfile(uid))?.referralCode || '_')).catch(() => undefined);
-  await deleteDoc(doc(db, 'users', uid));
+export async function deleteAccountData(uid: string, onProgress?: (label: string) => void): Promise<void> {
+  await purgeAccountData(uid, (p) => onProgress?.(p.step));
 }
 
 // ============ Badges / Trophées ============
@@ -1121,6 +1347,215 @@ export async function deleteFriendChallenge(uid: string, challengeId: string): P
   await deleteDoc(ref);
 }
 
+// ============ Notes privées (F01) ============
+//
+// La note libre était enregistrée dans le document `activitySessions`, donc
+// renvoyée à tout lecteur autorisé de la sortie (amis, lien). Elle est
+// désormais stockée dans une sous-collection lisible par le seul propriétaire :
+// `users/{uid}/privateActivityNotes/{sessionId}`. Le champ `note` n'est plus
+// écrit dans la sortie ; il n'est lu que pour migrer les documents existants.
+//
+// Rappel : Firestore ne supprime pas les sous-collections avec le document
+// parent — la suppression de compte les efface explicitement (voir
+// `deleteAccountData`).
+
+/** Lit la note privée d'une sortie, avec repli sur l'ancien champ `note`. */
+export async function getPrivateActivityNote(uid: string, sessionId: string, legacyNote?: string): Promise<string> {
+  try {
+    const snap = await getDoc(doc(db, 'users', uid, 'privateActivityNotes', sessionId));
+    if (snap.exists()) return String((snap.data() as { note?: string }).note || '');
+  } catch {
+    /* repli ci-dessous */
+  }
+  return legacyNote || '';
+}
+
+/** Enregistre la note privée et **retire** `note` du document partageable. */
+export async function setPrivateActivityNote(uid: string, sessionId: string, note: string): Promise<void> {
+  const clean = note.trim().slice(0, 500);
+  await setDoc(
+    doc(db, 'users', uid, 'privateActivityNotes', sessionId),
+    { note: clean, sessionId, updatedAt: Date.now() },
+    { merge: true }
+  );
+  // Les clients anciens relisaient `note` : on le supprime du document partagé.
+  await updateDoc(doc(db, 'activitySessions', sessionId), { note: deleteField() } as unknown as Record<string, unknown>).catch(
+    () => undefined
+  );
+}
+
+/**
+ * Migration des documents existants : déplace les notes présentes dans les
+ * sorties vers la sous-collection privée. Idempotent — une note déjà migrée
+ * n'est pas réécrite. À lancer une fois après déploiement (bouton du profil,
+ * ou script d'administration).
+ */
+/**
+ * Migre les notes héritées (`activitySessions.note`) vers les notes privées.
+ *
+ * Le nettoyage du champ hérité passe par `deleteField()` : il fait partie de la
+ * requête de mise à jour, mais les règles n'autorisent pas la suppression du
+ * champ par le client. L'opération est donc « au mieux », et la fonction
+ * retourne explicitement le nombre de sorties dont le champ n'a pas pu être
+ * retiré (`residual`), pour que l'administration sache qu'un nettoyage serveur
+ * reste nécessaire — plutôt que d'afficher un succès trompeur.
+ */
+export async function migratePrivateNotes(uid: string): Promise<{ migrated: number; scanned: number; residual: number }> {
+  const snaps = await getDocs(query(collection(db, 'activitySessions'), where('uid', '==', uid), limit(300)));
+  let migrated = 0;
+  let residual = 0;
+  for (const session of snaps.docs) {
+    const data = session.data() as ActivitySession;
+    const legacy = ((data as unknown as { note?: string }).note || '').trim();
+    if (!legacy) continue;
+    const noteRef = doc(db, 'users', uid, 'privateActivityNotes', session.id);
+    const existing = await getDoc(noteRef).catch(() => null);
+    if (!existing?.exists()) {
+      await setDoc(noteRef, { note: legacy.slice(0, 500), sessionId: session.id, updatedAt: Date.now(), migratedFrom: 'activitySessions' });
+      migrated += 1;
+    }
+    try {
+      await updateDoc(session.ref, { note: deleteField() } as unknown as Record<string, unknown>);
+    } catch {
+      residual += 1;
+    }
+  }
+  return { migrated, scanned: snaps.docs.length, residual };
+}
+
+// ============ Partage par lien révocable (F01) ============
+//
+// L'audience « Lien » n'avait aucun secret de partage : la sortie devenait
+// lisible par tout utilisateur authentifié. Un lien est désormais matérialisé
+// par un document `shareLinks/<sessionId>_<uid>` — identifiant déterministe,
+// donc vérifiable par une règle sans requête sur un champ :
+//   • le document ne contient qu'un **résumé** (titre, date, distance, durée,
+//     légende) : jamais le tracé GPS ;
+//   • il est lisible publiquement (un lien partagé doit s'ouvrir, même pour
+//     quelqu'un sans compte) ;
+//   • sa suppression révoque l'accès immédiatement, y compris pour l'API ;
+//   • le tracé complet n'est servi qu'aux audiences `private` / `friends`, dont
+//     l'amitié est vérifiée côté serveur.
+//
+// Le jeton aléatoire reste présent : il rend l'URL non devinable côté client.
+
+function randomToken(length = 24): string {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+  const bytes = new Uint8Array(length);
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) crypto.getRandomValues(bytes);
+  else for (let i = 0; i < length; i += 1) bytes[i] = Math.floor(Math.random() * 256);
+  return Array.from(bytes).map((b) => alphabet[b % alphabet.length]).join('');
+}
+
+/** Identifiant déterministe du document de partage d'une sortie. */
+export function shareLinkDocId(sessionId: string, uid: string): string {
+  return `${sessionId}_${uid}`;
+}
+
+/**
+ * Crée (ou renvoie) le lien révocable d'une sortie.
+ *
+ * Le document de partage ne publie qu'un résumé : c'est le prix d'un lien
+ * ouvrable sans compte. Le tracé reste couvert par l'audience déclarée de la
+ * sortie, elle-même vérifiée côté serveur.
+ */
+export async function createActivityShareLink(
+  uid: string,
+  sessionId: string,
+  scope: ShareLink['scope'] = 'summary'
+): Promise<ShareLink> {
+  const sessionRef = doc(db, 'activitySessions', sessionId);
+  const sessionSnap = await getDoc(sessionRef);
+  if (!sessionSnap.exists()) throw new Error('Sortie introuvable.');
+  const session = sessionSnap.data() as ActivitySession;
+  if (session.uid !== uid) throw new Error('Non autorisé.');
+
+  const linkRef = doc(db, 'shareLinks', shareLinkDocId(sessionId, uid));
+  const existing = await getDoc(linkRef).catch(() => null);
+  if (existing?.exists()) {
+    const data = existing.data() as ShareLink;
+    if (!data.expiresAt || data.expiresAt > Date.now()) {
+      return { ...data, id: linkRef.id, revoked: false };
+    }
+  }
+
+  const link: Omit<ShareLink, 'id'> = {
+    sessionId,
+    ownerUid: uid,
+    token: randomToken(),
+    scope,
+    revoked: false,
+    createdAt: Date.now(),
+    expiresAt: null,
+  };
+  await setDoc(linkRef, {
+    sessionId,
+    ownerUid: uid,
+    token: link.token,
+    scope: link.scope,
+    revoked: false,
+    createdAt: link.createdAt,
+    expiresAt: link.expiresAt,
+    // Résumé partageable — aucune coordonnée GPS ici.
+    title: session.title || session.routeName || 'Sortie ElyWalk',
+    caption: session.caption || '',
+    type: session.type,
+    startedAt: session.startedAt,
+    durationSec: session.durationSec,
+    distanceM: session.distanceM,
+    calories: session.calories,
+    ownerName: '',
+  });
+  await updateDoc(sessionRef, { visibility: 'link' });
+  return { id: linkRef.id, ...link };
+}
+
+/** Révoque un lien : il cesse immédiatement de fonctionner (règle serveur incluse). */
+export async function revokeActivityShareLink(uid: string, sessionId: string): Promise<void> {
+  const sessionSnap = await getDoc(doc(db, 'activitySessions', sessionId));
+  if (!sessionSnap.exists()) return;
+  if ((sessionSnap.data() as ActivitySession).uid !== uid) throw new Error('Non autorisé.');
+  await deleteDoc(doc(db, 'shareLinks', shareLinkDocId(sessionId, uid)));
+  await updateDoc(doc(db, 'activitySessions', sessionId), { visibility: 'private' });
+}
+
+/** Lien actif d'une sortie (ou `null`). */
+export async function listActivityShareLinks(uid: string, sessionId: string): Promise<ShareLink[]> {
+  const snap = await getDoc(doc(db, 'shareLinks', shareLinkDocId(sessionId, uid))).catch(() => null);
+  if (!snap?.exists()) return [];
+  return [{ ...(snap.data() as ShareLink), id: snap.id }];
+}
+
+/**
+ * Lit un lien partagé (public, sans compte). Retourne `null` si le lien a été
+ * révoqué ou s'il a expiré — l'écran affiche alors « lien révoqué » plutôt
+ * qu'une erreur de permission brute.
+ */
+export async function getSharedActivity(sessionId: string, ownerUid: string): Promise<Record<string, unknown> | null> {
+  const snap = await getDoc(doc(db, 'shareLinks', shareLinkDocId(sessionId, ownerUid))).catch(() => null);
+  if (!snap?.exists()) return null;
+  const data = snap.data() as ShareLink & { expiresAt?: number | null };
+  if (data.expiresAt && data.expiresAt < Date.now()) return null;
+  return { id: snap.id, ...data };
+}
+
+/**
+ * Vérifie qu'une audience est réellement satisfaite avant de renvoyer un
+ * contenu partagé — la règle Firestore fait de même, ce contrôle évite une
+ * lecture inutile et un message d'erreur brut côté écran.
+ */
+export async function assertAudienceAllows(requesterUid: string, ownerUid: string, audience: string): Promise<void> {
+  if (requesterUid === ownerUid) return;
+  if (audience === 'friends') {
+    const friendships = await getDocs(query(collection(db, 'friendships'), where('members', 'array-contains', requesterUid)));
+    const isFriend = friendships.docs.some((d) => ((d.data() as Friendship).members || []).includes(ownerUid));
+    if (!isFriend) throw new Error('Cette sortie est réservée aux amis de son auteur.');
+    return;
+  }
+  if (audience === 'link') return; // le lien est vérifié côté règles
+  throw new Error('Cette sortie est privée.');
+}
+
 // ============ Partage de sorties (visibilité) ============
 export async function setActivityVisibility(uid: string, sessionId: string, visibility: 'private'|'friends'|'link', sharedWith?: string[]): Promise<void> {
   const ref = doc(db,'activitySessions',sessionId);
@@ -1176,7 +1611,9 @@ export async function getReferralDashboard(uid: string): Promise<{ total: number
 // ============ QR / partage stylé ============
 // helper is in components, but db helper for code
 export function getFriendCodeShareUrl(code: string): string {
-  return `${typeof location!=='undefined' ? location.origin : ''}/?ref=${code}`;
+  // Domaine public : dans la WebView Capacitor, `location.origin` vaut
+  // `https://localhost`, lien inutilisable une fois partagé (F11).
+  return `https://elywalk-2f7ba.web.app/?ref=${encodeURIComponent(String(code).toUpperCase())}`;
 }
 
 // ============ Messagerie légère ============
@@ -1202,33 +1639,77 @@ export async function sendDirectMessage(from: UserProfile, toUid: string, text: 
   } satisfies DirectMessage);
 }
 export function watchDirectMessages(uid: string, friendUid: string, cb: (msgs: DirectMessage[])=>void): Unsubscribe {
-  // Watch messages where (from==uid && to==friendUid) OR vice versa — need two queries, merge client side
-  // Simplified: watch all messages where from==uid or to==uid and filter
-  const q1 = query(collection(db,'directMessages'), where('from','==',uid), where('to','==',friendUid), limit(100));
-  const q2 = query(collection(db,'directMessages'), where('from','==',friendUid), where('to','==',uid), limit(100));
+  // Deux requêtes (sens A→B et B→A), triées par le serveur sur `createdAt` :
+  // une limite sans ordre temporel renvoyait des documents arbitraires, dont
+  // les plus récents pouvaient être absents (F08).
+  const q1 = query(collection(db,'directMessages'), where('from','==',uid), where('to','==',friendUid), orderBy('createdAt','asc'), limit(100));
+  const q2 = query(collection(db,'directMessages'), where('from','==',friendUid), where('to','==',uid), orderBy('createdAt','asc'), limit(100));
   let m1: DirectMessage[]=[]; let m2: DirectMessage[]=[];
   const emit=()=>cb([...m1,...m2].sort((a,b)=>a.createdAt-b.createdAt));
-  const u1=onSnapshot(q1, s=>{ m1=s.docs.map(d=>({id:d.id,...(d.data() as DirectMessage)})); emit(); });
-  const u2=onSnapshot(q2, s=>{ m2=s.docs.map(d=>({id:d.id,...(d.data() as DirectMessage)})); emit(); });
+  const u1=onSnapshot(q1, s=>{ m1=s.docs.map(d=>({id:d.id,...(d.data() as DirectMessage)})); emit(); }, () => undefined);
+  const u2=onSnapshot(q2, s=>{ m2=s.docs.map(d=>({id:d.id,...(d.data() as DirectMessage)})); emit(); }, () => undefined);
   return ()=>{u1();u2();};
 }
-export async function listRecentMessages(uid: string, limitCount=20): Promise<DirectMessage[]> {
-  const q1 = query(collection(db,'directMessages'), where('from','==',uid), limit(limitCount));
-  const q2 = query(collection(db,'directMessages'), where('to','==',uid), limit(limitCount));
-  const [s1,s2]=await Promise.all([getDocs(q1), getDocs(q2)]);
-  const all=[...s1.docs,...s2.docs].map(d=>({id:d.id,...(d.data() as DirectMessage)})).sort((a,b)=>b.createdAt-a.createdAt).slice(0,limitCount);
-  return all;
-}
-export function watchRecentMessages(uid:string, cb:(msgs:DirectMessage[])=>void):Unsubscribe{
-  // merge both directions
-  let a:DirectMessage[]=[]; let b:DirectMessage[]=[];
-  const emit=()=>cb([...a,...b].sort((x,y)=>y.createdAt-x.createdAt).slice(0,20));
-  const u1=onSnapshot(query(collection(db,'directMessages'), where('from','==',uid), limit(10)), s=>{a=s.docs.map(d=>({id:d.id,...(d.data() as DirectMessage)}));emit();});
-  const u2=onSnapshot(query(collection(db,'directMessages'), where('to','==',uid), limit(10)), s=>{b=s.docs.map(d=>({id:d.id,...(d.data() as DirectMessage)}));emit();});
-  return ()=>{u1();u2();};
+/**
+ * Derniers messages reçus/émis, **triés par le serveur**.
+ *
+ * Avant : `limit(100)` sans `orderBy`, puis tri en mémoire — les messages
+ * au-delà des 100 premiers documents (ordre arbitraire de Firestore) étaient
+ * donc perdus, et la liste affichée n'était pas chronologique (F08).
+ */
+export async function listRecentMessages(uid: string, limitCount = 20): Promise<DirectMessage[]> {
+  const perBox = Math.max(1, Math.min(100, limitCount));
+  const [sent, received] = await Promise.all([
+    getDocs(query(collection(db, 'directMessages'), where('from', '==', uid), orderBy('createdAt', 'desc'), limit(perBox))),
+    getDocs(query(collection(db, 'directMessages'), where('to', '==', uid), orderBy('createdAt', 'desc'), limit(perBox))),
+  ]);
+  const merged = new Map<string, DirectMessage>();
+  for (const d of [...sent.docs, ...received.docs]) merged.set(d.id, { id: d.id, ...(d.data() as DirectMessage) });
+  return [...merged.values()].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)).slice(-perBox);
 }
 
-// ============ Événements communautaires ============
+/**
+ * Écoute de la boîte de réception, sans limite arbitraire de 10 documents.
+ * Le tri est fait par le serveur sur `createdAt` (index `to + createdAt`).
+ */
+export function watchRecentMessages(uid:string, cb:(msgs:DirectMessage[])=>void):Unsubscribe{
+  const emit = (a: DirectMessage[], b: DirectMessage[]) => {
+    const merged = new Map<string, DirectMessage>();
+    for (const m of [...a, ...b]) merged.set(m.id!, m);
+    cb([...merged.values()].sort((x, y) => (y.createdAt || 0) - (x.createdAt || 0)));
+  };
+  let sent: DirectMessage[] = [];
+  let received: DirectMessage[] = [];
+  const u1 = onSnapshot(
+    query(collection(db,'directMessages'), where('from','==',uid), orderBy('createdAt','desc'), limit(50)),
+    (s) => { sent = s.docs.map(d=>({id:d.id,...(d.data() as DirectMessage)})); emit(sent, received); },
+    () => undefined,
+  );
+  const u2 = onSnapshot(
+    query(collection(db,'directMessages'), where('to','==',uid), orderBy('createdAt','desc'), limit(50)),
+    (s) => { received = s.docs.map(d=>({id:d.id,...(d.data() as DirectMessage)})); emit(sent, received); },
+    () => undefined,
+  );
+  return () => { u1(); u2(); };
+}
+
+/**
+ * Conversation avec un ami : **une seule** écoute active à la fois.
+ *
+ * L'ouverture d'une conversation empilait un abonnement sans jamais le
+ * fermer : en alternant rapidement entre deux amis, plusieurs écoutes restaient
+ * actives et la feuille affichait les messages du mauvais interlocuteur (F08).
+ * `openDirectConversation` renvoie une fonction de désabonnement que l'écran
+ * appelle avant d'ouvrir la conversation suivante.
+ */
+export function openDirectConversation(
+  uid: string,
+  friendUid: string,
+  cb: (msgs: DirectMessage[]) => void
+): Unsubscribe {
+  return watchDirectMessages(uid, friendUid, cb);
+}
+
 export async function createCommunityEvent(creator: UserProfile, data: { title:string; description:string; establishmentId?:string; establishmentName?:string; location?:string; lat?:number; lng?:number; date:string; time?:string; maxParticipants?:number | null }): Promise<string> {
   const ref = await addDoc(collection(db,'communityEvents'), {
     title: data.title.slice(0,80),
@@ -1251,12 +1732,79 @@ export async function createCommunityEvent(creator: UserProfile, data: { title:s
   await createFeedItem(creator,'friend',`a créé l’événement « ${data.title} »`, { eventId: ref.id }).catch(()=>undefined);
   return ref.id;
 }
-export async function listCommunityEvents(limitCount=20): Promise<CommunityEvent[]> {
-  const snaps = await getDocs(query(collection(db,'communityEvents'), orderBy('date','asc'), limit(limitCount)));
-  return snaps.docs.map(d=>({id:d.id,...(d.data() as CommunityEvent)}));
+/**
+ * Rencontres à venir, triées par date croissante.
+ *
+ * F09 — l'ancienne requête prenait les vingt premières dates **sans filtre
+ * futur** : après quelques mois d'utilisation, des sorties passées occupaient
+ * toute la fenêtre et les événements à venir n'apparaissaient plus. On borne
+ * désormais la requête à la date du jour (`date` est un `YYYY-MM-DD`, donc
+ * comparable lexicalement) et on pagine par curseur.
+ */
+export interface CommunityEventsPage {
+  items: CommunityEvent[];
+  cursor: string | null;
+  hasMore: boolean;
+  /** Les événements passés sont demandés explicitement, jamais par défaut. */
+  scope: 'upcoming' | 'past';
 }
+
+export async function listCommunityEventsPage(options: {
+  scope?: 'upcoming' | 'past';
+  pageSize?: number;
+  cursor?: string | null;
+  today?: string;
+} = {}): Promise<CommunityEventsPage> {
+  const scope = options.scope || 'upcoming';
+  const pageSize = Math.min(50, Math.max(1, Math.floor(options.pageSize || 20)));
+  const today = options.today || dateStr();
+  const constraints: QueryConstraint[] = [];
+  if (scope === 'upcoming') {
+    constraints.push(where('date', '>=', today), orderBy('date', 'asc'), orderBy('__name__', 'asc'));
+  } else {
+    constraints.push(where('date', '<', today), orderBy('date', 'desc'), orderBy('__name__', 'desc'));
+  }
+  if (options.cursor) constraints.push(startAfter(options.cursor));
+  constraints.push(limit(pageSize + 1));
+  const snaps = await getDocs(query(collection(db, 'communityEvents'), ...constraints));
+  const hasMore = snaps.docs.length > pageSize;
+  const docs = hasMore ? snaps.docs.slice(0, pageSize) : snaps.docs;
+  return {
+    items: docs.map((d) => ({ id: d.id, ...(d.data() as CommunityEvent) })),
+    cursor: docs.length ? docs[docs.length - 1].id : null,
+    hasMore,
+    scope,
+  };
+}
+
+/** Liste simple (compatibilité) : les prochaines rencontres. */
+export async function listCommunityEvents(limitCount=20): Promise<CommunityEvent[]> {
+  const page = await listCommunityEventsPage({ pageSize: limitCount });
+  return page.items;
+}
+
+/**
+ * Écoute les rencontres **à venir**. La borne `date >= aujourd'hui` évite de
+ * charger l'historique complet, et la limite reste large : le filtrage par vue
+ * (à venir / mes inscriptions / passées) se fait côté écran sur ces documents.
+ */
 export function watchCommunityEvents(cb:(items:CommunityEvent[])=>void):Unsubscribe{
-  return onSnapshot(query(collection(db,'communityEvents'), orderBy('date','asc'), limit(20)), snap=>cb(snap.docs.map(d=>({id:d.id,...(d.data() as CommunityEvent)}))));
+  const today = dateStr();
+  return onSnapshot(
+    query(collection(db,'communityEvents'), where('date','>=', today), orderBy('date','asc'), limit(200)),
+    snap=>cb(snap.docs.map(d=>({id:d.id,...(d.data() as CommunityEvent)}))),
+    (error) => {
+      // Repli sans index composite : on écoute les 200 documents triés par date
+      // et on filtre la date côté client plutôt que de laisser un écran vide.
+      console.warn('[events] écoute bornée impossible, repli local', error?.message);
+      onSnapshot(query(collection(db,'communityEvents'), orderBy('date','asc'), limit(200)), (all) => {
+        const items = all.docs
+          .map(d=>({id:d.id,...(d.data() as CommunityEvent)}))
+          .filter(ev => !ev.date || ev.date >= today);
+        cb(items);
+      });
+    },
+  );
 }
 export async function joinCommunityEvent(uid:string, eventId:string):Promise<'joined'|'waitlisted'>{
   const ref=doc(db,'communityEvents',eventId);
@@ -1297,7 +1845,7 @@ export async function leaveCommunityEvent(uid:string, eventId:string):Promise<vo
   });
 }
 
-export async function updateCommunityEvent(uid:string, eventId:string, changes:{title?:string;description?:string;location?:string;date?:string;time?:string;status?:'scheduled'|'cancelled';message?:string}):Promise<void>{
+export async function updateCommunityEvent(uid:string, eventId:string, changes:{title?:string;description?:string;location?:string;lat?:number;lng?:number;date?:string;time?:string;status?:'scheduled'|'cancelled';message?:string}):Promise<void>{
   const ref=doc(db,'communityEvents',eventId);
   const recipients=await runTransaction(db, async tx => {
     const snap=await tx.get(ref);
@@ -1318,3 +1866,25 @@ export async function updateActivityPrivacy(uid:string, settings: ActivityPrivac
   await updateDoc(doc(db,'users',uid), { activityPrivacy: settings } as unknown as Record<string,unknown>);
 }
 
+
+// ============ F04 — synchronisation différée des écritures de sortie ============
+// Les trois écritures du parcours GPS (création, points intermédiaires, fin de
+// sortie) passent par la file persistante : une sortie vécue hors connexion est
+// rejouée telle quelle au retour du réseau, avec un identifiant généré sur
+// l'appareil (aucun doublon). Les points intermédiaires sont « dernière valeur
+// gagnée » par sortie : seul le tracé le plus récent est renvoyé.
+registerSyncHandler('activity.create', async (task) => {
+  const { uid, type, sessionId, startedAt, route } = task.payload as {
+    uid: string; type: ActivitySession['type']; sessionId: string; startedAt?: number;
+    route?: { id: string; name: string } | null;
+  };
+  await createActivitySession(uid, type, route || undefined, { sessionId, startedAt, createdOffline: true });
+});
+
+registerSyncHandler('activity.finish', async (task) => {
+  const { uid, sessionId, data } = task.payload as {
+    uid: string; sessionId: string;
+    data: Pick<ActivitySession, 'points' | 'distanceM' | 'durationSec' | 'calories' | 'steps'> & { pausedSec?: number };
+  };
+  await finishActivitySession(uid, sessionId, data);
+});

@@ -53,6 +53,38 @@ export interface ActivityPrivacySettings {
   shareActivities?: boolean;
   shareBadges?: boolean;
   shareChallenges?: boolean;
+  /**
+   * F01 — un changement de confidentialité s'applique-t-il aux publications
+   * déjà créées ? `true` (défaut) : les sorties partagées repassent en privé,
+   * les éléments de fil déjà publiés sont retirés. `false` : seules les
+   * publications futures sont concernées.
+   */
+  applyToExisting?: boolean;
+}
+
+/**
+ * Audience d'une publication, formalisée côté données (F01).
+ *
+ * - `private`  : propriétaire uniquement ;
+ * - `friends`  : amitiés vérifiées **côté serveur** (`friendships`) ;
+ * - `link`     : partage par lien révocable, avec périmètre explicite.
+ */
+export type Audience = 'private' | 'friends' | 'link';
+
+export interface ShareLink {
+  id?: string;
+  /** Sortie concernée. */
+  sessionId: string;
+  ownerUid: string;
+  /** Jeton aléatoire : le lien ne doit pas être devinable. */
+  token: string;
+  /** Périmètre exact de ce que le lien expose. */
+  scope: 'summary' | 'track';
+  revoked: boolean;
+  createdAt: number;
+  revokedAt?: number | null;
+  /** Date d'expiration (epoch ms), `null` = sans expiration. */
+  expiresAt?: number | null;
 }
 
 export interface DailySteps {
@@ -79,6 +111,13 @@ export interface ChallengeDefinition {
   icon: string;
   /** For collective challenges, progress is the community total. */
   participantLabel?: string;
+  /**
+   * F02 — le défi est-il ouvert et rémunéré ? Fixé par le catalogue
+   * `challengeCatalog` (administration). `false` ou absent : le défi reste un
+   * objectif personnel mais **aucune récompense n'est versée**, et l'écran le dit
+   * au lieu de laisser un bouton « Récupérer » qui échouerait.
+   */
+  rewardAllowed?: boolean;
 }
 
 export interface UserChallenge {
@@ -127,13 +166,33 @@ export interface ActivitySession {
   sharedWith?: string[];
   /** Titre personnalisé (« Balade au bord de l'Authie »). */
   title?: string;
-  /** Note libre de l'utilisateur (500 caractères max). */
+  /**
+   * Note libre de l'utilisateur (500 caractères max) — **privée**.
+   *
+   * F01 : la note était stockée dans le document de la sortie et donc renvoyée
+   * à tout lecteur autorisé (amis, lien). Elle vit désormais dans
+   * `users/{uid}/privateActivityNotes/{sessionId}` (lisible par le seul
+   * propriétaire) et n'est plus écrite ici. Les champs restent déclarés pour
+   * lire les documents anciens et les migrer (voir `migratePrivateNotes`).
+   */
   note?: string;
+  /**
+   * Message libre **partageable** avec l'audience de la sortie (500 caractères).
+   * Remplace `note` pour tout ce qui doit être visible par les amis.
+   */
+  caption?: string;
   /** Météo ressentie pendant la sortie. */
   weather?: ActivityWeather;
   /** Parcours préparé suivi pendant cette sortie. */
   routeId?: string | null;
   routeName?: string | null;
+  /**
+   * F05 — la sortie a été finalisée hors connexion : elle existe d'abord sur
+   * le téléphone, dans la file d'envoi persistante, puis sur le serveur.
+   */
+  createdOffline?: boolean;
+  /** Dernier acquittement serveur de la sortie (epoch ms). */
+  syncedAt?: number | null;
 }
 
 export interface PartnerOffer {

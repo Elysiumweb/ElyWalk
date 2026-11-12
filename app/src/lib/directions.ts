@@ -1,19 +1,28 @@
 /**
- * Itinéraires calculés dans l'application — sans redirection vers Google Maps.
+ * Itinéraires et adresses calculés **dans l'application** — sans redirection
+ * vers Google Maps.
  *
  * Fournisseurs (aucune clé API, aucun compte) :
- * - **OSRM** (serveur de démonstration OpenStreetMap) pour le tracé et la durée
- *   à pied / à vélo / en voiture. La géométrie est renvoyée en GeoJSON.
- * - **OpenTripPlanner** (instance publique d'Île-de-France Mobilités, jeu de
- *   données Transilien / RER / métro / bus) pour les transports en commun :
- *   marche jusqu'à l'arrêt, lignes, correspondances et durée.
- * - **Nominatim** (OpenStreetMap) pour l'adresse réelle et le géocodage d'une
- *   adresse saisie à la main.
+ * - **Valhalla** (serveur public FOSSGIS, données OpenStreetMap) pour le tracé
+ *   et les consignes à pied (`pedestrian`), à vélo (`bicycle`) et en voiture
+ *   (`auto`). Le moteur applique réellement le coût du mode demandé : les
+ *   passages piétons, le sens unique et les pistes cyclables sont pris en
+ *   compte, contrairement au serveur OSRM de démonstration qui renvoyait un
+ *   trajet automobile quel que soit le profil.
+ * - **routing.openstreetmap.de** (OSRM communautaire, profils `routed-foot`,
+ *   `routed-bike`, `routed-car`) en premier repli, lui aussi réellement
+ *   multimodal.
+ * - **router.project-osrm.org** en dernier repli (tracé routier : la durée est
+ *   alors recalculée pour la marche et le vélo).
+ * - **OpenTripPlanner** (Île-de-France Mobilités) puis **Transitous** pour les
+ *   transports en commun.
+ * - **Photon** puis **Nominatim** (OpenStreetMap) pour la recherche d'adresse
+ *   et le géocodage inversé.
  *
  * Chaque appel est borné dans le temps (`timeout`) : si un fournisseur ne
  * répond pas, l'interface reçoit une erreur lisible et propose le repli
- * « Afficher le trajet dans Maps ». Rien n'est mis en cache côté serveur : seuls
- * les index du module gardent en mémoire les réponses pour la session.
+ * « Ouvrir dans Maps ». Rien n'est mis en cache côté serveur : seuls les index
+ * du module gardent en mémoire les réponses pour la session.
  */
 
 import type { Coords } from './geo';
@@ -37,6 +46,12 @@ export interface RouteStep {
   color?: string;
   from?: string;
   to?: string;
+  /** Point de la manœuvre sur le tracé (guidage GPS). */
+  at?: LatLng;
+  /** Type de manœuvre normalisé (`turn`, `roundabout`, `arrive`…). */
+  kind?: string;
+  /** Sens de la manœuvre (`left`, `right`, `straight`…). */
+  modifier?: string;
 }
 
 export interface TransitLeg {
@@ -73,16 +88,16 @@ export const TRAVEL_MODES: Array<{ id: TravelMode; label: string; short: string;
 ];
 
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org';
+/** Recherche d'adresse avec autocomplétion (Photon, OpenStreetMap). */
+const PHOTON_URL = 'https://photon.komoot.io';
 /**
  * Serveur de routage **Valhalla** de la communauté FOSSGIS (données
- * OpenStreetMap). Contrairement au serveur OSRM de démonstration — qui répond
- * en voiture quel que soit le profil demandé (`/foot`, `/bike`, `/driving`) et
- * renvoyait donc des itinéraires vélo par les quais ou des trajets à pied sur
- * le périphérique — Valhalla applique réellement le coût du mode choisi :
- * `pedestrian`, `bicycle`, `auto`. Gratuit, sans clé d’API, CORS ouvert.
+ * OpenStreetMap) : `pedestrian`, `bicycle`, `auto`. Gratuit, sans clé d’API,
+ * CORS ouvert.
  */
 const VALHALLA_URL = 'https://valhalla1.openstreetmap.de';
-/** Repli : OSRM de démonstration (tracé voiture, durée recalculée à pied). */
+/** Replis OSRM : instance communautaire multimodale, puis démonstrateur. */
+const OSMDE_URL = 'https://routing.openstreetmap.de';
 const OSRM_URL = 'https://router.project-osrm.org';
 
 async function fetchJson(url: string, timeoutMs = 12_000): Promise<any> {
@@ -94,7 +109,7 @@ async function fetchJson(url: string, timeoutMs = 12_000): Promise<any> {
     // sur les services publics, et par l'origine HTTPS du site.
     const res = await fetch(url, {
       signal: controller.signal,
-      headers: { Accept: 'application/json', 'X-Client': 'ElyWalk/2.1.4' },
+      headers: { Accept: 'application/json', 'X-Client': 'ElyWalk/2.1.5' },
     });
     if (!res.ok) throw new Error(`Service indisponible (${res.status}).`);
     return await res.json();
@@ -104,6 +119,21 @@ async function fetchJson(url: string, timeoutMs = 12_000): Promise<any> {
   } finally {
     clearTimeout(timer);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Adresses — recherche avec suggestions (bug « Adresse » des Rencontres)
+// ---------------------------------------------------------------------------
+
+export interface AddressSuggestion {
+  /** Identifiant stable pour les listes React. */
+  id: string;
+  /** Libellé court prêt à afficher (« Rue de Rivoli, 75004 Paris »). */
+  label: string;
+  lat: number;
+  lng: number;
+  /** Type OpenStreetMap (`house`, `street`, `city`…), pour l'icône. */
+  kind?: string;
 }
 
 /** Adresse postale réelle d'un point, via Nominatim (OpenStreetMap). */
@@ -120,17 +150,123 @@ export async function reverseGeocode(point: LatLng): Promise<string | null> {
   }
 }
 
-/** Géocode une adresse saisie à la main. */
+/**
+ * Recherche d'adresses **au fil de la frappe**.
+ *
+ * Photon (index OpenStreetMap) est privilégié : il est conçu pour
+ * l'autocomplétion (réponses en ~50 ms, tolérant aux fautes, biais par
+ * proximité). Nominatim sert de repli quand Photon ne répond pas. Aucun appel
+ * n'est fait sous trois caractères, et les réponses sont mémorisées pour la
+ * session afin de ne pas solliciter les serveurs publics à chaque touche.
+ */
+const addressCache = new Map<string, AddressSuggestion[]>();
+
+export async function searchAddresses(
+  query: string,
+  options: { limit?: number; near?: LatLng | null } = {}
+): Promise<AddressSuggestion[]> {
+  const term = query.trim();
+  if (term.length < 3) return [];
+  const limit = Math.min(8, Math.max(1, options.limit || 6));
+  const near = options.near;
+  const cacheKey = `${term.toLowerCase()}|${limit}|${near ? `${near.lat.toFixed(2)},${near.lng.toFixed(2)}` : ''}`;
+  const cached = addressCache.get(cacheKey);
+  if (cached) return cached;
+
+  const fromPhoton = async (): Promise<AddressSuggestion[]> => {
+    const params = new URLSearchParams({ q: term, limit: String(limit), lang: 'fr' });
+    if (near) {
+      // Biais (et non filtre) : les résultats proches passent devant sans
+      // empêcher de trouver une adresse à l'autre bout du pays.
+      params.set('lat', near.lat.toFixed(4));
+      params.set('lon', near.lng.toFixed(4));
+    }
+    const data = await fetchJson(`${PHOTON_URL}/api/?${params.toString()}`, 6000);
+    const features: any[] = Array.isArray(data?.features) ? data.features : [];
+    const out: AddressSuggestion[] = [];
+    features.forEach((feature, index) => {
+      const props: Record<string, any> = feature?.properties || {};
+      const coords = feature?.geometry?.coordinates;
+      if (!Array.isArray(coords) || coords.length < 2) return;
+      const label = tidyAddress(photonLabel(props, String(props.name || term)));
+      const lat = Number(coords[1]);
+      const lng = Number(coords[0]);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+      out.push({
+        id: String(props.osm_id ? `${props.osm_type || 'osm'}-${props.osm_id}` : `p-${index}-${label}`),
+        label,
+        lat,
+        lng,
+        kind: String(props.osm_value || props.type || ''),
+      });
+    });
+    return out;
+  };
+
+  const fromNominatim = async (): Promise<AddressSuggestion[]> => {
+    const data = await fetchJson(
+      `${NOMINATIM_URL}/search?format=jsonv2&addressdetails=1&limit=${limit}&q=${encodeURIComponent(term)}`,
+      8000
+    );
+    const rows: any[] = Array.isArray(data) ? data : [];
+    return rows.map((row, index) => ({
+      id: String(row.place_id ?? `n-${index}`),
+      label: tidyAddress(String(row.display_name || term)),
+      lat: parseFloat(row.lat),
+      lng: parseFloat(row.lon),
+      kind: String(row.type || ''),
+    }));
+  };
+
+  let results: AddressSuggestion[] = [];
+  try {
+    results = await fromPhoton();
+  } catch {
+    results = [];
+  }
+  if (!results.length) {
+    try {
+      results = await fromNominatim();
+    } catch {
+      results = [];
+    }
+  }
+  const clean = dedupeAddresses(results).slice(0, limit);
+  if (clean.length) addressCache.set(cacheKey, clean);
+  return clean;
+}
+
+/** Construit un libellé lisible depuis les propriétés Photon. */
+function photonLabel(props: Record<string, any>, fallback: string): string {
+  const street = [props.housenumber, props.street].filter(Boolean).join(' ');
+  const parts = [
+    street || props.name || fallback,
+    props.postcode,
+    props.city || props.town || props.village || props.locality,
+  ].filter(Boolean);
+  if (parts.length) return parts.join(', ');
+  return [props.name, props.state, props.country].filter(Boolean).join(', ') || fallback;
+}
+
+function dedupeAddresses(items: AddressSuggestion[]): AddressSuggestion[] {
+  const seen = new Set<string>();
+  const out: AddressSuggestion[] = [];
+  for (const item of items) {
+    const key = `${item.label.toLowerCase()}|${item.lat.toFixed(4)}|${item.lng.toFixed(4)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
+}
+
+/** Géocode une adresse saisie à la main (premier résultat). */
 export async function geocodeAddress(query: string): Promise<{ lat: number; lng: number; label: string } | null> {
   const clean = query.trim();
   if (clean.length < 3) return null;
-  const data = await fetchJson(
-    `${NOMINATIM_URL}/search?format=jsonv2&limit=1&q=${encodeURIComponent(clean)}`,
-    10_000
-  );
-  const first = Array.isArray(data) ? data[0] : null;
+  const [first] = await searchAddresses(clean, { limit: 1 });
   if (!first) return null;
-  return { lat: parseFloat(first.lat), lng: parseFloat(first.lon), label: first.display_name };
+  return { lat: first.lat, lng: first.lng, label: first.label };
 }
 
 /** Raccourcit une adresse Nominatim pour l'affichage mobile. */
@@ -142,7 +278,7 @@ export function tidyAddress(label: string): string {
   // « 12, Rue de Rivoli, … » : le numéro seul n'apporte rien à l'affichage.
   if (parts.length > 1 && /^\d+[a-zA-Z]?$/.test(parts[0])) parts.shift();
   if (parts.length > 1 && /^france$/i.test(parts[parts.length - 1])) parts.pop();
-  return parts.slice(0, 4).join(', ').trim();
+  return parts.slice(0, 4).join(', ').trim() || label.trim();
 }
 
 /** Libellé court d'un point : adresse si connue, sinon coordonnées. */
@@ -153,7 +289,7 @@ export function pointLabel(point: LatLng | null, address?: string | null): strin
 }
 
 // ---------------------------------------------------------------------------
-// OSRM — marche, vélo, voiture
+// Marche, vélo, voiture — Valhalla d'abord, OSRM en secours
 // ---------------------------------------------------------------------------
 
 const VALHALLA_COSTING: Record<'walk' | 'bike' | 'car', string> = {
@@ -165,7 +301,7 @@ const VALHALLA_COSTING: Record<'walk' | 'bike' | 'car', string> = {
 const OSRM_PROFILES: Record<'walk' | 'bike' | 'car', string> = {
   walk: 'foot',
   bike: 'bike',
-  car: 'driving',
+  car: 'car',
 };
 
 interface OsrmStep {
@@ -232,9 +368,10 @@ function formatStep(step: OsrmStep): string {
 /**
  * Décode un tracé encodé « polyline ».
  * - OSRM (`geometries=polyline`) et OpenTripPlanner : précision 1e5.
+ * - Valhalla (`shape`) : précision 1e6.
  * - Transitous / MOTIS (v1) : précision 1e7.
  */
-function decodePolyline(str: string, factor = 1e5): LatLng[] {
+export function decodePolyline(str: string, factor = 1e5): LatLng[] {
   let index = 0;
   let lat = 0;
   let lng = 0;
@@ -262,61 +399,114 @@ function decodePolyline(str: string, factor = 1e5): LatLng[] {
   return out;
 }
 
+/** Troncature du tracé : suffisant pour l'affichage et le guidage. */
+function simplify(points: LatLng[], max = 3000): LatLng[] {
+  if (points.length <= max) return points;
+  const step = Math.ceil(points.length / max);
+  return points.filter((_, index) => index % step === 0 || index === points.length - 1);
+}
+
 /**
  * Itinéraire marche / vélo / voiture via Valhalla, avec consignes en français
  * fournies par le moteur (elles tiennent compte du mode : passages piétons,
  * pistes cyclables, sens uniques).
+ *
+ * Réponse Valhalla native (`trip`) : `summary.length` en km, `summary.time` en
+ * secondes, `legs[].maneuvers[]` (une consigne par manœuvre) et `legs[].shape`
+ * en polyline précision 1e6. C'est le format documenté du service : le
+ * `format=osrm` utilisé auparavant renvoyait régulièrement un corps vide sans
+ * code d'erreur, d'où les itinéraires « indisponibles » à pied, à vélo et en
+ * voiture alors que les transports fonctionnaient.
  */
 export async function routeWithValhalla(
   from: LatLng,
   to: LatLng,
   mode: 'walk' | 'bike' | 'car'
 ): Promise<RoutePlan> {
-  const body = {
+  const costing = VALHALLA_COSTING[mode];
+  const body: Record<string, unknown> = {
     locations: [
       { lat: from.lat, lon: from.lng },
       { lat: to.lat, lon: to.lng },
     ],
-    costing: VALHALLA_COSTING[mode],
-    // Instructions localisées en français et distances en km.
+    costing,
+    // Instructions localisées en français, distances en kilomètres.
     directions_options: { language: 'fr-FR', units: 'kilometers' },
+    shape_format: 'polyline6',
   };
-  // `format=osrm` renvoie une géométrie polyline précision 1e5 : même décodeur
-  // que le repli, et un seul format à maintenir.
-  const data = await fetchJson(`${VALHALLA_URL}/route?json=${encodeURIComponent(JSON.stringify(body))}&format=osrm`);
-  const route = data?.routes?.[0];
-  if (!route) throw new Error('Aucun itinéraire trouvé entre ces deux points.');
+  // Le coût par mode est explicite : à vélo, on privilégie les aménagements
+  // cyclables ; à pied, les trottoirs et passages piétons.
+  if (mode === 'bike') body.costing_options = { bicycle: { use_roads: 0.35, avoid_bad_surfaces: 0.25 } };
+  if (mode === 'walk') body.costing_options = { pedestrian: { use_hills: 0.3, walkway_factor: 0.8 } };
+  if (mode === 'car') body.costing_options = { auto: { use_highways: 0.5, use_tolls: 0.2 } };
 
-  const geometry: LatLng[] = route.geometry ? decodePolyline(route.geometry) : [];
+  const data = await fetchJson(`${VALHALLA_URL}/route?json=${encodeURIComponent(JSON.stringify(body))}`);
+  const trip = data?.trip;
+  if (!trip || !Array.isArray(trip.legs) || trip.legs.length === 0) {
+    throw new Error('Aucun itinéraire trouvé entre ces deux points.');
+  }
+
+  const geometry: LatLng[] = [];
   const steps: RouteStep[] = [];
-  for (const leg of route.legs || []) {
-    for (const raw of (leg.steps as OsrmStep[]) || []) {
-      if (!raw.distance && raw.maneuver?.type !== 'arrive') continue;
+  for (const leg of trip.legs) {
+    if (typeof leg.shape === 'string') geometry.push(...decodePolyline(leg.shape, 1e6));
+    for (const maneuver of leg.maneuvers || []) {
+      const instruction = String(maneuver.instruction || '').trim() || MANEUVER_FR[String(maneuver.type)] || 'Continuez';
+      const lengthKm = Number(maneuver.length) || 0;
       steps.push({
-        // Valhalla fournit déjà la phrase française (« Tournez à gauche… »).
-        instruction: raw.maneuver?.instruction || formatStep(raw),
-        distanceM: Math.round(raw.distance || 0),
-        durationS: Math.round(raw.duration || 0),
+        instruction,
+        distanceM: Math.round(lengthKm * 1000),
+        durationS: Math.round(Number(maneuver.time) || 0),
         mode,
+        kind: String(maneuver.type || ''),
+        modifier: maneuver.modifier ? String(maneuver.modifier) : undefined,
+        at:
+          typeof maneuver.begin_shape_index === 'number' && geometry[maneuver.begin_shape_index]
+            ? geometry[maneuver.begin_shape_index]
+            : undefined,
       });
     }
   }
 
+  const legDistanceKm = (trip.legs || []).reduce((sum: number, leg: any) => sum + (Number(leg.summary?.length) || 0), 0);
+  const legTimeS = (trip.legs || []).reduce((sum: number, leg: any) => sum + (Number(leg.summary?.time) || 0), 0);
+  // `summary` couvre l'ensemble du trajet ; à défaut, on additionne les tronçons.
+  const distanceKm = Number(trip.summary?.length) || legDistanceKm;
+  const distanceM = Math.round(distanceKm * 1000);
+  const durationS = Math.round(Number(trip.summary?.time) || legTimeS);
+
+  if (!geometry.length) throw new Error('Tracé indisponible pour ce mode.');
+  if (!distanceM) throw new Error('Distance indisponible pour ce mode.');
+
   return {
     mode,
-    distanceM: Math.round(route.distance || 0),
-    durationS: Math.round(route.duration || 0),
-    geometry,
+    distanceM,
+    durationS,
+    geometry: simplify(dedupe(geometry)),
     steps,
     provider: 'OpenStreetMap · Valhalla (FOSSGIS)',
   };
 }
 
-/** Repli OSRM (moteur de démonstration, tracé automobile), durée corrigée. */
-async function routeWithOsrm(from: LatLng, to: LatLng, mode: 'walk' | 'bike' | 'car'): Promise<RoutePlan> {
+/**
+ * Repli OSRM. `host` permet d'utiliser l'instance communautaire multimodale
+ * (profils réellement piéton / vélo / voiture) ou, en dernier recours, le
+ * démonstrateur public (`router.project-osrm.org`), dont le profil est ignoré :
+ * la durée est alors recalculée à 4,8 km/h (marche) ou 15 km/h (vélo).
+ */
+async function routeWithOsrm(
+  from: LatLng,
+  to: LatLng,
+  mode: 'walk' | 'bike' | 'car',
+  host: 'osmde' | 'demo'
+): Promise<RoutePlan> {
   const profile = OSRM_PROFILES[mode];
+  // Instance communautaire : le profil est porté par le préfixe d'URL
+  // (`/routed-foot`, `/routed-bike`, `/routed-car`) et le segment de route
+  // reste `driving`. Le démonstrateur public, lui, n'expose que `driving`.
+  const base = host === 'osmde' ? `${OSMDE_URL}/routed-${profile}` : OSRM_URL;
   const url =
-    `${OSRM_URL}/route/v1/${profile}/${from.lng},${from.lat};${to.lng},${to.lat}` +
+    `${base}/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}` +
     '?overview=full&geometries=polyline&steps=true&annotations=false';
   const data = await fetchJson(url);
   const route = data?.routes?.[0];
@@ -327,47 +517,69 @@ async function routeWithOsrm(from: LatLng, to: LatLng, mode: 'walk' | 'bike' | '
   for (const leg of route.legs || []) {
     for (const raw of (leg.steps || []) as OsrmStep[]) {
       if (!raw.distance && raw.maneuver?.type !== 'arrive') continue;
+      const location = raw.maneuver?.location;
       steps.push({
         instruction: formatStep(raw),
         distanceM: Math.round(raw.distance || 0),
         durationS: Math.round(raw.duration || 0),
         mode,
+        kind: raw.maneuver?.type,
+        modifier: raw.maneuver?.modifier,
+        at: Array.isArray(location) ? { lat: location[1], lng: location[0] } : undefined,
       });
     }
   }
+  if (!geometry.length) throw new Error('Tracé indisponible pour ce mode.');
 
-  // Le serveur de démonstration ignore le profil demandé : la durée annoncée
-  // est recalculée pour la marche (4,8 km/h) et le vélo (15 km/h).
-  const speedKmh = mode === 'walk' ? 4.8 : mode === 'bike' ? 15 : 0;
+  // L'instance communautaire applique le profil demandé ; le démonstrateur,
+  // lui, ne sait faire que de la voiture.
+  const speedKmh = host === 'demo' ? (mode === 'walk' ? 4.8 : mode === 'bike' ? 15 : 0) : 0;
   const durationS = speedKmh
     ? Math.round(((route.distance || 0) / 1000 / speedKmh) * 3600)
     : Math.round(route.duration || 0);
+
+  const provider =
+    host === 'osmde'
+      ? `OpenStreetMap · OSRM ${mode === 'walk' ? 'piéton' : mode === 'bike' ? 'vélo' : 'voiture'}`
+      : mode === 'car'
+        ? 'OpenStreetMap · OSRM'
+        : 'OpenStreetMap · OSRM (tracé routier)';
 
   return {
     mode,
     distanceM: Math.round(route.distance || 0),
     durationS,
-    geometry,
+    geometry: simplify(dedupe(geometry)),
     steps,
-    provider: mode === 'car' ? 'OpenStreetMap · OSRM' : 'OpenStreetMap · OSRM (tracé routier)',
+    provider,
   };
 }
 
-/** Itinéraire marche / vélo / voiture : Valhalla d’abord, OSRM en secours. */
+/** Itinéraire marche / vélo / voiture : Valhalla, puis OSRM (2 serveurs). */
 export async function routeOnFootBikeOrCar(
   from: LatLng,
   to: LatLng,
   mode: 'walk' | 'bike' | 'car'
 ): Promise<RoutePlan> {
+  const failures: string[] = [];
   try {
     return await routeWithValhalla(from, to, mode);
-  } catch {
-    try {
-      return await routeWithOsrm(from, to, mode);
-    } catch {
-      throw new Error('Itinéraire indisponible pour ce mode.');
-    }
+  } catch (e) {
+    failures.push((e as Error).message);
   }
+  try {
+    return await routeWithOsrm(from, to, mode, 'osmde');
+  } catch (e) {
+    failures.push((e as Error).message);
+  }
+  try {
+    return await routeWithOsrm(from, to, mode, 'demo');
+  } catch (e) {
+    failures.push((e as Error).message);
+  }
+  throw new Error(
+    `Itinéraire ${TRAVEL_MODES.find((m) => m.id === mode)?.label.toLowerCase() || mode} indisponible pour le moment.`
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -650,7 +862,7 @@ export function formatRouteDistance(meters: number): string {
   return `${(meters / 1000).toFixed(1).replace('.', ',')} km`;
 }
 
-/** Itinéraire pour le mode demandé ; bascule automatique si le tracé echoue. */
+/** Itinéraire pour le mode demandé. */
 export async function planRoute(from: LatLng, to: LatLng, mode: TravelMode): Promise<RoutePlan> {
   if (mode === 'transit') return routeWithTransit(from, to);
   return routeOnFootBikeOrCar(from, to, mode);
@@ -672,3 +884,9 @@ export const TRANSIT_MODE_LABEL: Record<TransitLeg['mode'], string> = {
   train: 'Train',
   transit: 'Transport',
 };
+
+/** Convertit un point `Coords` en `LatLng` (compatibilité ascendante). */
+export function fromCoords(point: Coords | null | undefined): LatLng | null {
+  if (!point) return null;
+  return { lat: point.lat, lng: point.lng };
+}

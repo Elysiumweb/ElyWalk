@@ -172,6 +172,49 @@ firebase firestore:indexes   # vérifie l'état de construction
 Les index manquants peuvent aussi être générés depuis les liens affichés par
 l'application au moment de l'erreur.
 
+## Catalogue des défis (`challengeCatalog`) — 2.2.0
+
+Depuis la 2.2.0, un client ne peut plus s'attribuer une récompense de défi :
+le montant est lu dans la collection **`challengeCatalog/{challengeId}`**, écrite
+uniquement par l'administration (règle `allow write: if president()`).
+
+Créer un document par défi ouvert, avec exactement ces champs :
+
+```json
+{
+  "active": true,
+  "reward": 5,
+  "target": 50000,
+  "startsAt": "2026-11-01",
+  "endsAt": "2026-11-30"
+}
+```
+
+- `reward` est **obligatoire** et borné à 50 EC : la règle compare le montant
+  réclamé au montant du catalogue (`after.reward == catalog.reward`). Un défi
+  absent ou `active: false` ne crédite rien et l'application l'indique.
+- `endsAt` (AAAA-MM-JJ) ferme automatiquement la réclamation à la date indiquée.
+- Sans ce catalogue, les défis restent jouables mais **aucune récompense n'est
+  versée** : c'est volontaire (mieux vaut un défi non payé qu'un crédit
+  illimité).
+
+## Notes privées et audiences — migration 2.2.0
+
+`activitySessions.note` n'existe plus : la règle Firestore refuse désormais ce
+champ. Les notes des versions précédentes doivent être déplacées vers
+`users/{uid}/privateActivityNotes/{sessionId}` — c'est ce que fait
+`migratePrivateNotes(uid)` (`app/src/lib/db.ts`), à appeler depuis un écran
+d'administration ou une tâche unique de migration. Tant qu'elles ne sont pas
+migrées, les notes restent visibles sur le document (elles étaient déjà
+publiées) mais ne sont plus modifiables.
+
+Le partage par lien utilise un document `shareLinks/<sessionId>_<uid>` :
+identifiant déterministe (donc vérifiable par une règle sans requête sur un
+champ), lecture par identifiant uniquement (`list` interdit — sinon les liens
+seraient énumérables), et **suppression = révocation immédiate**. Ce document ne
+contient qu'un résumé (titre, date, distance, durée, légende) : le tracé GPS
+n'est jamais publié par un lien.
+
 ## Backend de confiance — Cloudflare Workers (F05/F06/F11, 100 % gratuit)
 
 Les Cloud Functions Firebase exigent le plan payant **Blaze**. ElyWalk utilise

@@ -73,14 +73,70 @@ export async function saveRoute(owner: UserProfile, input: { name: string; descr
   return ref.id;
 }
 
+export interface SavedRoutesPage {
+  items: SavedRoute[];
+  /** Curseurs de reprise pour chaque source (`own`, `public`). */
+  cursor: { own: number | null; shared: number | null };
+  hasMore: boolean;
+}
+
+const ROUTES_PAGE_SIZE = 20;
+
+/**
+ * Parcours personnels **et** publics, paginés par curseur.
+ *
+ * Avant : deux requêtes plafonnées à 50 documents chacune, triées en mémoire.
+ * Au-delà de 50 parcours, les plus anciens devenaient introuvables — et la
+ * recherche textuelle de l'écran ne portait que sur ces 100 documents chargés
+ * (F06). Ici chaque source est paginée indépendamment, sans limite fixe, et le
+ * curseur est un simple décalage mémorisé côté appelant (`offset`), ce qui
+ * suffit pour une bibliothèque personnelle et évite un index composite sur
+ * `updatedAt`.
+ */
+export async function listRoutesPage(
+  uid: string,
+  options: { offset?: { own: number; shared: number }; pageSize?: number } = {}
+): Promise<SavedRoutesPage> {
+  const pageSize = Math.min(50, Math.max(1, options.pageSize || ROUTES_PAGE_SIZE));
+  const ownOffset = options.offset?.own || 0;
+  const sharedOffset = options.offset?.shared || 0;
+  const own: QueryConstraint[] = [where('uid', '==', uid), orderBy('updatedAt', 'desc'), limit(ownOffset + pageSize + 1)];
+  const publicQuery: QueryConstraint[] = [where('visibility', '==', 'public'), orderBy('updatedAt', 'desc'), limit(sharedOffset + pageSize + 1)];
+  const [ownSnaps, sharedSnaps] = await Promise.all([
+    getDocs(query(collection(db, 'savedRoutes'), ...own)),
+    getDocs(query(collection(db, 'savedRoutes'), ...publicQuery)),
+  ]);
+  const ownDocs = ownSnaps.docs.slice(ownOffset, ownOffset + pageSize);
+  const sharedDocs = sharedSnaps.docs.slice(sharedOffset, sharedOffset + pageSize);
+  const unique = new Map<string, SavedRoute>();
+  for (const d of [...ownDocs, ...sharedDocs]) unique.set(d.id, { id: d.id, ...(d.data() as SavedRoute) });
+  return {
+    items: [...unique.values()].sort((a, b) => b.updatedAt - a.updatedAt),
+    cursor: {
+      own: ownSnaps.docs.length > ownOffset + pageSize ? ownOffset + pageSize : null,
+      shared: sharedSnaps.docs.length > sharedOffset + pageSize ? sharedOffset + pageSize : null,
+    },
+    hasMore: ownDocs.length === pageSize || sharedDocs.length === pageSize,
+  };
+}
+
+/**
+ * Tous les parcours accessibles (bibliothèque complète), page après page.
+ * Utilisé par la recherche globale de l'écran Parcours.
+ */
 export async function listRoutes(uid: string): Promise<SavedRoute[]> {
-  // Deux petites requêtes évitent de rendre publics les parcours privés.
-  const own = await getDocs(query(collection(db, 'savedRoutes'), where('uid', '==', uid), limit(50)));
-  const publicQuery: QueryConstraint[] = [where('visibility', '==', 'public'), orderBy('updatedAt', 'desc'), limit(50)];
-  const shared = await getDocs(query(collection(db, 'savedRoutes'), ...publicQuery));
-  const all = [...own.docs, ...shared.docs];
-  const unique = new Map(all.map(d => [d.id, { id: d.id, ...(d.data() as SavedRoute) }]));
-  return [...unique.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+  const all = new Map<string, SavedRoute>();
+  let offset = { own: 0, shared: 0 };
+  // Garde-fou : 50 pages de 20 = 1 000 parcours, largement au-delà de l'usage
+  // réel, tout en évitant une boucle infinie si le serveur renvoie toujours
+  // des documents.
+  for (let page = 0; page < 50; page += 1) {
+    const result = await listRoutesPage(uid, { offset, pageSize: ROUTES_PAGE_SIZE });
+    for (const route of result.items) if (route.id) all.set(route.id, route);
+    if (!result.hasMore) break;
+    offset = { own: result.cursor.own ?? offset.own, shared: result.cursor.shared ?? offset.shared };
+  }
+  return [...all.values()].sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
 export async function getRoute(id: string): Promise<SavedRoute | null> {

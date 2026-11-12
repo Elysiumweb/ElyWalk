@@ -73,6 +73,14 @@ async function shareTextFile(
 }
 
 /**
+ * Partdage d'un fichier JSON — utilisé par l'export complet du compte (F03),
+ * pour qu'il soit réellement remis à l'utilisateur et pas seulement affiché.
+ */
+export async function shareJsonFile(content: string, filename: string, title: string): Promise<ExportResult> {
+  return shareTextFile(content, filename, 'application/json', title, 'Export de mes données ElyWalk');
+}
+
+/**
  * Exporte une sortie en GPX 1.1 : importable dans Strava, Garmin Connect,
  * Google Earth, OsmAnd, etc.
  */

@@ -126,6 +126,11 @@
     <!-- Service de premier plan pour la sortie GPS en arrière-plan -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Rappels programmés à heure fixe (rappels de marche, rappel de sortie).
+         Sans ces autorisations, Android 12+ peut repousser ou supprimer
+         l'alarme et la notification n'apparaît jamais. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Carte interactive : localisation -->

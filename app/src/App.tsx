@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { App as CapApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -9,6 +9,7 @@ import TabBar from './components/TabBar';
 import AdBanner from './components/AdBanner';
 import AdConsentSheet from './components/AdConsentSheet';
 import { initAds, loadAppOpenAd, showAppOpenAdIfReady } from './lib/ads';
+import { flushSyncQueue, loadSyncQueue } from './lib/syncQueue';
 import { pedometer } from './lib/pedometer';
 import AuthPage from './pages/AuthPage';
 import HomePage from './pages/HomePage';
@@ -23,17 +24,22 @@ import LegalPage from './pages/LegalPage';
 import HistoryPage from './pages/HistoryPage';
 import PublicProfilePage from './pages/PublicProfilePage';
 import WhatsNewPage from './pages/WhatsNewPage';
+import DiagnosticsPage from './pages/DiagnosticsPage';
 import ChallengesPage from './pages/ChallengesPage';
 import ActivityPage from './pages/ActivityPage';
 import ActivityDetailPage from './pages/ActivityDetailPage';
 import EventsPage from './pages/EventsPage';
 import RoutesPage from './pages/RoutesPage';
 import ProductStatus from './components/ProductStatus';
-import { setupNotifications } from './lib/notifications';
+import SyncStatus from './components/SyncStatus';
+import { setupNotifications, syncPushRegistration, listenNotificationNavigation } from './lib/notifications';
+import { listenEventReminderTaps } from './lib/eventReminders';
+import { installDiagnostics } from './lib/diagnostics';
 
 function Shell() {
   const { user, profile, loading, setPendingReferralCode } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
 
   useEffect(() => {
     const ref = new URLSearchParams(location.search).get('ref');
@@ -49,7 +55,25 @@ function Shell() {
     })();
   }, [user?.uid]);
 
-  useEffect(() => { if (user) setupNotifications(user.uid).catch(console.warn); }, [user?.uid]);
+  // Notifications : à la connexion on installe les canaux, les rappels et le
+  // jeton push du compte courant ; à la déconnexion on retire le jeton de cet
+  // appareil (sinon l'ancien compte continuait de recevoir les alertes).
+  // F06 — journal local des erreurs : installé avant tout le reste pour
+  // capturer les échecs de démarrage (Firebase, stockage, permissions).
+  useEffect(() => { installDiagnostics(); }, []);
+
+  useEffect(() => {
+    if (user?.uid) setupNotifications(user.uid).catch(console.warn);
+    else syncPushRegistration(null).catch(console.warn);
+  }, [user?.uid]);
+
+  // Toucher une notification ouvre l'écran concerné (Rencontres, Amis, …).
+  useEffect(() => listenNotificationNavigation((path) => navigate(path)), [navigate]);
+  // Rappels de sortie programmés localement : même comportement.
+  useEffect(
+    () => listenEventReminderTaps((eventId) => navigate('/events', { state: { eventId } })),
+    [navigate],
+  );
   useEffect(() => { const open=(raw:string)=>{const url=new URL(raw);const ref=url.searchParams.get('ref')||(url.protocol==='elywalk:'?url.searchParams.get('code'):null);if(ref)setPendingReferralCode(ref.toUpperCase())}; CapApp.getLaunchUrl().then(r=>r?.url&&open(r.url));const sub=CapApp.addListener('appUrlOpen',e=>open(e.url));return()=>{sub.then(h=>h.remove())}; }, [setPendingReferralCode]);
 
   // Initialisation du SDK Unity LevelPlay dès le lancement, AVANT toute
@@ -60,6 +84,13 @@ function Shell() {
     if (!Capacitor.isNativePlatform()) return;
     initAds(profile?.uid).catch(console.warn);
   }, [profile?.uid]);
+
+  // F04 — rejoue la file d'envoi dès qu'un compte est disponible : une sortie
+  // terminée hors connexion part sans que l'utilisateur ait à rouvrir l'écran.
+  useEffect(() => {
+    if (!user?.uid) return;
+    void loadSyncQueue().then(() => flushSyncQueue());
+  }, [user?.uid]);
 
   const appOpenInitializedRef = useRef(false);
 
@@ -128,10 +159,12 @@ function Shell() {
         <Route path="/events" element={<EventsPage />} />
         <Route path="/routes" element={<RoutesPage />} />
         <Route path="/whats-new" element={<WhatsNewPage />} />
+        <Route path="/diagnostics" element={<DiagnosticsPage />} />
         <Route path="/legal/:doc" element={<LegalPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       <ProductStatus />
+      <SyncStatus />
       <AdBanner />
       <TabBar />
       <AdConsentSheet />

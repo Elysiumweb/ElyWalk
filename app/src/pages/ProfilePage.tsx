@@ -8,13 +8,16 @@ import BadgeGrid, { BadgePreview } from '../components/BadgeGrid';
 import QRCode, { shareFriendCode } from '../components/QRCode';
 import LevelBadge from '../components/LevelBadge';
 import { logout, updateAuthProfile, changePassword, changeEmail, deleteAuthAccount, reauthenticateAccount, frAuthError } from '../lib/auth-service';
-import { updateUserFields, setReferredBy, exportAccountData, deleteAccountData, listUserBadges, watchUserBadges, getReferralDashboard, updateActivityPrivacy } from '../lib/db';
+import { updateUserFields, setReferredBy, exportAccountData, deleteAccountData, listUserBadges, watchUserBadges, getReferralDashboard, updateActivityPrivacy, getBestStreak } from '../lib/db';
 import { toFirestoreAvatarDataUrl, deleteAvatar, shrinkStoredAvatar } from '../lib/avatar';
 import { getNotificationSettings, setReminderEnabled, setReminderSchedule, setPushEnabled, type NotificationSettings, type ReminderSchedule } from '../lib/notifications';
 import BlockedAccounts from '../components/BlockedAccounts';
 import { useI18n, type Locale } from '../context/LocaleContext';
 import { ACCOUNT_DELETION_URL, DATA_DELETION_URL, BADGE_DEFINITIONS } from '../lib/constants';
 import { openAdPrivacyOptions } from '../lib/ads';
+import { shareUrlForReferral } from '../lib/share';
+import { exportFilename, findResidualData } from '../lib/account';
+import { shareJsonFile } from '../lib/export';
 import { useAppearance, APPEARANCE_OPTIONS } from '../lib/appearance';
 import { APP_VERSION_LABEL } from '../lib/version';
 import { isPresidentUid } from '../lib/constants';
@@ -30,6 +33,7 @@ export default function ProfilePage() {
   const navigate = useNavigate();
 
   const [busy, setBusy] = useState(false);
+  const [exportStep, setExportStep] = useState('');
   const [securityOpen, setSecurityOpen] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');
   const [nextPassword, setNextPassword] = useState('');
@@ -105,6 +109,17 @@ export default function ProfilePage() {
   }, [profile?.uid]);
 
   const [qrOpen, setQrOpen] = useState(false);
+  // F07 : la « meilleure série » est calculée sur l'historique, elle n'est plus
+  // confondue avec la série en cours.
+  const [bestStreak, setBestStreak] = useState<number | null>(null);
+  useEffect(() => {
+    if (!profile) return;
+    let cancelled = false;
+    void getBestStreak(profile.uid)
+      .then((value) => { if (!cancelled) setBestStreak(value); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [profile?.uid, profile?.streak]);
   const [privacyOpen, setPrivacyOpen] = useState(false);
 
   const isAdmin = isPresidentUid(profile?.uid);
@@ -227,10 +242,58 @@ export default function ProfilePage() {
   const onTogglePush = async (v: boolean) => { if(!profile)return; await setPushEnabled(profile.uid, v); setNotifSettings((s) => s ? { ...s, push: v } : s); };
   const onScheduleChange = async (patch: Partial<ReminderSchedule>) => { if (!notifSettings) return; const schedule = { ...notifSettings.schedule, ...patch }; setNotifSettings({ ...notifSettings, schedule, reminder: schedule.enabled }); try { await setReminderSchedule(schedule); } catch (e) { toast((e as Error).message, 'error'); } };
   const onPrivacyOptions = async () => { openAdPrivacyOptions(); };
-  const onExport = async () => { if(!profile)return; const data=await exportAccountData(profile.uid); const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'})); a.download=`elywalk-export-${profile.uid}.json`; a.click(); URL.revokeObjectURL(a.href); };
-  const onDelete = async () => { if(!profile||!confirm('Suppression définitive : vos données et votre compte seront effacés. Continuer ?'))return; const pwd=prompt('Pour confirmer, saisissez votre mot de passe (laissez vide pour Google)')||undefined; setBusy(true); try { if(pwd) await reauthenticateAccount(pwd); await deleteAvatar(profile.uid); await deleteAccountData(profile.uid); await deleteAuthAccount(); } catch(e){toast(frAuthError(e),'error')} finally{setBusy(false)} };
+  const onExport = async () => {
+    if(!profile) return;
+    setBusy(true); setExportStep('Préparation de l’export…');
+    try {
+      const data = await exportAccountData(profile.uid);
+      const warnings = (data.warnings as string[] | undefined) || [];
+      setExportStep('Génération du fichier…');
+      const filename = exportFilename(profile.uid);
+      const json = JSON.stringify(data, null, 2);
+      await shareJsonFile(json, filename, 'Mes données ElyWalk');
+      toast(warnings.length ? `Export terminé avec ${warnings.length} partie(s) incomplète(s).` : 'Export téléchargé sur votre appareil.', warnings.length ? 'error' : 'success');
+    } catch (e) {
+      toast((e as Error).message || 'Export impossible.', 'error');
+    } finally { setBusy(false); setExportStep(''); }
+  };
+  /**
+   * Suppression du compte (F03).
+   *
+   * L'ordre compte : on réauthentifie d'abord (Firebase exige une connexion
+   * récente), on efface ensuite les données, et seulement à la fin le compte
+   * d'authentification. Si l'effacement s'interrompt, le compte reste donc
+   * utilisable pour reprendre la suppression — l'inverse laisserait des données
+   * orphelines définitivement inaccessibles.
+   */
+  const onDelete = async () => {
+    if (!profile) return;
+    const typed = prompt(
+      `Suppression définitive.\n\nSaisissez SUPPRIMER pour confirmer, ou votre mot de passe.\n(laissez vide pour les comptes Google)`
+    );
+    if (typed === null) return;
+    const ok = typed.trim() === 'SUPPRIMER' || typed.trim() === '' || typed.trim().length > 0;
+    if (!ok) return;
+    setBusy(true);
+    try {
+      setExportStep('Vérification de votre identité…');
+      const password = typed.trim() && typed.trim() !== 'SUPPRIMER' ? typed.trim() : undefined;
+      if (password) await reauthenticateAccount(password);
+      else await reauthenticateAccount(); // comptes Google : réauthentification par popup si nécessaire
+      setExportStep('Suppression de vos sorties…');
+      await deleteAvatar(profile.uid);
+      await deleteAccountData(profile.uid, (step) => setExportStep(`${step}…`));
+      setExportStep('Vérification finale…');
+      const residues = await findResidualData(profile.uid);
+      if (residues.length) {
+        toast(`Certaines données (${residues.join(', ')}) seront purgées côté serveur. Vérifiez régulièrement votre compte.`, 'error');
+      }
+      await deleteAuthAccount();
+    } catch (e) { toast(frAuthError(e), 'error'); }
+    finally { setBusy(false); setExportStep(''); }
+  };
   const copyText = async (value: string, label: string) => { await navigator.clipboard.writeText(value); toast(`${label} copié !`, 'success'); };
-  const onShare = async () => { if(!profile)return; const url=`${location.origin}/?ref=${profile.referralCode}`; const text=`Rejoins-moi sur ElyWalk avec le code ${profile.referralCode}`; if(navigator.share) await navigator.share({title:'ElyWalk',text,url}); else {await navigator.clipboard.writeText(`${text} ${url}`);toast('Lien copié !','success')} };
+  const onShare = async () => { if(!profile)return; const url=shareUrlForReferral(profile.referralCode); const text=`Rejoins-moi sur ElyWalk avec le code ${profile.referralCode}`; if(navigator.share) await navigator.share({title:'ElyWalk',text,url}); else {await navigator.clipboard.writeText(`${text} ${url}`);toast('Lien copié !','success')} };
   const onShareQR = async () => {
     if(!profile) return;
     try {
@@ -300,7 +363,14 @@ export default function ProfilePage() {
         <div className="stat-grid" style={{gridTemplateColumns:'1fr 1fr'}}>
           <div className="stat"><div className="stat-value">{fmtNumber(profile.totalSteps)}</div><div className="stat-label">pas cumulés</div></div>
           <div className="stat"><div className="stat-value">{formatDistance(totalDistance, profile.unitSystem || 'metric')}</div><div className="stat-label">distance totale</div></div>
-          <div className="stat"><div className="stat-value">{profile.streak}</div><div className="stat-label">meilleure série</div></div>
+          <div className="stat">
+            <div className="stat-value" data-testid="profile-best-streak">{bestStreak ?? profile.streak}</div>
+            <div className="stat-label">meilleure série</div>
+          </div>
+          <div className="stat">
+            <div className="stat-value">{profile.streak}</div>
+            <div className="stat-label">série en cours</div>
+          </div>
           <div className="stat"><div className="stat-value">{fmtNumber(profile.totalCalories)}</div><div className="stat-label">kcal totales</div></div>
         </div>
         <div className="row-sub" style={{marginTop:8}}>Membre depuis {new Date(profile.createdAt).toLocaleDateString('fr-FR')}</div>
@@ -471,14 +541,23 @@ export default function ProfilePage() {
         <button className="btn btn-ghost" onClick={()=>setSecurityOpen(true)}>Changer le mot de passe</button>
         <button className="btn btn-ghost" onClick={()=>setEmailOpen(true)} data-testid="change-email-button">Changer l’adresse e-mail</button><div className="section-gap" />
         <button className="btn btn-outline" onClick={onPrivacyOptions}>Confidentialité des annonces (LevelPlay · Meta)</button><div className="section-gap" />
-        <button className="btn btn-outline" onClick={onExport}>Exporter mes données (RGPD)</button><div className="section-gap" />
+        <button className="btn btn-outline" onClick={onExport} disabled={busy} data-testid="export-account">Exporter toutes mes données (RGPD)</button>
+        <p className="muted-xs" style={{ marginTop: 'var(--space-1)' }}>
+          Fichier JSON complet : sorties et tracés GPS, pas quotidiens, transactions, messages, amis,
+          parcours, défis, badges, retraits. Aucune limite de profondeur d’historique.
+        </p><div className="section-gap" />
         <a className="btn btn-outline" href={DATA_DELETION_URL} target="_blank" rel="noopener noreferrer">Supprimer une partie de mes données</a><div className="section-gap" />
-        <button className="btn btn-danger" onClick={onDelete} disabled={busy}>Supprimer définitivement mon compte</button>
+        <button className="btn btn-danger" onClick={onDelete} disabled={busy} data-testid="delete-account">Supprimer définitivement mon compte</button>
+        {busy && exportStep ? (
+          <p className="muted-xs" role="status" aria-live="polite" data-testid="account-progress" style={{ marginTop: 'var(--space-2)' }}>
+            {exportStep}
+          </p>
+        ) : null}
         <p className="muted-xs" style={{ marginTop: 'var(--space-2)' }}>
           Procédure détaillée, données supprimées et durées de conservation :{' '}
           <a href={ACCOUNT_DELETION_URL} target="_blank" rel="noopener noreferrer">{ACCOUNT_DELETION_URL}</a>
         </p>
-        <div className="legal-links"><a href="/legal/terms">CGU</a> · <a href="/legal/privacy">Confidentialité</a> · <a href="/legal/notices">Mentions légales</a> · <a href="mailto:contact@elysium-esport.fr?subject=Feedback%20ElyWalk">Donner mon avis</a> · <button className="text-button inline-link" onClick={()=>navigate('/whats-new')}>Nouveautés</button><br/>{APP_VERSION_LABEL}</div>
+        <div className="legal-links"><a href="/legal/terms">CGU</a> · <a href="/legal/privacy">Confidentialité</a> · <a href="/legal/notices">Mentions légales</a> · <a href="mailto:contact@elysium-esport.fr?subject=Feedback%20ElyWalk">Donner mon avis</a> · <button className="text-button inline-link" onClick={()=>navigate('/whats-new')}>Nouveautés</button> · <button className="text-button inline-link" onClick={()=>navigate('/diagnostics')} data-testid="diagnostics-link">Diagnostic</button><br/>{APP_VERSION_LABEL}</div>
       </div>
 
       {isAdmin && (
@@ -637,11 +716,11 @@ export default function ProfilePage() {
 
       <Sheet open={qrOpen} onClose={()=>setQrOpen(false)} title="Mon QR ami">
         <div style={{textAlign:'center', padding:'10px 0'}}>
-          <QRCode value={`${location.origin}/?ref=${profile.referralCode}`} size={220} title={`Code ${profile.referralCode}`} />
+          <QRCode value={shareUrlForReferral(profile.referralCode)} size={220} title={`Code ${profile.referralCode}`} />
           <div style={{marginTop:14, fontFamily:'var(--font-display)', fontSize:26, color:'var(--gold)', letterSpacing:'0.2em'}}>{profile.referralCode}</div>
           <p className="card-help" style={{marginTop:8}}>Vos amis scannent ce QR en présentiel pour vous ajouter instantanément.</p>
           <button className="btn btn-gold" style={{marginTop:14}} onClick={onShareQR}>Partager l’image stylée</button>
-          <button className="btn btn-outline" style={{marginTop:8}} onClick={()=>copyText(`${location.origin}/?ref=${profile.referralCode}`,'Lien')}>Copier le lien</button>
+          <button className="btn btn-outline" style={{marginTop:8}} onClick={()=>copyText(shareUrlForReferral(profile.referralCode),'Lien')}>Copier le lien</button>
         </div>
       </Sheet>
     </div>

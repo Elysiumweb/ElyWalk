@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { getLeaderboard, listDailySteps, watchFriendships } from '../lib/db';
+import { getLeaderboard, getProfiles, listDailySteps, watchFriendships, type LeaderboardMetric } from '../lib/db';
 import Avatar from '../components/Avatar';
+import { ErrorState, friendlyError, Skeleton } from '../components/AsyncState';
 import { fmtCoins, fmtNumber } from '../lib/coins';
 import { isPresidentUid, PRESIDENT_UID, getWalkerLevel } from '../lib/constants';
 import type { UserProfile } from '../lib/types';
@@ -11,16 +12,72 @@ export default function LeaderboardPage() {
   const { profile } = useAuth(); const navigate=useNavigate();
   const [rows, setRows] = useState<UserProfile[]>([]); const [mode,setMode]=useState<'coins'|'today'|'steps'|'week'|'month'|'friends'>('coins'); const [friendIds,setFriendIds]=useState<string[]>([]); const [periodScores,setPeriodScores]=useState<Record<string,{week:number;month:number}>>({});
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<unknown>(null);
+  // F10 — les périodes 7/30 jours lisaient les documents quotidiens de chaque
+  // ligne du classement (100 × 30 lectures à chaque changement d'onglet, soit
+  // plusieurs secondes de gel sur un milieu de gamme). Les documents par jour
+  // sont désormais mis en cache par UID : un changement d'onglet ne relit rien.
+  const daysCacheRef = useRef(new Map<string, { at: number; days: Awaited<ReturnType<typeof listDailySteps>> }>());
+  const DAYS_TTL_MS = 5 * 60 * 1000;
   const currentRowRef = useRef<HTMLDivElement>(null);
 
-  const load = async () => {
-    setLoading(true); const users=await getLeaderboard(50); setRows(users);
-    const now=Date.now(), week=now-7*86400000, month=now-30*86400000; const scores:Record<string,{week:number;month:number}>={};
-    await Promise.all(users.map(async u=>{const days=await listDailySteps(u.uid,30);scores[u.uid]={week:days.filter(d=>d.validatedAt>=week).reduce((s,d)=>s+d.steps,0),month:days.filter(d=>d.validatedAt>=month).reduce((s,d)=>s+d.steps,0)}}));
-    setPeriodScores(scores); setLoading(false);
+  /**
+   * F07 — le classement ne part plus du top 50 par solde d'ElyCoins : la
+   * requête porte sur la métrique affichée (pas cumulés, pas du jour, solde).
+   * Les périodes 7 / 30 jours sont agrégées à partir des documents quotidiens,
+   * et le classement « Mes amis » interroge **tous** les amis (et pas seulement
+   * ceux qui figuraient dans le top 50).
+   */
+  const load = async (current: typeof mode = mode) => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const metric: LeaderboardMetric = current === 'today' ? 'today' : current === 'steps' ? 'steps' : 'coins';
+      const users = await getLeaderboard(100, metric);
+      setRows(users);
+      // Les périodes n'ont besoin d'être recalculées qu'une fois par onglet et
+      // par cache : on ne bloque pas l'affichage du reste du classement si elles
+      // échouent (une requête 7 jours refusée ne doit pas vider l'écran).
+      const now = Date.now(), week = now - 7 * 86400000, month = now - 30 * 86400000;
+      const scores: Record<string, { week: number; month: number }> = {};
+      await Promise.all(users.map(async (u) => {
+        const cached = daysCacheRef.current.get(u.uid);
+        let days = cached && now - cached.at < DAYS_TTL_MS ? cached.days : null;
+        if (!days) {
+          days = await listDailySteps(u.uid, 30).catch(() => []);
+          daysCacheRef.current.set(u.uid, { at: now, days });
+        }
+        scores[u.uid] = {
+          week: days.filter((d) => d.validatedAt >= week).reduce((sum, d) => sum + d.steps, 0),
+          month: days.filter((d) => d.validatedAt >= month).reduce((sum, d) => sum + d.steps, 0),
+        };
+      }));
+      setPeriodScores(scores);
+      // Amis hors du top : chargés à part pour que le classement entre amis soit
+      // complet quel que soit le solde.
+      const missing = friendIds.filter((uid) => !users.some((u) => u.uid === uid));
+      if (missing.length) {
+        const extra = await getProfiles(missing).catch(() => []);
+        setRows((prev) => [...prev, ...extra.filter((u) => !prev.some((p) => p.uid === u.uid))]);
+      }
+    } catch (e) {
+      // F10 — un échec de classement s'affiche et peut être relancé, au lieu de
+      // laisser une liste vide trompeuse.
+      setLoadError(e);
+    } finally {
+      setLoading(false);
+    }
   };
-  useEffect(() => { load().catch(()=>setLoading(false)); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(()=>profile?watchFriendships(profile.uid,setFriendIds):undefined,[profile?.uid]);
+  useEffect(() => { void load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!profile) return;
+    const unsub = watchFriendships(profile.uid, (ids) => {
+      setFriendIds(ids);
+      void load();
+    });
+    return unsub;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile?.uid]);
 
   const score=(u:UserProfile)=>mode==='today'?(u.todaySteps||0):mode==='steps'?u.totalSteps:mode==='week'?(periodScores[u.uid]?.week||0):mode==='month'?(periodScores[u.uid]?.month||0):u.elycoins;
   const allRows = profile && !rows.some(u => u.uid === profile.uid) ? [...rows, profile] : rows;
@@ -37,9 +94,17 @@ export default function LeaderboardPage() {
         </div>
       </div>
 
-      <div className="chip-row"><button className={`chip ${mode==='coins'?'chip-active':''}`} onClick={()=>setMode('coins')}>ElyCoins</button><button className={`chip ${mode==='today'?'chip-active':''}`} onClick={()=>setMode('today')}>Pas du jour</button><button className={`chip ${mode==='steps'?'chip-active':''}`} onClick={()=>setMode('steps')}>Pas cumulés</button><button className={`chip ${mode==='week'?'chip-active':''}`} onClick={()=>setMode('week')}>7 jours</button><button className={`chip ${mode==='month'?'chip-active':''}`} onClick={()=>setMode('month')}>30 jours</button><button className={`chip ${mode==='friends'?'chip-active':''}`} onClick={()=>setMode('friends')}>Mes amis</button><button className="chip" onClick={load}>Actualiser</button></div>
+      <div className="chip-row"><button className={`chip ${mode==='coins'?'chip-active':''}`} onClick={()=>setMode('coins')}>Solde EC</button><button className={`chip ${mode==='today'?'chip-active':''}`} onClick={()=>setMode('today')}>Pas du jour</button><button className={`chip ${mode==='steps'?'chip-active':''}`} onClick={()=>setMode('steps')}>Pas cumulés</button><button className={`chip ${mode==='week'?'chip-active':''}`} onClick={()=>setMode('week')}>7 jours</button><button className={`chip ${mode==='month'?'chip-active':''}`} onClick={()=>setMode('month')}>30 jours</button><button className={`chip ${mode==='friends'?'chip-active':''}`} onClick={()=>setMode('friends')}>Mes amis</button><button className="chip" onClick={() => void load()}>Actualiser</button></div>
       {loading ? (
-        <div className="card leaderboard-skeleton" aria-label="Chargement du classement">{[1,2,3,4,5].map(i=><div className="skeleton-row" key={i}><span/><div><b/><small/></div></div>)}</div>
+        <div className="card"><Skeleton rows={5} label="Chargement du classement" /></div>
+      ) : loadError ? (
+        <div className="card">
+          <ErrorState
+            error={loadError}
+            title={/permission|denied/i.test(friendlyError(loadError)) ? 'Classement réservé' : 'Classement indisponible'}
+            onRetry={() => void load()}
+          />
+        </div>
       ) : ranked.length === 0 ? (
         <div className="card">
           <div className="empty-state" data-testid="leaderboard-empty-state">

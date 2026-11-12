@@ -5,6 +5,7 @@ import { useToast } from '../components/Toast';
 import { useI18n } from '../context/LocaleContext';
 import Sheet from '../components/Sheet';
 import Avatar from '../components/Avatar';
+import AddressAutocomplete from '../components/AddressAutocomplete';
 import DirectionsPanel from '../components/DirectionsPanel';
 import { getCurrentPosition } from '../lib/geo';
 import { createCommunityEvent, watchCommunityEvents, joinCommunityEvent, leaveCommunityEvent, updateCommunityEvent, getProfiles } from '../lib/db';
@@ -46,6 +47,13 @@ export default function EventsPage() {
   const [title, setTitle] = useState(''); const [desc, setDesc] = useState('');
   const [date, setDate] = useState(todayLocalInput()); const [time, setTime] = useState('10:00');
   const [estId, setEstId] = useState(''); const [address, setAddress] = useState(''); const [capacity, setCapacity] = useState('');
+  // Coordonnées de l'adresse choisie dans la liste de suggestions : elles
+  // alimentent la carte et l'itinéraire de la sortie (avant, seul le texte de
+  // l'adresse était conservé, l'itinéraire partait donc d'un géocodage).
+  const [addressPoint, setAddressPoint] = useState<{ lat: number; lng: number } | null>(null);
+  // Vues « À venir / Mes inscriptions / Passées » (F09).
+  const [view, setView] = useState<'upcoming' | 'mine' | 'past'>('upcoming');
+  const [visibleCount, setVisibleCount] = useState(10);
   const [busy, setBusy] = useState(false);
   const [participants, setParticipants] = useState<UserProfile[]>([]);
   const [participantEvent, setParticipantEvent] = useState<CommunityEvent | null>(null);
@@ -56,10 +64,11 @@ export default function EventsPage() {
   const [directionsOrigin, setDirectionsOrigin] = useState<{ lat: number; lng: number } | null>(null);
 
   useEffect(() => watchCommunityEvents(items => { setEvents(items); void rescheduleEventReminders(items); }), []);
+  useEffect(() => { setVisibleCount(10); }, [view]);
   useEffect(() => { listEstablishments().then(setEstablishments).catch(() => undefined); }, []);
 
-  const reset = () => { setTitle(''); setDesc(''); setAddress(''); setCapacity(''); setEstId(''); setEditing(null); setDate(todayLocalInput()); };
-  const openEdit = (ev: CommunityEvent) => { setEditing(ev); setTitle(ev.title); setDesc(ev.description); setAddress(ev.location || ''); setCapacity(ev.maxParticipants?.toString() || ''); setDate(ev.date); setTime(ev.time || '10:00'); setOpen(true); };
+  const reset = () => { setTitle(''); setDesc(''); setAddress(''); setAddressPoint(null); setCapacity(''); setEstId(''); setEditing(null); setDate(todayLocalInput()); };
+  const openEdit = (ev: CommunityEvent) => { setEditing(ev); setTitle(ev.title); setDesc(ev.description); setAddress(ev.location || ''); setAddressPoint(ev.lat != null && ev.lng != null ? { lat: ev.lat, lng: ev.lng } : null); setCapacity(ev.maxParticipants?.toString() || ''); setDate(ev.date); setTime(ev.time || '10:00'); setOpen(true); };
   const submit = async () => {
     if (!profile) return;
     if (!title.trim() || !date || !time) { toast('Titre, date et heure sont requis.', 'error'); return; }
@@ -77,8 +86,11 @@ export default function EventsPage() {
     setBusy(true);
     try {
       const est = establishments.find(e => e.id === estId);
-      if (editing) await updateCommunityEvent(profile.uid, editing.id!, { title: title.trim(), description: desc.trim(), location: address.trim() || est?.address, date, time, message: 'La date, l’heure ou le lieu de la sortie a été modifié.' });
-      else await createCommunityEvent(profile, { title: title.trim(), description: desc.trim() || 'Sortie communautaire ElyWalk', establishmentId: est?.id, establishmentName: est?.name, location: address.trim() || est?.address, lat: est?.lat, lng: est?.lng, date, time, maxParticipants: max });
+      const location = address.trim() || est?.address;
+      const lat = addressPoint?.lat ?? est?.lat;
+      const lng = addressPoint?.lng ?? est?.lng;
+      if (editing) await updateCommunityEvent(profile.uid, editing.id!, { title: title.trim(), description: desc.trim(), location, lat, lng, date, time, message: 'La date, l’heure ou le lieu de la sortie a été modifié.' });
+      else await createCommunityEvent(profile, { title: title.trim(), description: desc.trim() || 'Sortie communautaire ElyWalk', establishmentId: est?.id, establishmentName: est?.name, location, lat, lng, date, time, maxParticipants: max });
       toast(editing ? 'Événement modifié, participants prévenus.' : 'Événement créé !', 'success'); setOpen(false); reset();
     } catch (e) { toast((e as Error).message, 'error'); } finally { setBusy(false); }
   };
@@ -93,6 +105,34 @@ export default function EventsPage() {
   const openReminder = async (ev: CommunityEvent) => { const setting = await getEventReminder(ev.id!); setReminderEnabled(setting.enabled); setReminderMinutes(setting.minutes); setReminderEvent(ev); };
   const saveReminder = async () => { if (!reminderEvent) return; try { await setEventReminder(reminderEvent, reminderEnabled, reminderMinutes); toast(reminderEnabled ? 'Rappel programmé.' : 'Rappel désactivé.', 'success'); setReminderEvent(null); } catch (e) { toast((e as Error).message, 'error'); } };
   const openDirections = (ev: CommunityEvent) => setDirectionsEvent(ev);
+
+  /**
+   * Filtrage des trois vues. Une sortie est « passée » dès que son départ est
+   * dépassé (ou si elle est annulée et déjà commencée) ; une sortie sans date
+   * exploitable reste visible dans « À venir » plutôt que de disparaître.
+   */
+  const filteredEvents = (() => {
+    const now = Date.now();
+    const withStart = events.map((ev) => ({ ev, start: eventDate(ev).getTime() }));
+    const sorted = withStart.sort((a, b) => {
+      const aValid = Number.isFinite(a.start);
+      const bValid = Number.isFinite(b.start);
+      if (view === 'past') return (bValid ? b.start : 0) - (aValid ? a.start : 0);
+      if (!aValid && !bValid) return 0;
+      if (!aValid) return 1;
+      if (!bValid) return -1;
+      return a.start - b.start;
+    });
+    return sorted
+      .filter(({ ev, start }) => {
+        const isPast = Number.isFinite(start) && start < now - 60 * 60 * 1000;
+        const joined = !!profile && (ev.participants.includes(profile.uid) || (ev.waitlist || []).includes(profile.uid));
+        if (view === 'past') return isPast;
+        if (view === 'mine') return joined && !isPast;
+        return !isPast;
+      })
+      .map(({ ev }) => ev);
+  })();
   /** Localisation demandée depuis la feuille d'itinéraire (Silent en cas de refus). */
   const locateForDirections = async () => {
     try {
@@ -106,7 +146,30 @@ export default function EventsPage() {
   return <div className="screen" data-testid="events-screen">
     <div className="screen-header"><div><h1 className="screen-title">Rencontres</h1><div className="screen-sub">Marcher ensemble · établissements partenaires</div></div><button className="btn btn-ghost btn-sm" onClick={() => nav(-1)}>Retour</button></div>
     <div className="card"><div className="card-title">Sorties communautaires Elysium</div><p className="card-help">Organisez ou rejoignez une marche. Les rappels sont facultatifs et les inscrits sont prévenus des changements.</p><button className="btn btn-gold" onClick={() => { reset(); setOpen(true); }}>+ Proposer une sortie</button></div>
-    {events.length === 0 ? <div className="card empty-state"><div className="display">Aucun événement</div>Soyez le premier à proposer une marche ensemble !</div> : events.map(ev => {
+    {/*
+      F09 — trois vues explicites. Avant, la liste s'arrêtait aux vingt
+      premières dates croissantes sans filtre : des sorties passées occupaient
+      toute la sélection et les événements à venir n'apparaissaient jamais.
+    */}
+    <div className="chip-row" role="tablist" aria-label="Filtrer les rencontres" data-testid="events-views">
+      {([
+        { id: 'upcoming', label: 'À venir' },
+        { id: 'mine', label: 'Mes inscriptions' },
+        { id: 'past', label: 'Passées' },
+      ] as const).map((item) => (
+        <button
+          key={item.id}
+          role="tab"
+          aria-selected={view === item.id}
+          className={`chip ${view === item.id ? 'chip-active' : ''}`}
+          onClick={() => { setView(item.id); setVisibleCount(10); }}
+          data-testid={`events-view-${item.id}`}
+        >
+          {item.label}
+        </button>
+      ))}
+    </div>
+    {filteredEvents.length === 0 ? <div className="card empty-state" data-testid="events-empty"><div className="display">{view === 'past' ? 'Aucune sortie passée' : view === 'mine' ? 'Aucune inscription' : 'Aucun événement à venir'}</div>{view === 'mine' ? 'Rejoignez une sortie depuis l’onglet « À venir ».' : 'Soyez le premier à proposer une marche ensemble !'}</div> : filteredEvents.slice(0, visibleCount).map(ev => {
       const mine = profile?.uid === ev.creatorUid; const joined = !!profile && ev.participants.includes(profile.uid); const waiting = !!profile && (ev.waitlist || []).includes(profile.uid); const full = !!ev.maxParticipants && ev.participants.length >= ev.maxParticipants;
       return <div key={ev.id} className={`card ${ev.status === 'cancelled' ? 'event-cancelled' : ''}`} data-testid="event-card">
         <div className="row-between"><div><div className="title-sm">{ev.title}</div><div className="row-sub">📅 {formatDate(eventDate(ev), { dateStyle: 'full', timeStyle: 'short' })}</div><div className="row-sub">📍 {ev.location || ev.establishmentName || 'Lieu à préciser'}</div></div><button className="badge" onClick={() => void showParticipants(ev)}>{ev.participants.length}{ev.maxParticipants ? ` / ${ev.maxParticipants}` : ''} inscrits</button></div>
@@ -117,11 +180,28 @@ export default function EventsPage() {
         <small className="muted-xs" style={{ display: 'block', marginTop: 'var(--space-1)' }}>Créé par {ev.creatorName}</small>
       </div>;
     })}
+    {filteredEvents.length > visibleCount && (
+      <button
+        className="btn btn-outline"
+        onClick={() => setVisibleCount((count) => count + 10)}
+        data-testid="events-load-more"
+      >
+        Afficher plus de sorties ({filteredEvents.length - visibleCount} restantes)
+      </button>
+    )}
     <Sheet open={open} onClose={() => setOpen(false)} title={editing ? 'Modifier la sortie' : 'Nouvel événement'}>
       <div className="field"><label>Titre</label><input className="input" value={title} onChange={e => setTitle(e.target.value)} maxLength={80} /></div><div className="field"><label>Description</label><textarea className="input" value={desc} onChange={e => setDesc(e.target.value)} maxLength={600} rows={3} /></div><div className="two-col"><div className="field"><label>Date</label><input className="input" type="date" value={date} min={todayLocalInput()} onChange={e => setDate(e.target.value)} /></div><div className="field"><label>Heure locale</label><input className="input" type="time" value={time} onChange={e => setTime(e.target.value)} /></div></div>
       <small className="field-help">Heure du fuseau de votre appareil{LOCAL_TIME_ZONE ? ` (${LOCAL_TIME_ZONE})` : ''} — la date et l’heure s’affichent ensuite selon la langue choisie.</small>
       {!editing && <div className="field"><label>Établissement partenaire (optionnel)</label><select className="input" value={estId} onChange={e => setEstId(e.target.value)}><option value="">Aucun — lieu libre</option>{establishments.map(est => <option key={est.id} value={est.id}>{est.name}</option>)}</select></div>}
-      <div className="field"><label>Adresse / point de rendez-vous</label><input className="input" value={address} onChange={e => setAddress(e.target.value)} maxLength={200} placeholder="Ex. Entrée principale du parc" /></div>{!editing && <div className="field"><label>Capacité maximale (vide = illimitée)</label><input className="input" type="number" min={2} max={500} value={capacity} onChange={e => setCapacity(e.target.value)} placeholder="Ex. 20" /></div>}
+      <AddressAutocomplete
+        label="Adresse / point de rendez-vous"
+        value={address}
+        onChange={(value) => { setAddress(value); setAddressPoint(null); }}
+        onSelect={(suggestion) => setAddressPoint({ lat: suggestion.lat, lng: suggestion.lng })}
+        placeholder="Ex. Entrée principale du parc"
+        helpText="Tapez les premières lettres : les adresses connues d’OpenStreetMap sont proposées. Choisir une suggestion place la sortie sur la carte et rend l’itinéraire fiable."
+        testId="event-address"
+      />{!editing && <div className="field"><label>Capacité maximale (vide = illimitée)</label><input className="input" type="number" min={2} max={500} value={capacity} onChange={e => setCapacity(e.target.value)} placeholder="Ex. 20" /></div>}
       <button className="btn btn-gold" onClick={submit} disabled={busy}>{busy ? 'Enregistrement…' : editing ? 'Enregistrer et prévenir' : 'Créer'}</button>
     </Sheet>
     <Sheet open={!!participantEvent} onClose={() => setParticipantEvent(null)} title="Participants"><p className="card-help">{participantEvent?.participants.length} inscrits · {(participantEvent?.waitlist || []).length} en liste d’attente</p>{participants.map(p => <div className="list-row" key={p.uid}><Avatar name={p.displayName} photoURL={p.photoURL} size={38} /><div className="row-main"><div className="row-title">{p.displayName}</div><div className="row-sub">{participantEvent?.participants.includes(p.uid) ? 'Inscrit' : 'Liste d’attente'}</div></div></div>)}</Sheet>

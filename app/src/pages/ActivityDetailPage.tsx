@@ -12,7 +12,14 @@ import {
   setActivityVisibility,
   sendDirectMessage,
   updateActivityMetadata,
+  getPrivateActivityNote,
+  setPrivateActivityNote,
+  createActivityShareLink,
+  revokeActivityShareLink,
+  listActivityShareLinks,
 } from '../lib/db';
+import { shareUrlForPath } from '../lib/share';
+import type { ShareLink } from '../lib/types';
 import { shareActivity } from '../lib/share';
 import { exportActivitiesCsv, exportActivityGpx } from '../lib/export';
 import { saveRoute } from '../lib/routes';
@@ -45,6 +52,23 @@ export default function ActivityDetailPage() {
   const [busy, setBusy] = useState(false);
   const [visibility, setVisibility] = useState<'private' | 'friends' | 'link'>('private');
   const [reportOpen, setReportOpen] = useState(false);
+  // Partage par lien **révocable** : un jeton explicite remplace l'audience
+  // « lien » qui n'avait aucun secret (F01).
+  const [shareLink, setShareLink] = useState<ShareLink | null>(null);
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [revokedLinkId, setRevokedLinkId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!id || !profile) return;
+    let cancelled = false;
+    void listActivityShareLinks(profile.uid, id)
+      .then((links) => {
+        if (cancelled) return;
+        setShareLink(links.find((link) => !link.revoked && (!link.expiresAt || link.expiresAt > Date.now())) || null);
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [id, profile?.uid]);
 
   // Édition : titre, note, météo ressentie
   const [editing, setEditing] = useState(false);
@@ -60,14 +84,26 @@ export default function ActivityDetailPage() {
 
   const isOwner = !!profile && !!session && session.uid === profile.uid;
 
+  // Note **privée** : lue dans la sous-collection du propriétaire, avec repli
+  // sur l'ancien champ `note` du document partagé (migration progressive).
+  const [privateNote, setPrivateNote] = useState('');
+
   useEffect(() => {
     if (!id) return;
     setLoading(true);
-    getActivitySession(id).then((s) => {
+    getActivitySession(id).then(async (s) => {
       setSession(s);
-      if (s) setVisibility((s.visibility as 'private' | 'friends' | 'link') || 'private');
+      if (s) {
+        setVisibility((s.visibility as 'private' | 'friends' | 'link') || 'private');
+        if (profile && s.uid === profile.uid) {
+          setPrivateNote(await getPrivateActivityNote(profile.uid, id, s.note).catch(() => s.note || ''));
+        } else if (s.caption) {
+          // Les autres lecteurs ne voient que le message partageable.
+          setPrivateNote('');
+        }
+      }
     }).catch(() => setSession(null)).finally(() => setLoading(false));
-  }, [id]);
+  }, [id, profile?.uid]);
 
   // Init carte
   useEffect(() => {
@@ -154,7 +190,7 @@ export default function ActivityDetailPage() {
   const openEdit = () => {
     if (!session) return;
     setDraftTitle(session.title || '');
-    setDraftNote(session.note || '');
+    setDraftNote(privateNote);
     setDraftWeather(session.weather || null);
     setEditing(true);
   };
@@ -163,15 +199,17 @@ export default function ActivityDetailPage() {
     if (!profile || !session?.id) return;
     setBusy(true);
     try {
+      // Le titre et la météo sont partageables ; la note reste privée et part
+      // dans la sous-collection du propriétaire (F01).
       await updateActivityMetadata(profile.uid, session.id, {
         title: draftTitle,
-        note: draftNote,
         weather: draftWeather,
       });
+      await setPrivateActivityNote(profile.uid, session.id, draftNote);
+      setPrivateNote(draftNote.trim());
       setSession((s) => s ? {
         ...s,
         title: draftTitle.trim() || undefined,
-        note: draftNote.trim() || undefined,
         weather: draftWeather || undefined,
       } : s);
       setEditing(false);
@@ -202,14 +240,58 @@ export default function ActivityDetailPage() {
     if (!profile || !session?.id) return;
     setBusy(true);
     try {
+      if (v === 'link') {
+        // Un lien n'a de sens qu'avec un jeton révocable : on le crée ici.
+        const link = await createActivityShareLink(profile.uid, session.id, 'summary');
+        setShareLink(link);
+      } else if (shareLink?.id) {
+        // Repasser en privé ou en amis révoque le lien existant : il ne doit
+        // pas continuer à donner accès à la sortie.
+        await revokeActivityShareLink(profile.uid, session.id);
+        setShareLink(null);
+      }
       await setActivityVisibility(profile.uid, session.id, v);
       setVisibility(v);
       setSession((s) => s ? { ...s, visibility: v } : s);
-      toast(v === 'private' ? 'Sortie privée' : v === 'friends' ? 'Partagée avec vos amis !' : 'Lien activable (amis)', 'success');
+      toast(
+        v === 'private'
+          ? 'Sortie privée : le lien de partage est révoqué.'
+          : v === 'friends'
+            ? 'Partagée avec vos amis (amitiés vérifiées).'
+            : 'Lien de partage créé.',
+        'success'
+      );
     } catch (e) {
       toast((e as Error).message, 'error');
     } finally {
       setBusy(false);
+    }
+  };
+
+  const copyShareLink = async () => {
+    if (!shareLink) return;
+    const url = shareUrlForPath(`/activity/${shareLink.sessionId}?t=${shareLink.token}`);
+    try {
+      await navigator.clipboard.writeText(url);
+      toast('Lien copié. Il peut être révoqué à tout moment.', 'success');
+    } catch {
+      toast(url, 'info');
+    }
+  };
+
+  const revokeLink = async () => {
+    if (!profile || !shareLink?.id) return;
+    setLinkBusy(true);
+    try {
+      if (!session?.id) return;
+      await revokeActivityShareLink(profile.uid, session.id);
+      setRevokedLinkId(session.id);
+      setShareLink(null);
+      toast('Lien révoqué : il ne fonctionne plus.', 'success');
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setLinkBusy(false);
     }
   };
 
@@ -292,7 +374,12 @@ export default function ActivityDetailPage() {
             ✏️ {session.title || session.note || session.weather ? 'Modifier titre, note et météo' : 'Renommer et annoter cette sortie'}
           </button>
         )}
-        {session.note && <p className="activity-note">📝 {session.note}</p>}
+        {isOwner && privateNote && (
+          <p className="activity-note" data-testid="activity-private-note">
+            📝 {privateNote} <small className="muted-xs">· note privée, visible par vous seul</small>
+          </p>
+        )}
+        {!isOwner && session.caption && <p className="activity-note" data-testid="activity-caption">💬 {session.caption}</p>}
 
         <div className="card" style={{ marginTop: 12, background: 'var(--surface-2)' }}>
           <div className="card-title">Visibilité</div>
@@ -303,9 +390,27 @@ export default function ActivityDetailPage() {
           </div>
           <small style={{ color: 'var(--muted)', fontSize: 11 }}>
             {visibility === 'private' && 'Seul vous voyez cette sortie.'}
-            {visibility === 'friends' && 'Vos amis peuvent voir cette sortie dans l’app.'}
-            {visibility === 'link' && 'Visible via lien — amis uniquement pour l’instant.'}
+            {visibility === 'friends' && 'Vérifié côté serveur : seules vos amitiés enregistrées voient cette sortie.'}
+            {visibility === 'link' && 'Accessible uniquement aux personnes qui possèdent le lien, tant qu’il n’est pas révoqué.'}
           </small>
+          {visibility === 'link' && isOwner && (
+            <div className="share-link-block" data-testid="share-link-block">
+              <small className="field-help">
+                Le lien porte un jeton propre à cette sortie et n’expose qu’un résumé
+                (distance, durée, date) : le tracé GPS reste privé. Le révoquer coupe
+                immédiatement l’accès.
+              </small>
+              <div className="two-col" style={{ marginTop: 6 }}>
+                <button type="button" className="btn btn-outline btn-sm" onClick={() => void copyShareLink()} disabled={!shareLink}>
+                  Copier le lien
+                </button>
+                <button type="button" className="btn btn-danger btn-sm" onClick={() => void revokeLink()} disabled={!shareLink || linkBusy} data-testid="revoke-share-link">
+                  Révoquer
+                </button>
+              </div>
+              {revokedLinkId && <p className="muted-xs">Lien révoqué · les destinataires n’ont plus accès.</p>}
+            </div>
+          )}
           {!isOwner && <small style={{ color: 'var(--gold)', display: 'block', marginTop: 6 }}>Sortie de {session.uid === profile?.uid ? 'vous' : 'un ami'} · visibilité : {visibility}</small>}
         </div>
 
@@ -392,7 +497,10 @@ export default function ActivityDetailPage() {
             placeholder="Sensations, météo, compagnie, souvenir…"
             onChange={(e) => setDraftNote(e.target.value)}
           />
-          <small className="field-help">{draftNote.length}/500 caractères · note privée.</small>
+          <small className="field-help">
+            {draftNote.length}/500 caractères · note <strong>privée</strong> : elle n’est jamais envoyée aux
+            personnes avec qui vous partagez cette sortie.
+          </small>
         </div>
         <button className="btn btn-gold" onClick={saveEdit} disabled={busy}>{busy ? 'Enregistrement…' : 'Enregistrer'}</button>
       </Sheet>
