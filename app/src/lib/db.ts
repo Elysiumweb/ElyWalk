@@ -1036,14 +1036,18 @@ export type LeaderboardMetric = 'coins' | 'today' | 'steps';
 
 export async function getLeaderboard(top = 50, metric: LeaderboardMetric = 'coins'): Promise<UserProfile[]> {
   const field = metric === 'coins' ? 'elycoins' : metric === 'steps' ? 'totalSteps' : 'todaySteps';
-  const q = query(collection(db, 'users'), orderBy(field, 'desc'), limit(top));
+  // La règle `users` plafonne une requête de collection à 200 documents : on
+  // borne donc la demande, sinon Firestore refuse l'ensemble (et non la seule
+  // page). L'écran demande 100, la règle autorise 200 : marge conservée.
+  const pageSize = Math.min(Math.max(top, 1), 200);
+  const q = query(collection(db, 'users'), orderBy(field, 'desc'), limit(pageSize));
   let snaps;
   try {
     snaps = await getDocs(q);
   } catch {
     // Index mono-champ non encore prêt : repli trié localement sur un lot plus
     // large, pour que l'écran reste utilisable.
-    snaps = await getDocs(query(collection(db, 'users'), limit(Math.max(top, 200))));
+    snaps = await getDocs(query(collection(db, 'users'), limit(pageSize)));
   }
   const rows = snaps.docs.map((d) => d.data() as UserProfile);
   const today = dateStr();
