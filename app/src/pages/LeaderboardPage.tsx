@@ -38,21 +38,31 @@ export default function LeaderboardPage() {
       // Les périodes n'ont besoin d'être recalculées qu'une fois par onglet et
       // par cache : on ne bloque pas l'affichage du reste du classement si elles
       // échouent (une requête 7 jours refusée ne doit pas vider l'écran).
-      const now = Date.now(), week = now - 7 * 86400000, month = now - 30 * 86400000;
-      const scores: Record<string, { week: number; month: number }> = {};
-      await Promise.all(users.map(async (u) => {
-        const cached = daysCacheRef.current.get(u.uid);
-        let days = cached && now - cached.at < DAYS_TTL_MS ? cached.days : null;
-        if (!days) {
-          days = await listDailySteps(u.uid, 30).catch(() => []);
-          daysCacheRef.current.set(u.uid, { at: now, days });
-        }
-        scores[u.uid] = {
-          week: days.filter((d) => d.validatedAt >= week).reduce((sum, d) => sum + d.steps, 0),
-          month: days.filter((d) => d.validatedAt >= month).reduce((sum, d) => sum + d.steps, 0),
-        };
-      }));
-      setPeriodScores(scores);
+      //
+      // Les documents quotidiens ne sont lus que pour les onglets qui les
+      // utilisent : auparavant, afficher « Solde EC » déclenchait 100 requêtes
+      // d'historique inutiles (et 100 refus potentiels dans la console).
+      if (current === 'week' || current === 'month') {
+        const now = Date.now(), week = now - 7 * 86400000, month = now - 30 * 86400000;
+        const scores: Record<string, { week: number; month: number }> = {};
+        await Promise.all(users.map(async (u) => {
+          if (u.uid === profile?.uid && periodScores[u.uid]) {
+            scores[u.uid] = periodScores[u.uid];
+            return;
+          }
+          const cached = daysCacheRef.current.get(u.uid);
+          let days = cached && now - cached.at < DAYS_TTL_MS ? cached.days : null;
+          if (!days) {
+            days = await listDailySteps(u.uid, 30).catch(() => []);
+            daysCacheRef.current.set(u.uid, { at: now, days });
+          }
+          scores[u.uid] = {
+            week: days.filter((d) => d.validatedAt >= week).reduce((sum, d) => sum + d.steps, 0),
+            month: days.filter((d) => d.validatedAt >= month).reduce((sum, d) => sum + d.steps, 0),
+          };
+        }));
+        setPeriodScores(scores);
+      }
       // Amis hors du top : chargés à part pour que le classement entre amis soit
       // complet quel que soit le solde.
       const missing = friendIds.filter((uid) => !users.some((u) => u.uid === uid));
@@ -90,7 +100,11 @@ export default function LeaderboardPage() {
       <div className="screen-header">
         <div>
           <h1 className="screen-title">Classement</h1>
-          <div className="screen-sub">Top 50 des marcheurs Elysium</div>
+          <div className="screen-sub">
+            {rows.length > 0
+              ? `${rows.length} marcheur${rows.length > 1 ? 's' : ''} classé${rows.length > 1 ? 's' : ''} · top 100`
+              : 'Top 100 des marcheurs Elysium'}
+          </div>
         </div>
       </div>
 

@@ -14,6 +14,16 @@ export default function WhatsNewPage() {
       </div>
 
       <div className="card">
+        <div className="card-title">Novembre 2026 — 2.2.1</div>
+        <ul className="whats-new">
+          <li>🏆 <strong>Classement à nouveau complet</strong> : les autres marcheurs s’affichent réellement (podium, top 100) au lieu de votre seule ligne — une règle de sécurité trop coûteuse faisait refuser toute la requête</li>
+          <li>📊 Colonnes « 7 jours » et « 30 jours » : elles affichent de nouveau des valeurs pour les autres profils</li>
+          <li>⚡ Moins de requêtes à l’ouverture du classement : l’historique n’est plus chargé inutilement pour les onglets Solde et Pas cumulés</li>
+          <li>🔒 Le blocage reste actif : un profil bloqué n’apparaît plus dans votre fil, ses sorties restent fermées et aucune interaction n’est possible</li>
+        </ul>
+      </div>
+
+      <div className="card">
         <div className="card-title">Novembre 2026 — 2.2.0</div>
         <ul className="whats-new">
           <li>📶 <strong>Sorties hors connexion</strong> : une sortie vécue sans réseau est conservée sur votre téléphone puis envoyée automatiquement au retour du réseau, avec un bandeau « synchronisation en attente » et un bouton Réessayer</li>

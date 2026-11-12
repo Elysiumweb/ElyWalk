@@ -237,6 +237,29 @@ Les défis sont datés. Republication nécessaire au minimum :
 Le bouton est idempotent : une ligne déjà valide n'est **jamais** écrasée (vos
 ajustements de montant survivent).
 
+## Classement et « liste » Firestore — 2.2.1
+
+⚠️ **À lire avant de déployer les règles** : Firestore limite une requête à
+**10 appels de document** (`exists()` / `get()`) **au total**, pas par ligne. Une
+règle de `list` qui appelle `blocked()` (2 appels) refuse donc la requête
+entière dès le 6ᵉ résultat — c'est ce qui vidait le classement en 2.2.0.
+
+Règle à retenir pour toute nouvelle collection lue en liste : **aucun `exists()`,
+`get()` ou `getAfter()` dans un `allow list`**. Ces contrôles vont dans
+`allow get` (lecture unitaire) et dans les règles d'écriture. Si un filtrage par
+ligne est indispensable, il faut dénormaliser l'information dans le document
+(ex. un champ `blockedUsers` sur le profil) — c'est une décision de modèle de
+données, pas un détail de règle.
+
+Vérification côté client : `getLeaderboard` lit en cascade (tri serveur → sans
+tri → petite fenêtre → tri local) et l'écran affiche le nombre réel de marcheurs
+classés. Si ce nombre est inférieur à l'attendu après déploiement, c'est que les
+règles actives sont encore les anciennes :
+
+```bash
+firebase deploy --only firestore:rules
+```
+
 ## Notes privées et audiences — migration 2.2.0
 
 `activitySessions.note` n'existe plus : la règle Firestore refuse désormais ce

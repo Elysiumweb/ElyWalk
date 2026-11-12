@@ -1,5 +1,42 @@
 # Changelog
 
+## 2.2.1 — 2026-11-12
+
+### Classement : « je ne vois pas les autres » — corrigé
+
+Régression introduite par les règles de la 2.2.0, et elle était silencieuse.
+
+**Cause.** Firestore limite une requête à **10 appels de document**
+(`exists()` / `get()`) **au total**, pas par ligne. La règle de lecture de
+`users` que j'avais écrite vérifiait le blocage avec `!blocked(viewer, profil)`,
+soit 2 appels par profil évalué : dès le **6ᵉ résultat**, Firestore refusait la
+requête entière. Le classement demandait 100 lignes ; l'écran ne recevait rien et
+n'affichait plus que l'utilisateur courant. Le même mécanisme vidait les colonnes
+« 7 jours » et « 30 jours » (30 jours × 2 appels sur `dailySteps`).
+
+**Correctif.**
+- Le contrôle de blocage n'est plus évalué sur les **listes** (`allow list`), là
+  où le budget d'appels explose, mais reste appliqué aux **lectures unitaires**
+  (`allow get`) et à toutes les interactions (demandes d'ami, messages,
+  réactions, sorties GPS). Un profil bloqué réapparaît donc dans l'agrégat
+  (pseudo, pas, solde — aucune localisation), mais son document reste
+  inaccessible et aucune interaction n'est possible. C'est le compromis que la
+  plateforme impose ; il est documenté dans `firestore.rules`.
+- `getLeaderboard` lit désormais en **cascade** : tri serveur → même volume sans
+  tri → petite fenêtre (5 lignes) → tri local. Un refus de règle sur une seule
+  ligne ne peut plus vider l'écran, et l'erreur réelle remonte au lieu d'une
+  liste trompeusement vide.
+- `listDailySteps` plafonne à 31 jours pour un profil tiers (le plafond de la
+  règle), et un `listMyDailySteps` explicite sert l'historique complet du
+  propriétaire (page Historique, export, meilleure série).
+- Les documents quotidiens ne sont plus lus que pour les onglets « 7 jours » /
+  « 30 jours » : afficher « Solde EC » déclenchait auparavant 100 requêtes
+  d'historique inutiles.
+- L'en-tête affiche le nombre réel de marcheurs classés, pour qu'une liste
+  tronquée soit visible au lieu d'être silencieuse.
+
+**Version** 2.2.1, `versionCode` **20201**.
+
 ## 2.2.0 — 2026-11-12
 
 Version **2.2.0** (`versionCode` 20200) : traitement des constats d'audit

@@ -436,7 +436,7 @@ async function collectiveProgress(challenge: ChallengeDefinition): Promise<numbe
 
 export async function listMyChallenges(uid: string, challenges: ChallengeDefinition[]): Promise<UserChallenge[]> {
   const active = challenges.filter((c) => challengeIsActive(c));
-  const [daily, profile] = await Promise.all([listDailySteps(uid, 370), getUserProfile(uid)]);
+  const [daily, profile] = await Promise.all([listMyDailySteps(uid, 370), getUserProfile(uid)]);
   const docs = await getDocs(collection(db, 'users', uid, 'challenges'));
   const saved = new Map(docs.docs.map((d) => [d.id, d.data() as UserChallenge]));
   const result: UserChallenge[] = [];
@@ -1034,27 +1034,56 @@ export async function getProfiles(uids: string[]): Promise<UserProfile[]> {
  */
 export type LeaderboardMetric = 'coins' | 'today' | 'steps';
 
+/**
+ * Classement public.
+ *
+ * Deux pièges rencontrés en production, tous deux silencieux :
+ *
+ *  1. **Le budget d'appels de document d'une requête.** Firestore n'autorise
+ *     que 10 appels `exists()`/`get()` par requête, pas par ligne. Une règle de
+ *     liste qui vérifie le blocage coûte 2 appels par document évalué : au-delà
+ *     de 5 résultats, la requête entière est refusée. L'écran se rabattait alors
+ *     sur l'utilisateur courant, seul — « je ne vois pas les autres ».
+ *  2. **Un profil qui refuse la lecture.** Un document dont les règles refusent
+ *     la lecture fait échouer `getDocs` pour toute la requête.
+ *
+ * D'où une lecture en cascade : chaque étage est plus permissif que le
+ * précédent, et le classement s'affiche dès qu'un étage passe. On remonte aussi
+ * l'erreur réelle pour que l'écran puisse la montrer au lieu d'une liste vide.
+ */
 export async function getLeaderboard(top = 50, metric: LeaderboardMetric = 'coins'): Promise<UserProfile[]> {
   const field = metric === 'coins' ? 'elycoins' : metric === 'steps' ? 'totalSteps' : 'todaySteps';
   // La règle `users` plafonne une requête de collection à 200 documents : on
   // borne donc la demande, sinon Firestore refuse l'ensemble (et non la seule
   // page). L'écran demande 100, la règle autorise 200 : marge conservée.
   const pageSize = Math.min(Math.max(top, 1), 200);
-  const q = query(collection(db, 'users'), orderBy(field, 'desc'), limit(pageSize));
-  let snaps;
-  try {
-    snaps = await getDocs(q);
-  } catch {
-    // Index mono-champ non encore prêt : repli trié localement sur un lot plus
-    // large, pour que l'écran reste utilisable.
-    snaps = await getDocs(query(collection(db, 'users'), limit(pageSize)));
+  const users = collection(db, 'users');
+  const attempts: Array<() => Promise<{ docs: Array<{ data: () => unknown }> }>> = [
+    // 1. Chemin nominal : trié côté serveur, sans appel de document dans la règle.
+    () => getDocs(query(users, orderBy(field, 'desc'), limit(pageSize))),
+    // 2. Règle encore stricte, ou index mono-champ absent : même volume, sans tri.
+    () => getDocs(query(users, limit(pageSize))),
+    // 3. Plafond de la règle dépassé (déploiement antérieur) : petite page.
+    () => getDocs(query(users, orderBy(field, 'desc'), limit(5))),
+    () => getDocs(query(users, limit(20))),
+  ];
+
+  let lastError: unknown = null;
+  for (const attempt of attempts) {
+    try {
+      const snaps = await attempt();
+      const rows = snaps.docs.map((d) => d.data() as UserProfile);
+      const today = dateStr();
+      return rows
+        .filter((row) => !!row?.uid)
+        .filter((row) => (metric === 'today' ? (row.todayDate || today) === today : true))
+        .sort((a, b) => scoreOf(b, metric) - scoreOf(a, metric))
+        .slice(0, top);
+    } catch (e) {
+      lastError = e;
+    }
   }
-  const rows = snaps.docs.map((d) => d.data() as UserProfile);
-  const today = dateStr();
-  return rows
-    .filter((row) => (metric === 'today' ? (row.todayDate || today) === today : true))
-    .sort((a, b) => scoreOf(b, metric) - scoreOf(a, metric))
-    .slice(0, top);
+  throw lastError instanceof Error ? lastError : new Error('Classement indisponible.');
 }
 
 /** Valeur comparée pour une métrique donnée. */
@@ -1064,14 +1093,33 @@ export function scoreOf(user: UserProfile, metric: LeaderboardMetric): number {
   return user.todaySteps || 0;
 }
 
+/**
+ * Pas quotidiens d'un utilisateur.
+ *
+ * `count` est plafonné à 31 pour un profil tiers : la règle de liste des
+ * `dailySteps` n'autorise une fenêtre plus large qu'au propriétaire, aux amis
+ * vérifiés et aux présidents. Demander 370 jours sur le profil d'un inconnu
+ * faisait refuser **toute** la requête (et donc vider les colonnes 7/30 jours du
+ * classement). Le plafond est appliqué ici pour que l'appelant n'ait pas à
+ * connaître les règles ; les écrans qui ont besoin de l'historique complet
+ * (le sien) demandent `listMyDailySteps`.
+ */
 export async function listDailySteps(uid: string, count = 30): Promise<DailySteps[]> {
+  const pageSize = Math.min(Math.max(count, 1), 31);
+  const snaps = await getDocs(query(collection(db, 'users', uid, 'dailySteps'), orderBy('validatedAt', 'desc'), limit(pageSize)));
+  return snaps.docs.map(d => ({ date: d.id, ...(d.data() as Omit<DailySteps, 'date'>) })).reverse();
+}
+
+/** Historique complet **du propriétaire** (page d'historique, export, migration). */
+export async function listMyDailySteps(uid: string, count = 370): Promise<DailySteps[]> {
   const snaps = await getDocs(query(collection(db, 'users', uid, 'dailySteps'), orderBy('validatedAt', 'desc'), limit(count)));
   return snaps.docs.map(d => ({ date: d.id, ...(d.data() as Omit<DailySteps, 'date'>) })).reverse();
 }
 
 /** Meilleure série **réellement** atteinte (F07) — calcul pur dans `streak.ts`. */
 export async function getBestStreak(uid: string, days = 370): Promise<number> {
-  const history = await listDailySteps(uid, days).catch(() => [] as DailySteps[]);
+  // Historique du propriétaire : la règle autorise ici une fenêtre large.
+  const history = await listMyDailySteps(uid, days).catch(() => [] as DailySteps[]);
   return computeBestStreak(history.map((d) => d.date));
 }
 
@@ -1332,8 +1380,9 @@ export async function getFriendChallengeProgress(challenge: FriendChallenge): Pr
   for (const uid of challenge.participants) {
     const profile = await getUserProfile(uid);
     if (!profile) continue;
-    // compute progress in period
-    const days = await listDailySteps(uid, 370);
+    // Fenêtre bornée à 31 jours (plafond de lecture pour le profil d'un tiers) :
+    // un défi entre amis dure au plus quelques semaines.
+    const days = await listDailySteps(uid, 31);
     const inRange = days.filter(d=>d.date>=challenge.startsAt && d.date<=challenge.endsAt);
     let progress = 0;
     if (challenge.metric==='steps') progress = inRange.reduce((s,d)=>s+d.steps,0);

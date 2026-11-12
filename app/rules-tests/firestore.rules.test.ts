@@ -139,3 +139,51 @@ describe('F01 — audiences des sorties', () => {
     await assertSucceeds(getDocs(query(col(as(BOB), 'users/alice/dailySteps'), lim(365))));
   });
 });
+
+
+// F07 — régression « je ne vois pas les autres au classement ».
+// Firestore n'accorde que 10 appels de document par requête (pas par ligne) :
+// une règle de liste qui vérifie le blocage coûtait 2 appels par profil évalué,
+// donc toute requête de plus de 5 résultats était refusée. Le classement ne
+// montrait plus que l'utilisateur courant.
+describe('F07 — lisibilité du classement', () => {
+  const profile = (uid: string, coins: number) => ({
+    uid, displayName: uid, photoURL: null, role: 'user', createdAt: 1,
+    totalSteps: coins, totalCalories: 0, streak: 0, todaySteps: 0, todayDate: '2026-11-12',
+    elycoins: coins, referralCode: uid.toUpperCase(), dailyStepGoal: 10000, unitSystem: 'metric',
+    onboardingDone: true, lastValidatedDate: '2026-11-12', email: `${uid}@example.com`,
+  });
+
+  it('autorise une requête de 60 profils triés', async () => {
+    const { setDoc: write, collection: col, getDocs, query, orderBy, limit: lim } = await import('firebase/firestore');
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      for (let i = 0; i < 60; i += 1) {
+        await write(doc(ctx.firestore(), `users/player${i}`), profile(`player${i}`, i));
+      }
+    });
+    const snaps = await assertSucceeds(
+      getDocs(query(col(as(BOB), 'users'), orderBy('elycoins', 'desc'), lim(60)))
+    );
+    expect(snaps.docs.length).toBe(60);
+  });
+
+  it('refuse une requête au-delà du plafond de 200 profils', async () => {
+    const { collection: col, getDocs, query, limit: lim } = await import('firebase/firestore');
+    await assertFails(getDocs(query(col(as(BOB), 'users'), lim(500))));
+  });
+
+  it('autorise 30 jours de pas quotidiens pour un tiers (colonnes 7/30 jours)', async () => {
+    const { collection: col, getDocs, query, orderBy, limit: lim } = await import('firebase/firestore');
+    await assertSucceeds(setDoc(doc(as(ALICE), 'activitySessions/x'), session(ALICE, 'private')));
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      for (let d = 1; d <= 30; d += 1) {
+        const day = `2026-11-${String(d).padStart(2, '0')}`;
+        await setDoc(doc(ctx.firestore(), `users/alice/dailySteps/${day}`), { steps: 100, coins: 1, calories: 10, validatedAt: d });
+      }
+    });
+    const snaps = await assertSucceeds(
+      getDocs(query(col(as(BOB), 'users/alice/dailySteps'), orderBy('validatedAt', 'desc'), lim(30)))
+    );
+    expect(snaps.docs.length).toBe(30);
+  });
+});
