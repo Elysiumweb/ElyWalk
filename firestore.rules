@@ -166,14 +166,25 @@ service cloud.firestore {
 
     match /users/{uid} {
       // F01 — la lecture d'un profil tiers reste possible (classement, amis,
-      // recherche par code) mais **bornée** : un document précis se lit
-      // normalement, une requête de collection est plafonnée à 200 documents —
-      // impossible donc d'aspirer toute la base des profils. Les champs
-      // sensibles (e-mail, PayPal, IP, HWID, santé) vivent dans `private` et
-      // dans les documents de retrait, jamais dans le document public.
-      allow get: if self(uid) || president() || (auth() && !blocked(request.auth.uid, uid));
+      // recherche par code) mais **bornée** : une requête de collection est
+      // plafonnée à 200 documents, impossible donc d'aspirer toute la base. Les
+      // champs sensibles (e-mail, PayPal, IP, HWID, santé) vivent dans `private`
+      // et dans les documents de retrait, jamais dans le document public.
+      //
+      // ⚠️ Le filtrage des blocages n'est **pas** appliqué sur `list`, et c'est
+      // volontaire. Firestore limite une requête à 10 appels de document
+      // (`exists`/`get`) au total, pas par ligne : un `!blocked(viewer, owner)`
+      // dans une règle de liste coûte 2 appels par document évalué, donc
+      // Firestore refuse la requête entière dès le 6e résultat. Le classement
+      // (50 à 200 lignes) devenait alors illisible — l'écran n'affichait plus
+      // que l'utilisateur courant. Conséquence assumée : un profil bloqué
+      // apparaît encore dans la liste agrégée (pseudonyme, pas, solde — aucune
+      // donnée de localisation), mais son document reste inaccessible en lecture
+      // unitaire (`get` ci-dessous) et toutes les interactions restent fermées.
+      allow get: if self(uid) || president()
+        || (auth() && !blocked(request.auth.uid, uid));
       allow list: if self(uid) || president()
-        || (auth() && !blocked(request.auth.uid, uid) && request.query.limit <= 200);
+        || (auth() && request.query.limit <= 200);
       allow create: if self(uid) && request.resource.data.uid == uid
         && request.resource.data.elycoins == 0 && request.resource.data.totalSteps == 0;
       allow update: if president() || (self(uid) && (safeProfileEdit() || safePublicSync() || validStepCredit(uid) || validAdCredit(uid) || validReferralCredit(uid) || validChallengeCredit(uid) || validDebit()));
@@ -185,10 +196,16 @@ service cloud.firestore {
         //    ce qui couvre le classement 7 / 30 jours et les cartes de profil
         //    sans permettre de reconstituer un historique complet ni de balayer
         //    la sous-collection.
+        // Même contrainte que pour `users` : un contrôle de blocage dans la
+        // règle de liste coûterait 2 appels de document par jour évalué (fenêtre
+        // de 30 jours = 60 appels pour une seule requête), donc tout l'historique
+        // d'autrui serait refusé et les colonnes « 7 / 30 jours » du classement
+        // resteraient à zéro. Les pas agrégés ne contiennent aucune localisation :
+        // le blocage continue de fermer les sorties GPS (`activitySessions`).
         allow get: if self(uid) || president() || areFriends(request.auth.uid, uid)
-          || (auth() && !blocked(request.auth.uid, uid));
+          || auth();
         allow list: if self(uid) || president() || areFriends(request.auth.uid, uid)
-          || (auth() && !blocked(request.auth.uid, uid) && request.query.limit <= 31);
+          || (auth() && request.query.limit <= 31);
         allow create: if self(uid) && verified()
           && request.resource.data.steps is int && numberBetween(request.resource.data.steps, 0, 60000)
           && numberBetween(request.resource.data.coins, 1, 50);

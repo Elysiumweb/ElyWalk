@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
-import { listDailySteps, updateUserFields } from '../lib/db';
+import { listMyDailySteps, updateUserFields } from '../lib/db';
 import type { DailySteps, HealthProfile, UnitSystem } from '../lib/types';
 import { caloriesForSteps, formatDistance, fmtNumber } from '../lib/coins';
 import { dateStr } from '../lib/coins';
@@ -51,7 +51,7 @@ export default function HistoryPage() {
 
   useEffect(() => {
     if (profile) {
-      listDailySteps(profile.uid, 70).then(setDays).catch(() => undefined);
+      listMyDailySteps(profile.uid, 70).then(setDays).catch(() => undefined);
       setGoal(profile.dailyStepGoal || 10000);
       setStride(profile.strideLengthCm || 75);
       setHealth(profile.health || {});
@@ -128,7 +128,7 @@ export default function HistoryPage() {
     setBusy(true);
     try {
       // L'écran n'affiche que 60 jours : l'export CSV couvre tout l'historique.
-      const all = await listDailySteps(profile.uid, 3650).catch(() => days);
+      const all = await listMyDailySteps(profile.uid, 3650).catch(() => days);
       const result = await exportDailyStepsCsv(all.length ? all : days, stride);
       toast(result === 'shared' ? 'CSV des pas partagé.' : 'CSV enregistré dans vos téléchargements.', 'success');
     } catch (e) {
