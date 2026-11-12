@@ -5,7 +5,7 @@ import { useToast } from '../components/Toast';
 import ProgressRing from '../components/ProgressRing';
 import Sheet from '../components/Sheet';
 import { pedometer } from '../lib/pedometer';
-import { showInterstitial, showRewardedAd } from '../lib/ads';
+import { adGate, openAdPrivacyOptions, showInterstitial, showRewardedAd } from '../lib/ads';
 import { validateSteps, creditAdReward, syncTodaySteps } from '../lib/db';
 import { coinsForSteps, caloriesForSteps, fmtCoins, fmtNumber, dateStr, nextStepTier, formatDistance } from '../lib/coins';
 import { shareDailyStats } from '../lib/share';
@@ -142,6 +142,17 @@ export default function HomePage() {
     try {
       if (!isNative) {
         toast('Les publicités sont disponibles uniquement sur l’application Android.', 'error');
+        return;
+      }
+      // F04 — un seul chemin d'erreur explicite avant de lancer la vidéo.
+      const gate = await adGate();
+      if (gate === 'no-consent') {
+        toast('Choisissez vos préférences publicitaires pour débloquer cette récompense.', 'info');
+        openAdPrivacyOptions();
+        return;
+      }
+      if (gate === 'unavailable') {
+        toast('La vidéo récompensée est indisponible pour le moment. Réessayez dans un instant.', 'error');
         return;
       }
       const reward = await showRewardedAd(profile.uid);

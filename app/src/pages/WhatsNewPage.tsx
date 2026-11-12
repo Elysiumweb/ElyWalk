@@ -14,6 +14,21 @@ export default function WhatsNewPage() {
       </div>
 
       <div className="card">
+        <div className="card-title">Novembre 2026 — 2.2.0</div>
+        <ul className="whats-new">
+          <li>📶 <strong>Sorties hors connexion</strong> : une sortie vécue sans réseau est conservée sur votre téléphone puis envoyée automatiquement au retour du réseau, avec un bandeau « synchronisation en attente » et un bouton Réessayer</li>
+          <li>🔒 <strong>Note personnelle vraiment privée</strong> : votre note de sortie n’est plus jamais jointe au tracé partagé ; le texte visible par vos amis est un commentaire séparé</li>
+          <li>🗑️ <strong>Suppression de compte fiable</strong> : elle va jusqu’au bout même après avoir validé des pas, efface messages, badges et parcours, et vérifie qu’il ne reste rien</li>
+          <li>📦 <strong>Export complet de vos données</strong> : tout votre historique (sorties et tracés GPS, pas, transactions, messages, amis, parcours, défis, retraits) dans un seul fichier, sans limite de profondeur</li>
+          <li>🔗 <strong>Partage maîtrisé</strong> : un lien de partage se révoque à tout moment, et une sortie « amis » n’est réellement lisible que par vos amis</li>
+          <li>🩺 <strong>Diagnostic intégré</strong> : version, réseau, notifications et journal des erreurs dans un rapport que vous choisissez d’envoyer (aucune donnée personnelle)</li>
+          <li>🏅 Classement : chaque onglet classe selon la métrique affichée (jour, cumul, 7 / 30 jours), avec vos amis même hors du top 50</li>
+          <li>⚡ Fluidité : moins de re-rendus pendant une sortie GPS et un classement qui ne recharge plus tout à chaque onglet</li>
+          <li>🧩 Plus d’écrans bloqués en « Chargement… » : un message clair et un bouton Réessayer en cas de réseau coupé</li>
+        </ul>
+      </div>
+
+      <div className="card">
         <div className="card-title">Novembre 2026 — 2.1.4</div>
         <ul className="whats-new">
           <li>🛡️ Transparence publicitaire : l’écran de consentement et la politique de confidentialité expliquent désormais la consultation de la <strong>liste des applications installées</strong> (§ 4.1), exigée par le formulaire Sécurité des données de Google Play</li>

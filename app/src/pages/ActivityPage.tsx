@@ -12,6 +12,7 @@ import {
   createActivitySession,
   finishActivitySession,
   listActivitySessionsPage,
+  searchActivitySessions,
   type ActivityQueryCursor,
 } from '../lib/db';
 import { tracking, isTrackingSupported, type TrackingSnapshot } from '../lib/tracking';
@@ -46,6 +47,7 @@ import {
 } from '../lib/activity';
 import { notifyActivityGoal } from '../lib/notifications';
 import { showEndOfActivityAd } from '../lib/ads';
+import { enqueueSync, subscribeQueue, type SyncState } from '../lib/syncQueue';
 import { distanceToRoute, getRoute } from '../lib/routes';
 import type { SavedRoute } from '../lib/types';
 
@@ -92,6 +94,7 @@ export default function ActivityPage() {
 
   const sessionRef = useRef<string | null>(null);
   const pointsRef = useRef<ActivityPoint[]>([]);
+  const lastPointPaintRef = useRef({ at: 0 });
   const distanceRef = useRef(0);
   const startedAtRef = useRef<number | null>(null);
   const typeRef = useRef<ActivityType>('walk');
@@ -135,6 +138,12 @@ export default function ActivityPage() {
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
   const cursorRef = useRef<ActivityQueryCursor | null>(null);
+  // Recherche textuelle (titre / note / parcours) : filtrage local, aucun index
+  // composite requis — la recherche globale ne se limite donc pas à la page
+  // chargée (F06).
+  const [search, setSearch] = useState('');
+  const [searchResults, setSearchResults] = useState<ActivitySession[] | null>(null);
+  const [searching, setSearching] = useState(false);
 
   const native = isTrackingSupported();
   const strideCm = profile?.strideLengthCm || 75;
@@ -232,6 +241,36 @@ export default function ActivityPage() {
     }
   }
 
+  // Recherche dans toutes les sorties du compte (debounce 300 ms).
+  useEffect(() => {
+    if (!profile) return;
+    const term = search.trim();
+    if (term.length < 2) {
+      setSearchResults(null);
+      setSearching(false);
+      return;
+    }
+    let cancelled = false;
+    setSearching(true);
+    const timer = setTimeout(() => {
+      const q = filtersToQuery(filters);
+      void searchActivitySessions(profile.uid, term, { type: q.type, from: q.from })
+        .then((items) => {
+          if (!cancelled) setSearchResults(items);
+        })
+        .catch(() => {
+          if (!cancelled) setSearchResults([]);
+        })
+        .finally(() => {
+          if (!cancelled) setSearching(false);
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [profile?.uid, search, filters]);
+
   // Carte
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -321,7 +360,10 @@ export default function ActivityPage() {
         stepsAtStartRef.current = typeof stored.stepsAtStart === 'number' ? stored.stepsAtStart : null;
         if (stored.id) sessionRef.current = stored.id;
         else {
-          sessionRef.current = await createActivitySession(profile.uid, typeRef.current);
+          sessionRef.current = `act_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+          await enqueueSync('activity.create', {
+            uid: profile.uid, type: typeRef.current, sessionId: sessionRef.current, startedAt: startedAtRef.current,
+          }, { dedupeKey: `create:${sessionRef.current}` });
           localStorage.setItem(ACTIVE_SESSION_KEY, JSON.stringify({
             id: sessionRef.current, type: typeRef.current, startedAt: startedAtRef.current, stepsAtStart: stepsAtStartRef.current,
           }));
@@ -450,8 +492,17 @@ export default function ActivityPage() {
       const preciseEnough = point.accuracy == null || point.accuracy <= 100;
       if (delta < 100 && preciseEnough) distanceRef.current += delta;
     }
-    pointsRef.current = [...pointsRef.current, point];
-    setPoints(pointsRef.current);
+    // F09 — le GPS émet environ un point par seconde : recréer le tableau à
+    // chaque point (et re-rendre la carte Leaflet + tout l'écran pendant 45 min
+    // de sortie) faisait chuter l'app. On accumule dans le tampon existant, et
+    // l'état n'est rafraîchi que toutes les deux secondes pour l'affichage.
+    pointsRef.current.push(point);
+    const now = Date.now();
+    const lastPaint = lastPointPaintRef.current;
+    if (now - lastPaint.at >= 2000){
+      lastPaint.at = now;
+      setPoints(pointsRef.current.slice(-4000));
+    }
     setDistance(distanceRef.current);
     noteAccuracy(point.accuracy, true);
     void maybePersist();
@@ -507,8 +558,14 @@ export default function ActivityPage() {
       setElapsed(0);
       lastSavedRef.current = now;
 
-      const id = await createActivitySession(profile.uid, type, plannedRoute?.id ? { id: plannedRoute.id, name: plannedRoute.name } : undefined);
+      // F04 — identifiant généré sur l'appareil : la sortie peut démarrer hors
+      // connexion, et un renvoi met à jour le même document (aucun doublon).
+      const id = `act_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
       sessionRef.current = id;
+      const route = plannedRoute?.id ? { id: plannedRoute.id, name: plannedRoute.name } : null;
+      await enqueueSync('activity.create', {
+        uid: profile.uid, type, sessionId: id, startedAt: now, route,
+      }, { dedupeKey: `create:${id}` });
       try {
         await pedometer.loadPersisted();
         stepsAtStartRef.current = pedometer.getTodaySteps();
@@ -629,14 +686,21 @@ export default function ActivityPage() {
         : 0;
       const steps = delta > 0 ? delta : Math.round(finalDistance / (strideCm / 100));
       const cal = Math.round((finalDistance / 1000) * (typeRef.current === 'run' ? 75 : 50));
-      await finishActivitySession(profile.uid, sessionRef.current, {
-        points: finalPoints,
-        distanceM: finalDistance,
-        durationSec: duration,
-        pausedSec: pauseSeconds,
-        calories: cal,
-        steps,
-      });
+      // F04 — la fin de sortie est mise en file : hors connexion, l'utilisateur
+      // voit sa sortie enregistrée sur son téléphone et envoyée plus tard, au
+      // lieu de perdre le parcours.
+      await enqueueSync('activity.finish', {
+        uid: profile.uid,
+        sessionId: sessionRef.current,
+        data: {
+          points: finalPoints,
+          distanceM: finalDistance,
+          durationSec: duration,
+          pausedSec: pauseSeconds,
+          calories: cal,
+          steps,
+        },
+      }, { dedupeKey: `finish:${sessionRef.current}` });
       pointsRef.current = [];
       distanceRef.current = 0;
       startedAtRef.current = null;
@@ -790,6 +854,20 @@ export default function ActivityPage() {
 
       <div className="activity-history card">
         <div className="card-title">Mes sorties</div>
+          <div className="field" style={{ marginBottom: 10 }}>
+            <input
+              className="input"
+              type="search"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Rechercher par titre, note ou parcours…"
+              aria-label="Rechercher dans mes sorties"
+              data-testid="activity-search-input"
+            />
+            <small className="field-help">
+              La recherche porte sur toutes vos sorties, pas seulement sur la page affichée.
+            </small>
+          </div>
           <div className="activity-filters">
             <div className="filter-row" role="group" aria-label="Filtrer par type">
               {(['all', 'walk', 'run'] as const).map((value) => (
@@ -834,13 +912,18 @@ export default function ActivityPage() {
             )}
           </div>
 
+          {searching && <div className="spinner" style={{ margin: '18px auto' }} />}
           {loadingSessions && sessions.length === 0 && <div className="spinner" style={{ margin: '18px auto' }} />}
-          {!loadingSessions && sessions.length === 0 && (
+          {!loadingSessions && !searching && (searchResults ?? sessions).length === 0 && (
             <div className="empty-state">
-              {activeFilterCount > 0 ? 'Aucune sortie ne correspond à ces filtres.' : 'Démarrez votre première sortie GPS.'}
+              {searchResults
+                ? 'Aucune sortie ne correspond à cette recherche.'
+                : activeFilterCount > 0
+                  ? 'Aucune sortie ne correspond à ces filtres.'
+                  : 'Démarrez votre première sortie GPS.'}
             </div>
           )}
-          {sessions.map((s) => (
+          {(searchResults ?? sessions).map((s) => (
             <button className="list-row activity-session-row" key={s.id} onClick={() => navigate(`/activity/${s.id}`)}>
               <span className="activity-history-icon">{s.type === 'run' ? '🏃' : '🚶'}</span>
               <div className="row-main">
@@ -855,10 +938,15 @@ export default function ActivityPage() {
               <span className="row-value activity-chev">›</span>
             </button>
           ))}
-          {hasMore && (
+          {hasMore && !searchResults && (
             <button className="btn btn-outline" style={{ marginTop: 8 }} onClick={loadMoreSessions} disabled={loadingSessions}>
               {loadingSessions ? 'Chargement…' : 'Charger plus de sorties'}
             </button>
+          )}
+          {searchResults && (
+            <p className="muted-xs" style={{ marginTop: 8 }}>
+              {searchResults.length} résultat{searchResults.length > 1 ? 's' : ''} pour « {search.trim()} ».
+            </p>
           )}
           <button className="text-button" style={{ marginTop: 6 }} onClick={() => navigate('/history')}>
             Voir l’historique quotidien

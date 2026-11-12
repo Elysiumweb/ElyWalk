@@ -5,8 +5,10 @@ import {
   indexedDBLocalPersistence,
   type Auth,
 } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { getFirestore, setLogLevel } from 'firebase/firestore';
 import { Capacitor } from '@capacitor/core';
+import { doc, getDoc } from 'firebase/firestore';
+import { logDiagnostic } from './diagnostics';
 
 // Configuration Firebase du projet ElyWalk (elywalk-2f7ba).
 // Ces valeurs proviennent de google-services.json — elles sont publiques
@@ -29,4 +31,19 @@ export const auth: Auth = Capacitor.isNativePlatform()
 
 auth.languageCode = 'fr';
 
+// F06 — les erreurs Firestore (`permission-denied`, `failed-precondition : an
+// index is required`, `unavailable`) étaient jusqu'ici muettes ou seulement
+// visibles dans une console que personne n'ouvre sur un téléphone. On les fait
+// remonter au journal de diagnostic, qui les rend consultables depuis l'écran
+// Profil → Diagnostic, sans transmettre quoi que ce soit automatiquement.
+setLogLevel('warn');
+
 export const db = getFirestore(firebaseApp);
+
+if (Capacitor.isNativePlatform()) {
+  // Sonde volontairement silencieuse : une lecture refusée sur un document
+  // inexistant ne casse rien, mais son échec typé est consigné.
+  void getDoc(doc(db, 'diagnostics', 'ping'))
+    .then(() => logDiagnostic('info', 'firestore', 'Connexion Firestore établie'))
+    .catch((e) => logDiagnostic('warn', 'firestore', e));
+}

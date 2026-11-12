@@ -18,11 +18,15 @@ import {
   type Establishment,
 } from '../lib/establishments';
 import { isPresidentUid } from '../lib/constants';
-import { fmtCoins, fmtEuros } from '../lib/coins';
+import { fmtCoins, fmtEuros, fmtNumber } from '../lib/coins';
 import type { ContentReport, PartnerRequest, ReportStatus, Withdrawal } from '../lib/types';
+import { getChallengeDefinitions } from '../lib/constants';
+import { closeChallengeCatalogEntry, describeCatalogState, publishChallengeCatalog, setChallengeCatalogEntry, type ChallengeCatalogEntry } from '../lib/challenges';
+import { collection, getDocs } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 import { reviewReport, watchReports } from '../lib/safety';
 
-type Tab = 'partners' | 'withdrawals' | 'establishments' | 'reports';
+type Tab = 'partners' | 'withdrawals' | 'establishments' | 'reports' | 'challenges';
 
 export default function AdminPage() {
   const { profile } = useAuth();
@@ -36,6 +40,78 @@ export default function AdminPage() {
   const [establishments, setEstablishments] = useState<Establishment[]>([]);
   const [loading, setLoading] = useState(true);
   const [reports,setReports]=useState<ContentReport[]>([]);
+  // F02 — le barème des défis vit dans `challengeCatalog` (écriture réservée aux
+  // présidents). Cet écran évite d'avoir à saisir les identifiants à la main
+  // dans la console Firebase, où une faute de frappe crée une ligne orpheline.
+  const [catalog,setCatalog] = useState<Map<string, ChallengeCatalogEntry>>(new Map());
+  const [catalogBusy,setCatalogBusy] = useState(false);
+  // Montants en cours de saisie, par identifiant de défi (chaîne pour laisser
+  // l'utilisateur taper « 1 » avant « 15 » sans reformatage intempestif).
+  const [rewardDrafts,setRewardDrafts] = useState<Record<string, string>>({});
+  const reloadCatalog = async () => {
+    try {
+      const snaps = await getDocs(collection(db, 'challengeCatalog'));
+      const next = new Map<string, ChallengeCatalogEntry>();
+      snaps.docs.forEach((d) => next.set(d.id, d.data() as ChallengeCatalogEntry));
+      setCatalog(next);
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    }
+  };
+  useEffect(() => { if (isPresidentUid(profile?.uid)) void reloadCatalog(); }, [profile?.uid]); // eslint-disable-line react-hooks/exhaustive-deps
+  const saveReward = async (challengeId: string, fallback: number) => {
+    if (!profile) return;
+    const raw = rewardDrafts[challengeId];
+    const reward = Number(raw ?? fallback);
+    setCatalogBusy(true);
+    try {
+      await setChallengeCatalogEntry(profile.uid, challengeId, { reward, active: true });
+      await reloadCatalog();
+      setRewardDrafts((d) => { const { [challengeId]: _omit, ...rest } = d; return rest; });
+      toast(`Barème enregistré : ${reward} EC.`, 'success');
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setCatalogBusy(false);
+    }
+  };
+
+  const toggleCatalogEntry = async (challengeId: string, open: boolean) => {
+    if (!profile) return;
+    setCatalogBusy(true);
+    try {
+      if (open) {
+        await publishChallengeCatalog(profile.uid);
+      } else {
+        await closeChallengeCatalogEntry(profile.uid, challengeId);
+      }
+      await reloadCatalog();
+      toast(open ? 'Défi ouvert au versement.' : 'Défi fermé : plus aucun versement.', 'success');
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setCatalogBusy(false);
+    }
+  };
+
+  const publishCatalog = async () => {
+    if (!profile) return;
+    setCatalogBusy(true);
+    try {
+      const result = await publishChallengeCatalog(profile.uid);
+      await reloadCatalog();
+      toast(
+        result.written.length
+          ? `${result.written.length} défi(s) ouvert(s) au versement${result.skipped.length ? ` · ${result.skipped.length} déjà réglé(s)` : ''}.`
+          : 'Tous les défis du jour ont déjà un barème valide.',
+        'success',
+      );
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setCatalogBusy(false);
+    }
+  };
   useEffect(()=>isPresidentUid(profile?.uid)?watchReports(setReports):undefined,[profile?.uid]);
 
   // Formulaire établissement
@@ -179,6 +255,13 @@ export default function AdminPage() {
         >
           Établissements ({establishments.length})
         </button>
+        <button
+          className={`chip ${tab === 'challenges' ? 'chip-active' : ''}`}
+          onClick={() => setTab('challenges')}
+          data-testid="admin-tab-challenges"
+        >
+          Barème des défis
+        </button>
       </div>
 
       {loading ? (
@@ -257,6 +340,86 @@ export default function AdminPage() {
               </div>
             ))
           )}
+        </div>
+      ) : tab === 'challenges' ? (
+        <div className="card" data-testid="admin-challenge-catalog">
+          <div className="card-title">Barème des défis</div>
+          <p className="card-help">
+            Un défi n’est rémunéré que s’il possède une ligne de catalogue
+            <code> challengeCatalog/&lt;identifiant&gt;</code>. Les identifiants sont
+            datés : « Sprint collectif » change chaque lundi, « Feu sacré » chaque
+            jour. Le bouton ci-dessous crée les lignes du jour avec les montants
+            ci-dessous — ajustez un montant puis validez-le défi par défi.
+          </p>
+          <button
+            className="btn btn-gold"
+            onClick={publishCatalog}
+            disabled={catalogBusy}
+            data-testid="publish-challenge-catalog"
+          >
+            {catalogBusy ? 'Publication…' : 'Ouvrir les défis du jour au versement'}
+          </button>
+          <div className="section-gap" />
+          <ul className="challenge-catalog-list">
+            {describeCatalogState(getChallengeDefinitions(), catalog).map(({ challenge, state, reward }) => {
+              const draft = rewardDrafts[challenge.id];
+              const value = draft ?? String(reward);
+              const dirty = draft != null && Number(draft) !== reward;
+              return (
+                <li key={challenge.id} data-testid={`catalog-row-${challenge.id}`}>
+                  <div className="catalog-row-head">
+                    <span className="catalog-row-title">
+                      {challenge.icon} <strong>{challenge.title}</strong>
+                    </span>
+                    <span className={`catalog-state is-${state}`}>
+                      {state === 'paid' ? 'ouvert' : state === 'closed' ? 'fermé' : 'objectif seul'}
+                    </span>
+                  </div>
+                  <div className="catalog-row-meta">
+                    {challenge.startsAt} → {challenge.endsAt} · objectif{' '}
+                    {challenge.metric === 'steps' ? fmtNumber(challenge.target) : challenge.target}
+                    {challenge.metric === 'steps' ? ' pas' : challenge.metric === 'activeDays' ? ' jours actifs' : ' jours de série'}
+                  </div>
+                  <div className="catalog-row-actions">
+                    <label className="catalog-reward">
+                      <span>EC</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={50}
+                        inputMode="numeric"
+                        value={value}
+                        onChange={(e) => setRewardDrafts((d) => ({ ...d, [challenge.id]: e.target.value }))}
+                        aria-label={`Montant en ElyCoins pour ${challenge.title}`}
+                        data-testid={`catalog-reward-${challenge.id}`}
+                      />
+                    </label>
+                    <button
+                      className="btn btn-outline btn-sm"
+                      onClick={() => void saveReward(challenge.id, challenge.reward)}
+                      disabled={catalogBusy || !dirty}
+                      data-testid={`catalog-save-${challenge.id}`}
+                    >
+                      Enregistrer
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => void toggleCatalogEntry(challenge.id, state !== 'paid')}
+                      disabled={catalogBusy}
+                      data-testid={`catalog-toggle-${challenge.id}`}
+                    >
+                      {state === 'paid' ? 'Fermer' : 'Ouvrir'}
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+          <p className="muted-xs">
+            Montant autorisé : 1 à 50 EC. Une ligne déjà valide n’est jamais
+            écrasée par « Ouvrir les défis du jour » : vos ajustements survivent
+            à une republication. Fermer un défi coupe tout versement immédiatement.
+          </p>
         </div>
       ) : tab === 'reports' ? (
         <div className="card" data-testid="moderation-queue"><div className="card-title">File de modération</div><p className="card-help">Chaque décision est datée et conservée dans l’historique du signalement.</p>{reports.length===0?<div className="empty-state">Aucun signalement.</div>:reports.map(report=><article key={report.id} style={{padding:'12px 0',borderBottom:'1px solid var(--gold-border)'}} data-testid="report-row"><div style={{display:'flex',justifyContent:'space-between',gap:8}}><strong>{report.targetType} · {report.reason}</strong><span className="badge">{report.status}</span></div><div className="row-sub">Contenu {report.targetId} · signalé le {new Date(report.createdAt).toLocaleString('fr-FR')}</div>{report.details&&<p>{report.details}</p>}<div className="route-actions">{report.status==='open'&&<button className="btn btn-outline btn-sm" onClick={()=>moderate(report,'reviewing')}>Prendre en charge</button>}<button className="btn btn-gold btn-sm" onClick={()=>moderate(report,'resolved')}>Résoudre</button><button className="btn btn-ghost btn-sm" onClick={()=>moderate(report,'dismissed')}>Classer sans suite</button></div>{report.history.length>0&&<div className="moderation-history">{report.history.map((action,index)=><div key={index}>{new Date(action.createdAt).toLocaleString('fr-FR')} · {action.status} · {action.note||'Sans note'}</div>)}</div>}</article>)}</div>

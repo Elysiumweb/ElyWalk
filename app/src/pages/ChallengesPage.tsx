@@ -5,7 +5,7 @@ import { useToast } from '../components/Toast';
 import Sheet from '../components/Sheet';
 import Avatar from '../components/Avatar';
 import { getChallengeDefinitions } from '../lib/constants';
-import { claimChallengeReward, listMyChallenges, createFriendChallenge, watchFriendChallenges, getFriendChallengeProgress, deleteFriendChallenge, watchFriendships, getProfiles } from '../lib/db';
+import { claimChallengeReward, listMyChallenges, loadChallengeCatalog, createFriendChallenge, watchFriendChallenges, getFriendChallengeProgress, deleteFriendChallenge, watchFriendships, getProfiles } from '../lib/db';
 import type { ChallengeDefinition, UserChallenge, FriendChallenge, UserProfile } from '../lib/types';
 import { fmtNumber } from '../lib/coins';
 
@@ -34,7 +34,10 @@ export default function ChallengesPage() {
     if (!profile) return;
     setLoading(true);
     try {
-      const definitions = getChallengeDefinitions();
+      // F02 — le montant affiché provient du catalogue autoritaire, jamais de la
+      // constante embarquée : un défi fermé ou revalorisé côté administration
+      // s'affiche immédiatement avec le bon barème.
+      const definitions = await loadChallengeCatalog(getChallengeDefinitions());
       const states = await listMyChallenges(profile.uid, definitions);
       setItems(states.map((state) => ({ challenge: definitions.find((d) => d.id === state.challengeId)!, state })));
     } catch (e) { toast((e as Error).message || 'Impossible de charger les défis.', 'error'); }
@@ -93,12 +96,16 @@ export default function ChallengesPage() {
     {loading ? <div className="card empty-state">Chargement des défis…</div> : items.map(({ challenge, state }) => {
       const progress = Math.min(state.progress, challenge.target); const percent = Math.min(100, progress / challenge.target * 100);
       return <article className={`challenge-card card ${state.completed ? 'challenge-complete' : ''}`} key={challenge.id} data-testid={`challenge-${challenge.id}`}>
-        <div className="challenge-top"><span className="challenge-icon">{challenge.icon}</span><div className="row-main"><div className="challenge-kind">{challenge.kind === 'collective' ? 'COLLECTIF' : challenge.kind === 'seasonal' ? 'SAISONNIER' : 'DÉFI DATÉ'}</div><h2>{challenge.title}</h2></div><span className="challenge-reward">+{challenge.reward} EC</span></div>
+        <div className="challenge-top"><span className="challenge-icon">{challenge.icon}</span><div className="row-main"><div className="challenge-kind">{challenge.kind === 'collective' ? 'COLLECTIF' : challenge.kind === 'seasonal' ? 'SAISONNIER' : 'DÉFI DATÉ'}</div><h2>{challenge.title}</h2></div><span className="challenge-reward">{challenge.rewardAllowed === false ? 'Objectif' : `+${challenge.reward} EC`}</span></div>
         <p className="challenge-description">{challenge.description}</p>
         <div className="challenge-meta"><span>{daysLeft(challenge.endsAt)}</span><span>{challenge.participantLabel || (challenge.metric === 'activeDays' ? 'jours actifs' : challenge.metric === 'streak' ? 'jours de série' : 'pas')}</span></div>
         <div className="challenge-progress"><div style={{ width: `${percent}%` }} /></div>
         <div className="challenge-numbers"><span>{challenge.metric === 'steps' ? fmtNumber(progress) : progress} / {challenge.metric === 'steps' ? fmtNumber(challenge.target) : challenge.target}</span><span>{state.claimed ? 'Récompense récupérée ✓' : state.completed ? 'Terminé !' : `${Math.round(percent)} %`}</span></div>
-        {state.completed && !state.claimed && <button className="btn btn-gold" onClick={() => claim(challenge, state)}>Récupérer +{challenge.reward} EC</button>}
+        {state.completed && !state.claimed && (challenge.rewardAllowed === false
+          // F02 — aucun catalogue actif : le défi reste un objectif, sans
+          // récompense. Mieux vaut l'annoncer que proposer un bouton qui échoue.
+          ? <p className="muted-xs" data-testid="challenge-no-reward">Objectif atteint ! Aucune récompense n’est ouverte sur ce défi.</p>
+          : <button className="btn btn-gold" onClick={() => claim(challenge, state)}>Récupérer +{challenge.reward} EC</button>)}
       </article>;
     })}
     </>}

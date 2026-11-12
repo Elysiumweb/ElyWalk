@@ -6,6 +6,7 @@ import {
   pointLabel,
   tidyAddress,
   routeOnFootBikeOrCar,
+  searchAddresses,
   type TravelMode,
 } from './directions';
 import { haversineM } from './geo';
@@ -213,6 +214,45 @@ describe('inIleDeFrance', () => {
 // Modes marche / vélo / voiture — Valhalla d'abord, OSRM en secours
 // ---------------------------------------------------------------------------
 
+/** Réponse Valhalla native (`trip`) — format réel du service. */
+const VALHALLA_TRIP = {
+  trip: {
+    language: 'fr-FR',
+    summary: { length: 6.1, time: 1200 },
+    legs: [
+      {
+        summary: { length: 6.1, time: 1200 },
+        // Polyline précision 1e6.
+        shape: '_p~iF~ps|U_ulLnnqC_mqNvxq`@',
+        maneuvers: [
+          {
+            type: 'depart',
+            instruction: 'Partez vers le nord sur Rue de Rivoli.',
+            length: 0.3,
+            time: 200,
+            begin_shape_index: 0,
+          },
+          {
+            type: 'left',
+            modifier: 'left',
+            instruction: 'Tournez à gauche dans Rue de Rivoli.',
+            length: 5.8,
+            time: 1000,
+            begin_shape_index: 1,
+          },
+          {
+            type: 'destination',
+            instruction: 'Vous êtes arrivé à votre destination.',
+            length: 0,
+            time: 0,
+            begin_shape_index: 2,
+          },
+        ],
+      },
+    ],
+  },
+};
+
 describe('routeOnFootBikeOrCar', () => {
   const from = { lat: 48.85, lng: 2.35 };
   const to = { lat: 48.87, lng: 2.29 };
@@ -222,30 +262,7 @@ describe('routeOnFootBikeOrCar', () => {
     const original = globalThis.fetch;
     globalThis.fetch = (async (input: any) => {
       calls.push(String(input));
-      return {
-        ok: true,
-        json: async () => ({
-          routes: [
-            {
-              distance: 6100,
-              duration: 1200,
-              geometry: '_p~iF~ps|U_ulLnnqC_mqNvxq`@',
-              legs: [
-                {
-                  steps: [
-                    {
-                      distance: 300,
-                      duration: 200,
-                      name: 'Rue de Rivoli',
-                      maneuver: { type: 'turn', modifier: 'left', instruction: 'Tournez à gauche dans Rue de Rivoli.' },
-                    },
-                  ],
-                },
-              ],
-            },
-          ],
-        }),
-      } as any;
+      return { ok: true, json: async () => VALHALLA_TRIP } as any;
     }) as any;
     try {
       const plan = await routeOnFootBikeOrCar(from, to, 'bike');
@@ -253,20 +270,45 @@ describe('routeOnFootBikeOrCar', () => {
       expect(decodeURIComponent(calls[0])).toContain('"costing":"bicycle"');
       expect(plan.mode).toBe('bike');
       expect(plan.provider).toContain('Valhalla');
-      // Valhalla fournit la phrase française : elle est reprise telle quelle.
-      expect(plan.steps[0].instruction).toBe('Tournez à gauche dans Rue de Rivoli.');
+      // Valhalla fournit la phrase française : elle est reprise telle quelle,
+      // dans l'ordre des manœuvres (départ, virage, arrivée).
+      expect(plan.steps).toHaveLength(3);
+      expect(plan.steps[1].instruction).toBe('Tournez à gauche dans Rue de Rivoli.');
+      expect(plan.steps[1].kind).toBe('left');
+      expect(plan.steps[1].at).toMatchObject({ lat: expect.any(Number), lng: expect.any(Number) });
+      // Distance et durée viennent du résumé du trajet, pas de l'interface.
+      expect(plan.distanceM).toBe(6100);
+      expect(plan.durationS).toBe(1200);
+      expect(plan.geometry.length).toBeGreaterThan(1);
     } finally {
       globalThis.fetch = original;
     }
   });
 
-  it('retombe sur OSRM et recalcule la durée à pied si Valhalla échoue', async () => {
+  it('demande un tracé piéton ou automobile selon le mode', async () => {
+    const calls: string[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (input: any) => {
+      calls.push(decodeURIComponent(String(input)));
+      return { ok: true, json: async () => VALHALLA_TRIP } as any;
+    }) as any;
+    try {
+      await routeOnFootBikeOrCar(from, to, 'walk');
+      await routeOnFootBikeOrCar(from, to, 'car');
+      expect(calls[0]).toContain('"costing":"pedestrian"');
+      expect(calls[1]).toContain('"costing":"auto"');
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('rejette une réponse Valhalla vide et bascule sur OSRM', async () => {
     const calls: string[] = [];
     const original = globalThis.fetch;
     globalThis.fetch = (async (input: any) => {
       const url = String(input);
       calls.push(url);
-      if (url.includes('valhalla')) throw new Error('502');
+      if (url.includes('valhalla')) return { ok: true, json: async () => ({}) } as any;
       return {
         ok: true,
         json: async () => ({
@@ -284,8 +326,37 @@ describe('routeOnFootBikeOrCar', () => {
     try {
       const plan = await routeOnFootBikeOrCar(from, to, 'walk');
       expect(calls).toHaveLength(2);
-      expect(calls[1]).toContain('project-osrm');
+      // Instance communautaire multimodale : profil piéton explicite.
+      expect(calls[1]).toContain('routed-foot');
       expect(plan.mode).toBe('walk');
+      // Le profil étant respecté, la durée du moteur est conservée.
+      expect(plan.durationS).toBe(360);
+      expect(plan.provider).toContain('piéton');
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('utilise le démonstrateur OSRM en dernier recours et recalcule la durée', async () => {
+    const calls: string[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (input: any) => {
+      const url = String(input);
+      calls.push(url);
+      if (!url.includes('project-osrm')) throw new Error('502');
+      return {
+        ok: true,
+        json: async () => ({
+          routes: [
+            { distance: 4800, duration: 360, geometry: '_p~iF~ps|U_ulLnnqC_mqNvxq`@', legs: [{ steps: [] }] },
+          ],
+        }),
+      } as any;
+    }) as any;
+    try {
+      const plan = await routeOnFootBikeOrCar(from, to, 'walk');
+      expect(calls.some((url) => url.includes('routed-foot'))).toBe(true);
+      expect(calls[calls.length - 1]).toContain('project-osrm');
       // 4,8 km à 4,8 km/h = 1 h = 3600 s.
       expect(plan.durationS).toBe(3600);
       expect(plan.provider).toContain('OSRM');
@@ -294,13 +365,82 @@ describe('routeOnFootBikeOrCar', () => {
     }
   });
 
-  it('signale l’indisponibilité quand les deux moteurs échouent', async () => {
+  it('signale l’indisponibilité quand les trois moteurs échouent', async () => {
     const original = globalThis.fetch;
     globalThis.fetch = (async () => {
       throw new Error('offline');
     }) as any;
     try {
       await expect(routeOnFootBikeOrCar(from, to, 'car')).rejects.toThrow(/indisponible/i);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Recherche d'adresse (Rencontres → Adresse)
+// ---------------------------------------------------------------------------
+
+describe('searchAddresses', () => {
+  it('ne sollicite aucun service sous trois caractères', async () => {
+    const original = globalThis.fetch;
+    let called = false;
+    globalThis.fetch = (async () => {
+      called = true;
+      return { ok: true, json: async () => ({ features: [] }) } as any;
+    }) as any;
+    try {
+      expect(await searchAddresses('pa')).toEqual([]);
+      expect(called).toBe(false);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('propose des adresses Photon avec leurs coordonnées', async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      ({
+        ok: true,
+        json: async () => ({
+          features: [
+            {
+              properties: { housenumber: '12', street: 'Rue de Rivoli', postcode: '75004', city: 'Paris', osm_id: 42, osm_type: 'W', osm_value: 'house' },
+              geometry: { coordinates: [2.3553, 48.8558] },
+            },
+          ],
+        }),
+      }) as any) as any;
+    try {
+      const items = await searchAddresses('rue de rivoli 75004');
+      expect(items).toHaveLength(1);
+      expect(items[0].label).toContain('Rue de Rivoli');
+      expect(items[0].lat).toBeCloseTo(48.8558, 3);
+      expect(items[0].lng).toBeCloseTo(2.3553, 3);
+      expect(items[0].kind).toBe('house');
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('retombe sur Nominatim quand Photon échoue', async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (input: any) => {
+      const url = String(input);
+      if (url.includes('photon')) throw new Error('503');
+      return {
+        ok: true,
+        json: async () => [
+          { place_id: 7, display_name: '1, Place de la Concorde, 75008 Paris, France', lat: '48.8656', lon: '2.3212', type: 'house' },
+        ],
+      } as any;
+    }) as any;
+    try {
+      const items = await searchAddresses('place de la concorde paris');
+      expect(items).toHaveLength(1);
+      expect(items[0].label).toBe('Place de la Concorde, 75008 Paris');
+      expect(items[0].lat).toBeCloseTo(48.8656, 3);
     } finally {
       globalThis.fetch = original;
     }

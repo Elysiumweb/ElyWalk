@@ -171,6 +171,24 @@ export function canShowAds(): boolean {
   return initialized && adsAllowed;
 }
 
+/**
+ * F04 — porte unique avant **toute** action récompensée (vidéo → ElyCoins).
+ *
+ * Trois cas sont distingués à l'écran, parce qu'ils demandent trois gestes
+ * différents : le SDK n'a pas pu démarrer (réseau), aucun choix de consentement
+ * n'existe encore (ouvrir la feuille de consentement), ou le consentement
+ * autorise la diffusion. Auparavant, tout échec se soldait par un silence et
+ * l'utilisateur regardait une vidéo qui ne créditait rien.
+ */
+export type AdGate = 'ready' | 'no-consent' | 'unavailable';
+
+export async function adGate(): Promise<AdGate> {
+  if (!isNative()) return 'unavailable';
+  await initAds();
+  if (!adsAllowed) return 'no-consent';
+  return initialized ? 'ready' : 'unavailable';
+}
+
 /** Ouvre l'écran « Confidentialité des annonces ». */
 export { openAdPrivacyOptions } from './adConsent';
 

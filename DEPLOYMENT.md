@@ -172,6 +172,88 @@ firebase firestore:indexes   # vérifie l'état de construction
 Les index manquants peuvent aussi être générés depuis les liens affichés par
 l'application au moment de l'erreur.
 
+## Catalogue des défis (`challengeCatalog`) — 2.2.0
+
+### Où ?
+
+**Uniquement dans l'espace d'administration de l'application** :
+*Profil → 👑 Administration Elysium → onglet « Barème des défis »*.
+
+Aucune saisie dans la console Firebase n'est nécessaire (ni souhaitée) : les
+identifiants de défi sont **datés** — `week-steps-2026-11-09` change chaque
+lundi, `streak-2026-11-12` chaque jour — et une ligne recopiée à la main devient
+orpheline la semaine suivante, donc un défi qui ne paie plus silencieusement.
+L'écran calcule les identifiants du jour et écrit la collection à votre place
+(écriture réservée aux présidents par la règle `allow write: if president()`).
+
+### Comment ?
+
+1. Se connecter avec un compte président (`isPresidentUid`).
+2. *Profil → 👑 Administration Elysium → Barème des défis*.
+3. Ajuster au besoin le montant de chaque défi (1 à 50 EC), puis
+   **« Ouvrir les défis du jour au versement »**.
+4. Pour chaque défi, le badge indique l'état réel :
+   `ouvert` (versement actif), `fermé` (aucun versement), `objectif seul`
+   (aucune ligne de catalogue).
+5. « Enregistrer » fige un montant défi par défi ; « Fermer » coupe
+   immédiatement tout versement sur ce défi (suppression de la ligne).
+
+### Rythme
+
+Republier régulièrement, l'écran le rappelle :
+
+- **chaque lundi** → `week-steps-<lundi>` (Sprint collectif) ;
+- **le 1er du mois** → `season-<AAAA-MM>` (Saison des foulées) ;
+- **tous les 3-4 jours** → `streak-<date>` et `dated-active-<date>`.
+
+### Ce que contient un document
+
+```
+challengeCatalog/week-steps-2026-11-09
+  active:    true          // false ou absent = défi non rémunéré
+  reward:    25            // 1 à 50 EC, doit correspondre au versement
+  target:    250000        // objectif (pas / jours actifs / série)
+  startsAt:  "2026-11-09"  // AAAA-MM-JJ
+  endsAt:    "2026-11-15"
+  title:     "Sprint collectif"   // memorandum, facultatif
+  updatedAt: 1762900000000
+```
+
+Sans ligne de catalogue, le défi reste jouable mais **aucune récompense n'est
+versée** : c'est volontaire, mieux vaut un défi non payé qu'un crédit illimité.
+La règle `validChallengeCredit` exige `active == true`, une date de fin non
+dépassée et `reward` **strictement égal** au montant réclamé.
+
+### Rythme
+
+Les défis sont datés. Republication nécessaire au minimum :
+
+- **chaque lundi** pour `week-steps-<lundi>` (Sprint collectif) ;
+- **le 1er du mois** pour `season-<AAAA-MM>` (Saison des foulées) ;
+- **chaque jour** pour `streak-<AAAA-MM-JJ>` (Feu sacré) et
+  `dated-active-<début>` (7 jours en mouvement) — ces deux-là sont visibles une
+  quinzaine de jours, une republication tous les 3-4 jours suffit en pratique.
+
+Le bouton est idempotent : une ligne déjà valide n'est **jamais** écrasée (vos
+ajustements de montant survivent).
+
+## Notes privées et audiences — migration 2.2.0
+
+`activitySessions.note` n'existe plus : la règle Firestore refuse désormais ce
+champ. Les notes des versions précédentes doivent être déplacées vers
+`users/{uid}/privateActivityNotes/{sessionId}` — c'est ce que fait
+`migratePrivateNotes(uid)` (`app/src/lib/db.ts`), à appeler depuis un écran
+d'administration ou une tâche unique de migration. Tant qu'elles ne sont pas
+migrées, les notes restent visibles sur le document (elles étaient déjà
+publiées) mais ne sont plus modifiables.
+
+Le partage par lien utilise un document `shareLinks/<sessionId>_<uid>` :
+identifiant déterministe (donc vérifiable par une règle sans requête sur un
+champ), lecture par identifiant uniquement (`list` interdit — sinon les liens
+seraient énumérables), et **suppression = révocation immédiate**. Ce document ne
+contient qu'un résumé (titre, date, distance, durée, légende) : le tracé GPS
+n'est jamais publié par un lien.
+
 ## Backend de confiance — Cloudflare Workers (F05/F06/F11, 100 % gratuit)
 
 Les Cloud Functions Firebase exigent le plan payant **Blaze**. ElyWalk utilise

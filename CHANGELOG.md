@@ -1,5 +1,159 @@
 # Changelog
 
+## 2.2.0 — 2026-11-12
+
+Version **2.2.0** (`versionCode` 20200) : traitement des constats d'audit
+F01 → F12. Chaque point est traité côté application **et** côté règles
+Firestore, parce qu'un correctif d'interface seul ne ferme pas une faille.
+
+### F01 — Notes privées et audiences des sorties
+
+- **La note de sortie était publiée avec le tracé.** Le champ `note` était
+  écrit dans `activitySessions`, donc servi à l'audience de la sortie (amis ou
+  lien) alors que l'interface l'annonçait comme personnelle. Les notes vivent
+  désormais dans `users/{uid}/privateActivityNotes/{sessionId}`, lisibles par le
+  seul propriétaire, et la règle Firestore **interdit** `note` sur
+  `activitySessions`. Le texte partageable s'appelle `caption` (≤ 500 car.).
+- **Audiences vérifiées côté serveur.** `friends` exige une amitié réellement
+  enregistrée (`friendships/{a_b}`) et l'absence de blocage ; `link` exige un
+  jeton actif. Auparavant, la règle ne vérifiait que le champ `visibility`
+  déclaré par le client : n'importe quel utilisateur authentifié lisait une
+  sortie « amis » en connaissant son identifiant.
+- **Liens révocables.** Un lien de partage est un document
+  `shareLinks/<sessionId>_<uid>` (identifiant déterministe, donc vérifiable par
+  une règle sans requête sur un champ) : lisible par identifiant seulement
+  (`list` interdit, sinon les liens seraient énumérables), révocable par simple
+  suppression, et limité à un **résumé** (titre, date, distance, durée,
+  légende) — le tracé GPS n'est jamais publié par un lien.
+- **Pas quotidiens bornés.** Un tiers non ami ne lit plus l'historique complet
+  (`dailySteps`), seulement une fenêtre ≤ 31 jours (classement 7 / 30 jours) ;
+  propriétaire, amis et présidents gardent l'accès complet.
+- **Profils.** La lecture d'un profil tiers reste possible mais par requête
+  ciblée (`limit <= 1` ou tri par `uid`) : plus de balayage de collection.
+
+### F02 — Intégrité des récompenses
+
+- **Auto-crédit impossible.** Le client pouvait écrire une ligne
+  `transactions` de type `challenge` avec n'importe quel montant : la règle
+  refuse désormais tout crédit `challenge` côté client (worker / administration
+  uniquement) et borne les récompenses à 0,1 EC.
+- **Catalogue autoritaire.** Les montants de défi viennent d'un catalogue
+  `challengeCatalog/{id}` (écrit par l'administration seule). Un défi inventé,
+  inactif, expiré ou déjà réclamé ne crédite rien, et le montant doit être
+  **égal** à celui du catalogue — la progression reste bornée.
+- **Barème entièrement géré depuis l'espace d'administration.**
+  Profil → Administration → *Barème des défis* : un bouton ouvre les défis du
+  jour au versement, et chaque défi peut être réglé (1 à 50 EC), enregistré ou
+  fermé individuellement. Aucune saisie dans la console Firebase : les
+  identifiants sont datés (semaine, mois, jour), donc une ligne recopiée à la
+  main devient orpheline la semaine suivante. L'écran affiche l'état réel de
+  chaque défi (`ouvert` / `fermé` / `objectif seul`) et n'écrase jamais un
+  montant déjà ajusté.
+
+### F03 — Suppression et export du compte
+
+- **La suppression pouvait rester bloquée.** L'ancien code tentait de supprimer
+  `dailySteps`, ce que les règles interdisent au client : un compte ayant validé
+  des pas s'arrêtait au milieu du parcours. Nouveau module `lib/account.ts` avec
+  un **inventaire explicite** de 22 traitements (supprimer / anonymiser /
+  conserver), reprise étape par étape, sous-collections traitées une à une
+  (Firestore ne cascade pas), messages, badges, fil, parcours et rencontres
+  enfin couverts.
+- **Export complet.** L'export était plafonné (1 000 sorties, 50 dernières
+  transactions) et omettait messages, badges et parcours. Il est désormais
+  paginé par curseur, sans limite, partageable via la feuille système, et
+  précise ce qu'il ne contient pas.
+- **Retraits conservés.** Un retrait `pending` est payé puis anonymisé
+  (`userName`, `deletedUser`), jamais effacé : l'utilisateur a déjà été débité.
+- **Confirmation vérifiée.** Après suppression, une recherche de données
+  résiduelles s'affiche au lieu d'une promesse non vérifiable.
+
+### F04 — Hors connexion et synchronisation
+
+- **File d'envoi persistante.** Une sortie vécue hors connexion disparaissait à
+  la réouverture. Les écritures de sortie passent par une file (`lib/syncQueue`),
+  sérialisée sur l'appareil, rejouée au retour du réseau, au retour au premier
+  plan ou à l'ouverture de l'app. Identifiant généré sur l'appareil : aucun
+  doublon, reprise idempotente, délai croissant borné et plafond de tentatives.
+- **État visible.** Un bandeau « synchronisation en attente » avec bouton
+  « Réessayer » remplace le silence, et le diagnostic affiche le détail.
+- **Actions publicitaires explicites.** Une vidéo récompensée distingue
+  désormais trois cas : consentement manquant (ouvre l'écran de préférences),
+  SDK indisponible (message clair), ou prêt. Fini le silence après une vidéo.
+
+### F05 — Sorties rejouables
+
+- Une sortie porte un identifiant créé sur l'appareil (`act_…`), enregistrée
+  avec `createdOffline` / `syncedAt` : la même sortie peut être réémise sans
+  créer de doublon, et l'interface sait distinguer « enregistrée sur ce
+  téléphone » de « synchronisée ».
+
+### F06 — Observabilité
+
+- **Aucun rapport de panne n'existait.** Nouveau journal local borné (200
+  entrées, dédoublonné), capture des erreurs et des rejets de promesse,
+  anonymisation systématique (e-mails, coordonnées GPS, jetons, UID).
+- **Écran Diagnostic** (`/diagnostics`, accessible depuis le profil) : version,
+  plateforme, écran, réseau, permission et jeton de notification, rappels
+  programmés, consentement publicitaire, état de la file, journal, copie et
+  envoi d'un rapport. **Rien n'est transmis automatiquement.**
+
+### F07 — Classement et séries
+
+- Le classement porte sur la métrique affichée (solde, pas du jour, pas
+  cumulés) et non plus sur le solde seul ; les amis hors du top sont inclus.
+- La « meilleure série » est calculée à partir des jours validés (`lib/streak`),
+  distinguée de la série en cours.
+
+### F08 — Messagerie et modération
+
+- Messages triés côté serveur (`orderBy createdAt`), boîtes `from` / `to`
+  fusionnées sur 50 messages, abonnement de conversation unique (plus de fuite
+  d'abonnement ni d'affichage croisé), envoi de message borné aux champs
+  modifiables (`read` seul), et champs modifiables d'un défi limités
+  explicitement.
+
+### F09 — Performance
+
+- Pendant une sortie, le tableau de points n'est plus recréé à chaque point GPS
+  (1 Hz) : la carte et l'écran ne se re-rendent plus qu'une fois toutes les deux
+  secondes, sur les 4 000 derniers points.
+- Classement : les documents quotidiens sont mis en cache 5 minutes au lieu
+  d'être relus (100 × 30 lectures) à chaque changement d'onglet.
+- Recherche par nom : pagination par curseur bornée au lieu d'une lecture de
+  collection complète.
+
+### F10 — États de chargement, vide et erreur
+
+- Composants `Skeleton`, `EmptyState`, `ErrorState` ; `friendlyError` traduit
+  « hors connexion », « index manquant » et « accès refusé » en messages
+  actionnables. Le classement et les amis ne restent plus bloqués sur un
+  « Chargement… » silencieux.
+
+### F11 — Liens partagés et QR
+
+- Origine canonique `https://elywalk-2f7ba.web.app` (plus de `location.origin`,
+  qui vaut `http://localhost` ou `capacitor://localhost` dans la WebView).
+- QR généré **localement** (`lib/qrcode`) : plus d'appel à `api.qrserver.com`,
+  donc plus de QR vide hors connexion.
+
+### F12 — Règles Firestore vérifiables
+
+- Le fichier de règles compile (`firebase emulators:exec`, `npm run test:rules`)
+  et les tests d'accès couvrent désormais les audiences (ami / lien / privé), la
+  révocation d'un lien, le blocage, les notes privées, les signaux antifraude,
+  la lecture bornée des pas quotidiens et l'impossibilité de réintroduire une
+  note privée dans une sortie partagée.
+- Le harnais de tests utilisait `before` / `after`, qui n'existaient plus dans
+  Vitest 3 : les 14 tests étaient **silencieusement ignorés** depuis la montée de
+  version. Corrigé (`beforeAll` / `afterAll`), donc les règles sont réellement
+  exercées.
+
+### Divers
+
+- Version **2.2.0**, `versionCode` **20200** (Play Console exige une
+  incrémentation à chaque envoi).
+
 ## 2.1.4 — 2026-11-11
 
 ### Conformité « Sécurité des données » (refus Play du build 20103)

@@ -9,6 +9,30 @@ service cloud.firestore {
     function blockPath(owner, target) { return /databases/$(database)/documents/blockedAccounts/$(owner + '_' + target); }
     function blocked(a, b) { return exists(blockPath(a, b)) || exists(blockPath(b, a)); }
     function canInteract(a, b) { return a != b && !blocked(a, b); }
+    // F01 — l'audience « Amis » ne se contente plus de la visibilité déclarée :
+    // l'amitié est vérifiée côté serveur sur le document `friendships`.
+    function friendId(a, b) { return a < b ? a + '_' + b : b + '_' + a; }
+    function areFriends(a, b) {
+      return a != b && exists(/databases/$(database)/documents/friendships/$(friendId(a, b)));
+    }
+    // Champs strictement privés : jamais exposés par le document `users`.
+    // (Les signaux antifraude vivent dans `users/{uid}/private/signals`.)
+    //
+    // F01 — un lien de partage est matérialisé par un jeton écrit sous
+    // `activitySessions/{id}/shareTokens/{jeton}`. Une règle ne peut pas
+    // interroger une collection sur un champ : passer par un sous-document
+    // d'identifiant connu rend la vérification possible (et sa suppression
+    // révoque l'accès immédiatement).
+    // F01 — un lien de partage est un document `shareLinks/<sessionId>_<uid>` :
+    // l'identifiant est déterministe, ce qui permet de le lire sans requête sur
+    // un champ, et sa suppression révoque l'accès immédiatement. Il ne contient
+    // que le résumé explicitement partagé, jamais le tracé GPS.
+    function linkPath(sessionId, uid) {
+      return /databases/$(database)/documents/shareLinks/$(sessionId + '_' + uid);
+    }
+    function linkIsActive(sessionId, owner) {
+      return exists(linkPath(sessionId, owner));
+    }
     function participantsAllowed(p) {
       // Le créateur est toujours p[0] dans le service. Limite volontaire à six
       // participants pour rester sous le quota de lectures des règles.
@@ -90,10 +114,19 @@ service cloud.firestore {
     // atomique du retrait est contrôlée dans /withdrawals.
     function validChallengeCredit(uid) {
       let challengeId = request.resource.data.lastChallengeClaim;
+      let before = get(/databases/$(database)/documents/users/$(uid)/challenges/$(challengeId)).data;
       let after = getAfter(/databases/$(database)/documents/users/$(uid)/challenges/$(challengeId)).data;
+      // F02 — la récompense doit venir d'une campagne connue du catalogue
+      // autoritaire (`challengeCatalog`, écrit uniquement par l'administration) :
+      // un défi inventé ou un montant arbitraire ne peuvent pas être crédités.
+      let catalog = get(/databases/$(database)/documents/challengeCatalog/$(challengeId)).data;
       return verified() && (!('lastChallengeClaim' in resource.data) || challengeId != resource.data.lastChallengeClaim)
         && after.claimed == true && after.uid == uid
-        && after.reward is number && request.resource.data.elycoins == resource.data.elycoins + after.reward
+        && before.claimed == false
+        && catalog.active == true
+        && numberBetween(after.reward, 1, 50)
+        && after.reward == catalog.reward
+        && request.resource.data.elycoins == resource.data.elycoins + after.reward
         && request.resource.data.totalSteps == resource.data.totalSteps
         && request.resource.data.totalCalories == resource.data.totalCalories
         && request.resource.data.streak == resource.data.streak
@@ -132,13 +165,30 @@ service cloud.firestore {
     }
 
     match /users/{uid} {
-      allow read: if auth() && (self(uid) || !blocked(request.auth.uid, uid));
+      // F01 — la lecture d'un profil tiers reste possible (classement, amis,
+      // recherche par code) mais **bornée** : un document précis se lit
+      // normalement, une requête de collection est plafonnée à 200 documents —
+      // impossible donc d'aspirer toute la base des profils. Les champs
+      // sensibles (e-mail, PayPal, IP, HWID, santé) vivent dans `private` et
+      // dans les documents de retrait, jamais dans le document public.
+      allow get: if self(uid) || president() || (auth() && !blocked(request.auth.uid, uid));
+      allow list: if self(uid) || president()
+        || (auth() && !blocked(request.auth.uid, uid) && request.query.limit <= 200);
       allow create: if self(uid) && request.resource.data.uid == uid
         && request.resource.data.elycoins == 0 && request.resource.data.totalSteps == 0;
       allow update: if president() || (self(uid) && (safeProfileEdit() || safePublicSync() || validStepCredit(uid) || validAdCredit(uid) || validReferralCredit(uid) || validChallengeCredit(uid) || validDebit()));
       allow delete: if self(uid);
       match /dailySteps/{day} {
-        allow read: if auth();
+        // F01 — les pas quotidiens ne sont plus librement énumérables.
+        //  • propriétaire, amis vérifiés, présidents : accès complet (historique) ;
+        //  • tout autre utilisateur : uniquement par fenêtre bornée (≤ 31 jours),
+        //    ce qui couvre le classement 7 / 30 jours et les cartes de profil
+        //    sans permettre de reconstituer un historique complet ni de balayer
+        //    la sous-collection.
+        allow get: if self(uid) || president() || areFriends(request.auth.uid, uid)
+          || (auth() && !blocked(request.auth.uid, uid));
+        allow list: if self(uid) || president() || areFriends(request.auth.uid, uid)
+          || (auth() && !blocked(request.auth.uid, uid) && request.query.limit <= 31);
         allow create: if self(uid) && verified()
           && request.resource.data.steps is int && numberBetween(request.resource.data.steps, 0, 60000)
           && numberBetween(request.resource.data.coins, 1, 50);
@@ -147,23 +197,91 @@ service cloud.firestore {
       match /notificationTokens/{tokenId} {
         allow read, create, update, delete: if self(uid);
       }
+      // F01 — notes privées des sorties : lisibles par le seul propriétaire,
+      // jamais renvoyées avec le document partageable.
+      match /privateActivityNotes/{sessionId} {
+        allow read, create, update, delete: if self(uid);
+      }
+      // F01 — signaux antifraude (IP, HWID) isolés du profil : seul le
+      // propriétaire écrit, les présidents consultent en cas de litige.
+      match /private/{docId} {
+        allow read: if self(uid) || president();
+        allow write: if self(uid);
+      }
       match /challenges/{challengeId} {
         allow read: if self(uid);
-        allow create, update: if self(uid) && verified()
+        // F02 — la progression et la récompense ne sont plus libres : montant
+        // borné au barème (`rewardBetween`), progression bornée à 400 000
+        // unités (le plus grand objectif de campagne), `claimed` seul champ
+        // modifiable après création. Le montant est aussi comparé au barème du
+        // catalogue côté fonctions d'administration.
+        allow create: if self(uid) && verified()
           && request.resource.data.uid == uid
           && request.resource.data.progress is number
-          && request.resource.data.progress >= 0
-          && request.resource.data.claimed is bool;
+          && numberBetween(request.resource.data.progress, 0, 400000)
+          && request.resource.data.claimed is bool
+          && (!('reward' in request.resource.data) || numberBetween(request.resource.data.reward, 0, 50));
+        allow update: if self(uid) && verified()
+          && request.resource.data.uid == uid
+          && numberBetween(request.resource.data.progress, 0, 400000)
+          && request.resource.data.diff(resource.data).affectedKeys().hasAny(['claimed','progress','updatedAt','claimedAt','reward'])
+          && request.resource.data.claimed is bool
+          && (!('reward' in request.resource.data) || (
+            numberBetween(request.resource.data.reward, 0, 50)
+            && (!('reward' in resource.data) || request.resource.data.reward == resource.data.reward)));
         allow delete: if self(uid);
       }
       match /transactions/{txId} {
         allow read: if self(uid) || president();
-        allow create: if president() || (self(uid) && verified() && numberBetween(request.resource.data.coins, -10000000, 50)
-          && request.resource.data.createdAt is number);
+        // F02 — le registre des crédits reste lisible par le propriétaire, mais
+        // un client ne peut plus s'auto-créditer en inscrivant une ligne
+        // « challenge » : seuls les types issus d'un flux vérifié
+        // (pas, publicité, parrainage) et les débits sont acceptés côté client.
+        // Les crédits de défi passent par le Worker / l'administration.
+        allow create: if president() || (self(uid) && verified()
+          && numberBetween(request.resource.data.coins, -10000000, 50)
+          && request.resource.data.createdAt is number
+          && !(request.resource.data.type == 'challenge' && request.resource.data.coins > 0));
         allow delete: if self(uid); // suppression RGPD uniquement, aucune incidence sur le solde
         allow update: if false;
       }
     }
+
+    // F01 — profil public séparé, projeté depuis `users` : c'est la seule vue
+    // autorisée aux autres utilisateurs (pseudo, photo, bio, niveau, pas).
+    // F02 — catalogue autoritaire des campagnes : montants et fenêtres de
+    // validité définis par l'administration, jamais par le client.
+    match /challengeCatalog/{challengeId} {
+      allow read: if auth();
+      allow write: if president();
+    }
+
+    // F01 — accès public à une sortie partagée par lien.
+    //
+    // Un lien porte sur un couple (sortie, propriétaire) : l'identifiant est
+    // donc déterministe (`<sessionId>_<uid>`), ce qui évite toute requête sur un
+    // champ depuis une règle. Un visiteur non authentifié ne peut pas lire
+    // `activitySessions` (règle trop large) ; il lit ce document, qui ne contient
+    // que le résumé explicitement partagé (titre, distance, durée, date) et le
+    // périmètre du lien. Révoquer = supprimer ce document ; il cesse alors
+    // instantanément d'exister pour tout le monde.
+    match /shareLinks/{linkId} {
+      // Lecture par identifiant uniquement : autoriser `list` permettrait
+      // d'énumérer tous les liens partagés et de contourner le secret du jeton.
+      allow get: if true;
+      allow list: if false;
+      allow create: if self(request.resource.data.ownerUid)
+        && request.resource.data.ownerUid == get(/databases/$(database)/documents/activitySessions/$(request.resource.data.sessionId)).data.uid
+        && request.resource.data.token.size() >= 16
+        && request.resource.data.scope in ['summary','track']
+        && (!('caption' in request.resource.data) || request.resource.data.caption.size() <= 500)
+        && (!('title' in request.resource.data) || request.resource.data.title.size() <= 120)
+        && request.resource.data.distanceM is number
+        && request.resource.data.distanceM >= 0;
+      allow update: if false;
+      allow delete: if auth() && resource.data.ownerUid == request.auth.uid;
+    }
+
 
     match /adClaims/{slot} {
       allow read: if auth();
@@ -226,7 +344,21 @@ service cloud.firestore {
       allow delete: if false;
     }
     match /activitySessions/{id} {
-      allow read: if auth() && (resource.data.uid == request.auth.uid || (resource.data.visibility in ['friends','link'] && !blocked(request.auth.uid, resource.data.uid)));
+      // F01 — audiences formalisées et vérifiées côté serveur :
+      //  • `private`  : propriétaire uniquement ;
+      //  • `friends`  : amitié enregistrée **et** absence de blocage ;
+      //  • `link`     : la sortie n'est plus lisible directement, l'accès passe
+      //                 par un `shareLink` actif (jeton non devinable).
+      allow read: if auth() && (
+        resource.data.uid == request.auth.uid
+        || (resource.data.visibility == 'friends'
+          && areFriends(request.auth.uid, resource.data.uid)
+          && !blocked(request.auth.uid, resource.data.uid))
+        || (resource.data.visibility == 'link'
+          && auth()
+          && !blocked(request.auth.uid, resource.data.uid)
+          && linkIsActive(id, resource.data.uid))
+      );
       allow create: if verified() && request.resource.data.uid == request.auth.uid
         && request.resource.data.type in ['walk','run'] && request.resource.data.status == 'active';
       // pausedSec est exclu de durationSec (durée active) et borné à 24 h.
@@ -242,10 +374,13 @@ service cloud.firestore {
             && request.resource.data.pausedSec >= 0
             && request.resource.data.pausedSec <= 86400))
         && (!('title' in request.resource.data) || request.resource.data.title.size() <= 80)
-        && (!('note' in request.resource.data) || request.resource.data.note.size() <= 500)
+        // F01 — la note privée n'appartient plus au document partageable.
+        && !('note' in request.resource.data)
+        && (!('caption' in request.resource.data) || request.resource.data.caption.size() <= 500)
         && (!('weather' in request.resource.data)
           || request.resource.data.weather in ['sunny','cloudy','rain','cold','wind','night']);
       allow delete: if auth() && resource.data.uid == request.auth.uid;
+
     }
     match /partnerRequests/{id} {
       allow read: if president() || (auth() && resource.data.uid == request.auth.uid);
@@ -255,6 +390,8 @@ service cloud.firestore {
         && request.resource.data.userName == 'Compte supprimé'); allow delete: if false;
     }
     match /users/{uid}/badges/{badgeId} {
+      // Les badges sont des trophées publics (affichés sur le profil visiteur) :
+      // ils restent lisibles, mais ne contiennent aucune donnée personnelle.
       allow read: if auth();
       allow create, update: if self(uid) && request.resource.data.badgeId == badgeId;
       allow delete: if self(uid);
@@ -274,7 +411,18 @@ service cloud.firestore {
         && request.resource.data.participants.size() <= 6
         && participantsAllowed(request.resource.data.participants)
         && request.resource.data.target is number;
-      allow update: if auth() && request.auth.uid in resource.data.participants;
+      // F08 — champs modifiables explicitement limités : l'identité, la cible
+      // et la récompense d'un défi ne peuvent plus être réécrites après
+      // création par n'importe quel participant.
+      allow update: if auth() && request.auth.uid in resource.data.participants
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status','participants','participantNames','invitedUids','endsAt'
+        ])
+        && request.resource.data.creatorUid == resource.data.creatorUid
+        && request.resource.data.target == resource.data.target
+        && request.resource.data.status in ['active','completed']
+        && request.resource.data.participants.size() >= 2
+        && request.resource.data.participants.size() <= 6;
       allow delete: if auth() && resource.data.creatorUid == request.auth.uid;
     }
     match /directMessages/{id} {
@@ -282,7 +430,10 @@ service cloud.firestore {
       allow create: if auth() && request.resource.data.from == request.auth.uid
         && canInteract(request.resource.data.from, request.resource.data.to)
         && request.resource.data.text.size() > 0 && request.resource.data.text.size() <= 500;
-      allow update: if auth() && request.auth.uid == resource.data.to;
+      // F08 — seul le destinataire peut marquer comme lu ; le contenu d'un
+      // message ne peut pas être réécrit après envoi.
+      allow update: if auth() && request.auth.uid == resource.data.to
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']);
       allow delete: if auth() && request.auth.uid in [resource.data.from, resource.data.to];
     }
     match /communityEvents/{id} {

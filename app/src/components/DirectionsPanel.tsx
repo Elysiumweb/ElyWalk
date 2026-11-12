@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useToast } from './Toast';
+import AddressAutocomplete from './AddressAutocomplete';
+import NavigationView from './NavigationView';
 import { haversineM, type Coords } from '../lib/geo';
 import {
   externalMapsUrl,
@@ -14,6 +16,7 @@ import {
   tidyAddress,
   TRAVEL_MODES,
   TRANSIT_MODE_LABEL,
+  type AddressSuggestion,
   type LatLng,
   type RoutePlan,
   type TravelMode,
@@ -78,6 +81,10 @@ export default function DirectionsPanel({
   const [destPoint, setDestPoint] = useState<LatLng | null>(null);
   const [addressQuery, setAddressQuery] = useState('');
   const [editingStart, setEditingStart] = useState(false);
+  // Détail des consignes : masqué par défaut. Le guidage se fait sur la carte
+  // (NavigationView) ; la liste n'est qu'une aide consultable.
+  const [showSteps, setShowSteps] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
 
   // Point d'arrivée : coordonnées de l'établissement si connues, sinon
   // géocodage de son adresse postale.
@@ -262,28 +269,13 @@ export default function DirectionsPanel({
     await onLocate();
   };
 
-  const applyAddressQuery = async () => {
-    if (addressQuery.trim().length < 3) {
-      toast('Saisissez une adresse de départ complète.', 'error');
-      return;
-    }
-    setLoading(true);
-    try {
-      const hit = await geocodeAddress(addressQuery);
-      if (!hit) {
-        toast('Adresse introuvable. Précisez la ville.', 'error');
-        return;
-      }
-      setStartPoint({ lat: hit.lat, lng: hit.lng });
-      setStartLabel(tidyAddress(hit.label));
-      setEditingStart(true);
-      onOriginResolved?.({ lat: hit.lat, lng: hit.lng });
-      setAddressQuery('');
-    } catch (e) {
-      toast((e as Error).message, 'error');
-    } finally {
-      setLoading(false);
-    }
+  /** Adresse choisie dans la liste de suggestions (coordonnées déjà résolues). */
+  const applySuggestion = (suggestion: AddressSuggestion) => {
+    setStartPoint({ lat: suggestion.lat, lng: suggestion.lng });
+    setStartLabel(suggestion.label);
+    setEditingStart(true);
+    onOriginResolved?.({ lat: suggestion.lat, lng: suggestion.lng });
+    setAddressQuery(suggestion.label);
   };
 
   return (
@@ -346,19 +338,17 @@ export default function DirectionsPanel({
         </div>
 
         {(editingStart || !startPoint) && (
-          <div className="directions-address-form">
-            <input
-              className="input"
-              value={addressQuery}
-              onChange={(e) => setAddressQuery(e.target.value)}
-              placeholder="Adresse de départ (ex. 12 rue de Rivoli, Paris)"
-              aria-label="Adresse de départ"
-              data-testid="directions-start-input"
-            />
-            <button className="btn btn-gold btn-sm" onClick={() => void applyAddressQuery()} disabled={loading}>
-              Utiliser
-            </button>
-          </div>
+          <AddressAutocomplete
+            value={addressQuery}
+            onChange={setAddressQuery}
+            onSelect={applySuggestion}
+            label="Adresse de départ"
+            placeholder="Ex. 12 rue de Rivoli, Paris"
+            ariaLabel="Adresse de départ"
+            helpText="Les adresses sont proposées au fil de la frappe : touchez-en une pour partir de là."
+            near={startPoint}
+            testId="directions-start"
+          />
         )}
 
         <div className="directions-summary" data-testid="directions-summary">
@@ -415,27 +405,57 @@ export default function DirectionsPanel({
           </div>
         )}
 
-        {plan?.steps && plan.steps.length > 0 && !loading && (
-          <ol className="directions-steps" data-testid="directions-steps">
-            {plan.steps.map((step, index) => (
-              <li key={`${index}-${step.instruction}`}>
-                <span className="directions-step-index" aria-hidden="true">
-                  {index + 1}
-                </span>
-                <div className="row-main">
-                  <div className="row-title" style={{ fontSize: 13 }}>
-                    {step.instruction}
-                  </div>
-                  {step.distanceM > 0 && (
-                    <div className="row-sub">
-                      {formatRouteDistance(step.distanceM)}
-                      {step.durationS > 0 ? ` · ${formatDuration(step.durationS)}` : ''}
+        {/*
+          Le détail des consignes n'est plus affiché en permanence : il
+          remplaçait le guidage par une simple liste. La carte et le bouton
+          « Démarrer » lancent un vrai guidage (NavigationView) ; la liste reste
+          disponible à la demande, pour préparer le trajet.
+        */}
+        {plan && plan.steps.length > 0 && !loading && (
+          <div className="directions-steps-block">
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => setShowSteps((v) => !v)}
+              aria-expanded={showSteps}
+              data-testid="directions-toggle-steps"
+            >
+              {showSteps ? 'Masquer le détail des consignes' : `Voir le détail (${plan.steps.length} étapes)`}
+            </button>
+            {showSteps && (
+              <ol className="directions-steps" data-testid="directions-steps">
+                {plan.steps.map((step, index) => (
+                  <li key={`${index}-${step.instruction}`}>
+                    <span className="directions-step-index" aria-hidden="true">
+                      {index + 1}
+                    </span>
+                    <div className="row-main">
+                      <div className="row-title" style={{ fontSize: 13 }}>
+                        {step.instruction}
+                      </div>
+                      {step.distanceM > 0 && (
+                        <div className="row-sub">
+                          {formatRouteDistance(step.distanceM)}
+                          {step.durationS > 0 ? ` · ${formatDuration(step.durationS)}` : ''}
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ol>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </div>
+        )}
+
+        {destPoint && (
+          <button
+            type="button"
+            className="btn btn-gold directions-start-nav"
+            onClick={() => setNavOpen(true)}
+            data-testid="directions-start-navigation"
+          >
+            🧭 Démarrer le guidage
+          </button>
         )}
 
         {destPoint && (
@@ -448,11 +468,21 @@ export default function DirectionsPanel({
           </button>
         )}
         <p className="muted-xs directions-credits">
-          Calcul d’itinéraire : OpenStreetMap · OSRM (marche, vélo, voiture) et
+          Calcul d’itinéraire : OpenStreetMap · Valhalla (marche, vélo, voiture) et
           Île-de-France Mobilités ou <a href="https://transitous.org" target="_blank" rel="noreferrer">Transitous</a>{' '}
-          (transports en commun).
+          (transports en commun). Adresses : Photon · OpenStreetMap.
         </p>
       </div>
+
+      <NavigationView
+        open={navOpen}
+        onClose={() => setNavOpen(false)}
+        destinationName={destination?.name || 'Destination'}
+        destination={destPoint}
+        mode={mode}
+        initialPlan={plan}
+        start={startPoint}
+      />
     </div>
   );
 }

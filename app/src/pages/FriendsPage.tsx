@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
@@ -19,8 +19,11 @@ import {
   sendDirectMessage,
   watchRecentMessages,
   listRecentMessages,
+  watchDirectMessages,
 } from '../lib/db';
+import { shareUrlForReferral } from '../lib/share';
 import Avatar from '../components/Avatar';
+import { EmptyState, ErrorState, Skeleton } from '../components/AsyncState';
 import ActivityFeed from '../components/ActivityFeed';
 import QRCode, { shareFriendCode } from '../components/QRCode';
 import { fmtNumber, dateStr } from '../lib/coins';
@@ -40,6 +43,7 @@ export default function FriendsPage() {
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<unknown>(null);
   const [tab, setTab] = useState<'friends'|'feed'|'messages'>('friends');
   const [qrOpen, setQrOpen] = useState(false);
   const [messages, setMessages] = useState<DirectMessage[]>([]);
@@ -53,9 +57,18 @@ export default function FriendsPage() {
     if (!profile) return;
     const unsub1 = watchIncomingRequests(profile.uid, setRequests);
     const unsub2 = watchFriendships(profile.uid, async (uids) => {
-      const profiles = await getProfiles(uids);
-      setFriends(profiles);
-      setLoading(false);
+      // F10 — une lecture de profils refusée laissait auparavant la liste en
+      // « Chargement… » indéfiniment : on sort explicitement de l'état chargement
+      // et on l'expose pour pouvoir réessayer.
+      try {
+        const profiles = await getProfiles(uids);
+        setFriends(profiles);
+        setLoadError(null);
+      } catch (e) {
+        setLoadError(e);
+      } finally {
+        setLoading(false);
+      }
     });
     const unsub3 = watchOutgoingRequests(profile.uid, setOutgoing);
     const unsub4 = watchFriendReactions(profile.uid, setReactions);
@@ -97,17 +110,37 @@ export default function FriendsPage() {
 
   const doSearch = async () => { setSearchResults(await searchUsersByName(code)); };
   const remove = async (uid:string) => { if(!profile||!confirm('Supprimer cet ami ?'))return; await removeFriendship(profile.uid,uid); toast('Ami supprimé.','info'); };
-  const share = async () => { if(!profile)return; const text=`Rejoins-moi sur ElyWalk : ${location.origin}/?ref=${profile.referralCode}`; if(navigator.share)await navigator.share({text});else{await navigator.clipboard.writeText(text);toast('Lien copié !','success')} };
+  // Domaine canonique (elywalk-2f7ba.web.app) et non `location.origin`, qui
+  // vaut `http://localhost` dans la WebView Capacitor : le lien partagé doit
+  // ouvrir l'application chez le destinataire (F11).
+  const share = async () => { if(!profile)return; const text=`Rejoins-moi sur ElyWalk : ${shareUrlForReferral(profile.referralCode)}`; if(navigator.share)await navigator.share({text});else{await navigator.clipboard.writeText(text);toast('Lien copié !','success')} };
   const shareQR = async()=>{ if(!profile)return; try{ const r=await shareFriendCode(profile.referralCode, profile.displayName); toast(r==='shared'?'QR partagé !':'Image enregistrée.','success'); }catch(e){toast((e as Error).message,'error')} };
   const today = dateStr();
 
-  const openChat = async (uid:string, name:string)=>{
-    if(!profile) return;
-    setMsgOpen({uid,name});
-    const { watchDirectMessages } = await import('../lib/db');
-    // subscribe
-    watchDirectMessages(profile.uid, uid, setChatMessages);
+  /**
+   * Ouvre une conversation en **fermant l'écoute précédente**.
+   * Avant, chaque ouverture empilait un abonnement : en alternant rapidement
+   * entre deux amis, les messages de l'un s'affichaient chez l'autre (F08).
+   */
+  const chatUnsubRef = useRef<(() => void) | null>(null);
+  const closeChat = () => {
+    chatUnsubRef.current?.();
+    chatUnsubRef.current = null;
+    setMsgOpen(null);
+    setChatMessages([]);
   };
+  const openChat = (uid:string, name:string)=>{
+    if(!profile) return;
+    chatUnsubRef.current?.();
+    setChatMessages([]);
+    setMsgOpen({uid,name});
+    chatUnsubRef.current = watchDirectMessages(profile.uid, uid, setChatMessages);
+  };
+  // Fermeture de la feuille ou démontage : aucun abonnement ne doit survivre.
+  useEffect(() => () => {
+    chatUnsubRef.current?.();
+    chatUnsubRef.current = null;
+  }, []);
   const sendMsg = async()=>{
     if(!profile||!msgOpen||!msgText.trim()) return;
     setMsgBusy(true);
@@ -174,12 +207,20 @@ export default function FriendsPage() {
       <div className="card">
         <div className="card-title">Mes amis ({friends.length})</div>
         {loading ? (
-          <div className="empty-state">Chargement...</div>
+          <Skeleton rows={4} label="Chargement de vos amis" />
+        ) : loadError ? (
+          <ErrorState
+            title="Vos amis n’ont pas pu être chargés"
+            error={loadError}
+            onRetry={() => { setLoading(true); setLoadError(null); }}
+          />
         ) : friends.length === 0 ? (
-          <div className="empty-state" data-testid="friends-empty-state">
-            <div className="display">Aucun ami pour l’instant</div>
-            Ajoutez vos amis avec leur code pour comparer vos pas, séries et calories.
-          </div>
+          <EmptyState
+            icon="👋"
+            title="Aucun ami pour l’instant"
+            hint="Ajoutez vos amis avec leur code pour comparer vos pas, séries et calories."
+            action={<button className="btn btn-gold" onClick={() => setAddOpen(true)}>Ajouter un ami</button>}
+          />
         ) : (
           friends.map((f) => (
             <div className="list-row" key={f.uid} data-testid="friend-row">
@@ -246,14 +287,14 @@ export default function FriendsPage() {
 
       <Sheet open={qrOpen} onClose={()=>setQrOpen(false)} title="QR code ami">
         <div style={{textAlign:'center', padding:'8px 0'}}>
-          {profile && <QRCode value={`${location.origin}/?ref=${profile.referralCode}`} size={220} title={`Code ${profile.referralCode}`} />}
+          {profile && <QRCode value={shareUrlForReferral(profile.referralCode)} size={220} title={`Code ${profile.referralCode}`} />}
           <div style={{marginTop:12, fontFamily:'var(--font-display)', fontSize:24, color:'var(--gold)', letterSpacing:'0.2em'}}>{profile?.referralCode}</div>
           <p style={{color:'var(--muted)', fontSize:12, marginTop:8}}>Montrez ce QR à vos amis en présentiel — scan instantané.</p>
           <button className="btn btn-gold" style={{marginTop:12}} onClick={shareQR}>Partager l’image stylée ElyWalk</button>
         </div>
       </Sheet>
 
-      <Sheet open={!!msgOpen} onClose={()=>setMsgOpen(null)} title={`💬 ${msgOpen?.name||''}`}>
+      <Sheet open={!!msgOpen} onClose={closeChat} title={`💬 ${msgOpen?.name||''}`}>
         <div style={{maxHeight:'50vh', overflow:'auto', marginBottom:12}}>
           {chatMessages.length===0 ? <div className="empty-state">Aucun message. Dites bonjour ! 👋</div> : chatMessages.map(m=>(
             <div key={m.id} className={`list-row ${m.from===profile?.uid?'':'incoming'}`} style={{background: m.from===profile?.uid?'var(--gold-dim)':'transparent', borderRadius:8, margin:'6px 0', padding:'8px 10px'}}>

@@ -13,6 +13,30 @@ import {
 
 export type ShareResult = 'shared' | 'downloaded';
 
+/**
+ * Domaine public canonique de l'application.
+ *
+ * `location.origin` vaut `https://localhost` (ou `capacitor://localhost`) dans
+ * la WebView Android : les liens de parrainage et les QR codes partagés depuis
+ * l'application étaient donc inutilisables (F11). Le domaine Firebase Hosting
+ * reste la seule source de vérité pour le web, les liens universels et
+ * `assetlinks.json`.
+ */
+export const CANONICAL_SHARE_ORIGIN = 'https://elywalk-2f7ba.web.app';
+
+/** Lien de parrainage partageable, toujours sur le domaine public. */
+export function shareUrlForReferral(code: string): string {
+  const clean = String(code || '').trim().toUpperCase();
+  return clean ? `${CANONICAL_SHARE_ORIGIN}/?ref=${encodeURIComponent(clean)}` : CANONICAL_SHARE_ORIGIN;
+}
+
+/** Lien partageable vers une ressource interne (sortie, rencontre, profil). */
+export function shareUrlForPath(path: string): string {
+  const clean = path.startsWith('/') ? path : `/${path}`;
+  return `${CANONICAL_SHARE_ORIGIN}${clean}`;
+}
+
+
 /** Blob JPEG → base64 brut (sans le préfixe data:). */
 function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
