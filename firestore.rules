@@ -405,15 +405,18 @@ service cloud.firestore {
       }
     }
 
-    // F01 — profil public séparé, projeté depuis `users` : c'est la seule vue
-    // autorisée aux autres utilisateurs (pseudo, photo, bio, niveau, pas).
-    // F02 — catalogue autoritaire des campagnes : montants et fenêtres de
-    // validité définis par l'administration, jamais par le client.
     // Version publiée sur le Play Store (écran de mise à jour au démarrage).
     //
     // Lecture : toute session authentifiée — l'écran de mise à jour doit pouvoir
     // s'afficher même avant l'onboarding. Écriture : président uniquement, et
     // uniquement les champs attendus, bornés. Aucune donnée personnelle ici.
+    //
+    // Les versions ne sont pas validées par une expression régulière : le
+    // langage des règles n'accepte pas d'échappement `\.` fiable dans une chaîne,
+    // et une regex invalide empêchait tout le fichier de compiler. La borne de
+    // longueur suffit — le document est écrit par le président uniquement, et le
+    // client (`decideUpdate`) ne propose jamais de mise à jour vers une valeur
+    // qu'il ne sait pas comparer.
     match /appRelease/{docId} {
       allow read: if auth();
       allow write: if president()
@@ -423,15 +426,18 @@ service cloud.firestore {
         ])
         && request.resource.data.latestVersion is string
         && request.resource.data.latestVersion.size() <= 20
-        && request.resource.data.latestVersion.matches('^[0-9]+(\.[0-9]+){1,3}$')
         && (!('minSupportedVersion' in request.resource.data)
           || (request.resource.data.minSupportedVersion is string
-            && request.resource.data.minSupportedVersion.size() <= 20
-            && request.resource.data.minSupportedVersion.matches('^[0-9]+(\.[0-9]+){1,3}$')))
+            && request.resource.data.minSupportedVersion.size() <= 20))
         && (!('notes' in request.resource.data)
           || (request.resource.data.notes is string && request.resource.data.notes.size() <= 600))
         && (!('enabled' in request.resource.data) || request.resource.data.enabled is bool);
     }
+
+    // F01 — profil public séparé, projeté depuis `users` : c'est la seule vue
+    // autorisée aux autres utilisateurs (pseudo, photo, bio, niveau, pas).
+    // F02 — catalogue autoritaire des campagnes : montants et fenêtres de
+    // validité définis par l'administration, jamais par le client.
     match /challengeCatalog/{challengeId} {
       allow read: if auth();
       allow write: if president();
