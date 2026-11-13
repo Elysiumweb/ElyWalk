@@ -1,0 +1,17 @@
+# Dépendances
+node_modules/
+
+# Sorties de build
+dist/
+build/
+.output/
+.vite/
+
+# Fichiers locaux de l’éditeur / OS
+.DS_Store
+*.log
+.env
+.env.local
+
+# Artefacts Capacitor/Android générés
+app/android/app/build/

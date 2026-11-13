@@ -4,6 +4,7 @@ import { App as CapApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { LocaleProvider } from './context/LocaleContext';
+import { AlertsProvider } from './context/AlertsContext';
 import { ToastProvider } from './components/Toast';
 import TabBar from './components/TabBar';
 import AdBanner from './components/AdBanner';
@@ -30,6 +31,8 @@ import ActivityPage from './pages/ActivityPage';
 import ActivityDetailPage from './pages/ActivityDetailPage';
 import EventsPage from './pages/EventsPage';
 import RoutesPage from './pages/RoutesPage';
+import SettingsPage from './pages/SettingsPage';
+import ProgressionPage from './pages/ProgressionPage';
 import ProductStatus from './components/ProductStatus';
 import SyncStatus from './components/SyncStatus';
 import { setupNotifications, syncPushRegistration, listenNotificationNavigation } from './lib/notifications';
@@ -149,6 +152,8 @@ function Shell() {
         <Route path="/leaderboard" element={<LeaderboardPage />} />
         <Route path="/wallet" element={<WalletPage />} />
         <Route path="/profile" element={<ProfilePage />} />
+        <Route path="/progression" element={<ProgressionPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
         <Route path="/partners" element={<PartnersPage />} />
         <Route path="/admin" element={<AdminPage />} />
         <Route path="/history" element={<HistoryPage />} />
@@ -178,7 +183,9 @@ export default function App() {
       <LocaleProvider>
       <ToastProvider>
         <AuthProvider>
-          <Shell />
+          <AlertsProvider>
+            <Shell />
+          </AlertsProvider>
         </AuthProvider>
       </ToastProvider>
       </LocaleProvider>

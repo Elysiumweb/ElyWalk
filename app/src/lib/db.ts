@@ -171,6 +171,48 @@ export async function updateUserFields(uid: string, fields: Partial<UserProfile>
   await updateDoc(doc(db, 'users', uid), fields as Record<string, unknown>);
 }
 
+/**
+ * Synchronise les préférences d'alerte et la dernière position connue.
+ *
+ * Le worker (cron) et l'application partagent ces champs :
+ *  - `alerts`           : préférences (messages, rencontres proches + rayon,
+ *                         rappels d'inscription) ;
+ *  - `lastLat`/`lastLng` : position approximative, utilisée pour le rayon des
+ *                         rencontres proches quand l'application est fermée.
+ *
+ * Seul le titulaire du compte écrit ces champs (règle Firestore : mise à jour
+ * de son propre document uniquement).
+ */
+export async function syncAlertSettings(
+  uid: string,
+  alerts: {
+    messages: boolean;
+    friendRequests: boolean;
+    nearbyEvents: boolean;
+    nearbyRadiusKm: number;
+    eventReminders: boolean;
+    eventReminderMinutes: number;
+  },
+  position: { lat: number; lng: number } | null,
+): Promise<void> {
+  const payload: Record<string, unknown> = {
+    alerts: {
+      messages: !!alerts.messages,
+      friendRequests: !!alerts.friendRequests,
+      nearbyEvents: !!alerts.nearbyEvents,
+      nearbyRadiusKm: Math.min(100, Math.max(1, Math.round(alerts.nearbyRadiusKm))),
+      eventReminders: !!alerts.eventReminders,
+      eventReminderMinutes: Math.min(1440, Math.max(5, Math.round(alerts.eventReminderMinutes))),
+      updatedAt: Date.now(),
+    },
+  };
+  if (position && Number.isFinite(position.lat) && Number.isFinite(position.lng)) {
+    payload.lastLat = position.lat;
+    payload.lastLng = position.lng;
+  }
+  await updateDoc(doc(db, 'users', uid), payload);
+}
+
 /** Synchronise les pas du jour (visible par les amis). */
 export async function syncTodaySteps(uid: string, steps: number): Promise<void> {
   await updateDoc(doc(db, 'users', uid), {

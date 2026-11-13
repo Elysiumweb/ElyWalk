@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import { useI18n } from '../context/LocaleContext';
 import Sheet from '../components/Sheet';
+import ConfirmSheet from '../components/ConfirmSheet';
 import { listRoutesPage, parseGpx, saveRoute, duplicateRoute, deleteRoute, routeToGpx, updateRouteVisibility } from '../lib/routes';
 import { formatDistance } from '../lib/coins';
 import type { SavedRoute } from '../lib/types';
@@ -79,6 +80,22 @@ export default function RoutesPage() {
     catch (e) { toast((e as Error).message, 'error'); }
     finally { setBusy(false); }
   };
+  // Suppression d'un parcours : confirmation structurée (plus de `confirm()`).
+  const [pendingDelete, setPendingDelete] = useState<SavedRoute | null>(null);
+  const onDeleteRoute = async () => {
+    if (!profile || !pendingDelete?.id) return;
+    setBusy(true);
+    try {
+      await deleteRoute(profile.uid, pendingDelete.id);
+      toast('Parcours supprimé.', 'info');
+      setPendingDelete(null);
+      await reload();
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
   const download = (route: SavedRoute) => {
     const url = URL.createObjectURL(new Blob([routeToGpx(route)], { type: 'application/gpx+xml' }));
     const a = document.createElement('a'); a.href = url; a.download = `${route.name.replace(/[^a-z0-9_-]+/gi, '-')}.gpx`; a.click(); URL.revokeObjectURL(url);
@@ -99,7 +116,7 @@ export default function RoutesPage() {
       <div className="route-card-head"><div><h2>{route.name}</h2><p>Par {route.ownerName} · {route.visibility === 'public' ? 'Public' : 'Privé'}</p></div><span className="badge">{formatDistance(route.distanceM, 'metric')}</span></div>
       <div className="route-stats"><span>↗ {route.elevationGainM} m D+</span><span>↘ {route.elevationLossM} m D−</span><span>{route.points.length} points</span></div>
       {route.description && <p className="card-help">{route.description}</p>}
-      <div className="route-actions"><button className="btn btn-gold btn-sm" onClick={() => navigate('/activity', { state: { routeId: route.id } })}>{t('routes.follow')}</button><button className="btn btn-outline btn-sm" onClick={() => download(route)}>GPX</button>{route.uid !== profile?.uid && profile && <button className="btn btn-outline btn-sm" onClick={() => duplicateRoute(route, profile).then(reload)}>Sauvegarder</button>}{route.uid === profile?.uid && <><button className="btn btn-ghost btn-sm" onClick={() => updateRouteVisibility(profile.uid, route.id!, route.visibility === 'public' ? 'private' : 'public').then(reload)}>{route.visibility === 'public' ? 'Rendre privé' : 'Publier'}</button><button className="btn btn-danger btn-sm" onClick={() => confirm('Supprimer ce parcours ?') && deleteRoute(profile.uid, route.id!).then(reload)}>Supprimer</button></>}</div>
+      <div className="route-actions"><button className="btn btn-gold btn-sm" onClick={() => navigate('/activity', { state: { routeId: route.id } })}>{t('routes.follow')}</button><button className="btn btn-outline btn-sm" onClick={() => download(route)}>GPX</button>{route.uid !== profile?.uid && profile && <button className="btn btn-outline btn-sm" onClick={() => duplicateRoute(route, profile).then(reload)}>Sauvegarder</button>}{route.uid === profile?.uid && <><button className="btn btn-ghost btn-sm" onClick={() => updateRouteVisibility(profile.uid, route.id!, route.visibility === 'public' ? 'private' : 'public').then(reload)}>{route.visibility === 'public' ? 'Rendre privé' : 'Publier'}</button><button className="btn btn-danger btn-sm" onClick={() => setPendingDelete(route)}>Supprimer</button></>}</div>
     </article>)}
     {hasMore && (
       <button className="btn btn-outline" style={{ marginTop: 8 }} onClick={() => void loadMore()} disabled={loadMoreBusy} data-testid="routes-load-more">
@@ -107,6 +124,21 @@ export default function RoutesPage() {
       </button>
     )}
     <p className="card-help">Cartes © contributeurs OpenStreetMap. Le suivi nécessite votre position uniquement pendant la sortie.</p>
+    <ConfirmSheet
+      open={!!pendingDelete}
+      onClose={() => setPendingDelete(null)}
+      title={pendingDelete ? `Supprimer « ${pendingDelete.name} » ?` : 'Supprimer ce parcours ?'}
+      danger
+      consequences={[
+        'La trace GPX est effacée définitivement.',
+        'Le parcours disparaît de votre liste et de celle de la communauté.',
+        'Les sorties déjà effectuées avec ce parcours sont conservées.',
+      ]}
+      confirmLabel="Supprimer"
+      busy={busy}
+      onConfirm={onDeleteRoute}
+      testId="delete-route-sheet"
+    />
     <Sheet open={!!imported} onClose={() => setImported(null)} title="Enregistrer le parcours"><div className="field"><label>Nom</label><input className="input" value={name} onChange={e => setName(e.target.value)} maxLength={80} /></div><div className="field"><label>Visibilité</label><select className="input" value={visibility} onChange={e => setVisibility(e.target.value as 'private' | 'public')}><option value="private">Privé — moi uniquement</option><option value="public">Public — toute la communauté</option></select></div><button className="btn btn-gold" disabled={busy || !name.trim()} onClick={save}>{busy ? 'Enregistrement…' : 'Enregistrer'}</button></Sheet>
   </div>;
 }

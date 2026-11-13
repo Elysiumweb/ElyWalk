@@ -12,8 +12,12 @@
  * - **routing.openstreetmap.de** (OSRM communautaire, profils `routed-foot`,
  *   `routed-bike`, `routed-car`) en premier repli, lui aussi réellement
  *   multimodal.
- * - **router.project-osrm.org** en dernier repli (tracé routier : la durée est
- *   alors recalculée pour la marche et le vélo).
+ * - **router.project-osrm.org** en **dernier recours pour la voiture
+ *   uniquement** : ce démonstrateur ne connaît qu'un profil automobile. Il
+ *   n'est plus utilisé pour la marche ou le vélo — un tracé routier n'est pas
+ *   un guidage piéton fiable, et le présenter comme tel trompait l'utilisateur.
+ *   Quand aucun moteur multimodal ne répond, l'interface annonce clairement
+ *   l'indisponibilité du mode et propose une alternative explicite.
  * - **OpenTripPlanner** (Île-de-France Mobilités) puis **Transitous** pour les
  *   transports en commun.
  * - **Photon** puis **Nominatim** (OpenStreetMap) pour la recherche d'adresse
@@ -489,10 +493,14 @@ export async function routeWithValhalla(
 }
 
 /**
- * Repli OSRM. `host` permet d'utiliser l'instance communautaire multimodale
- * (profils réellement piéton / vélo / voiture) ou, en dernier recours, le
- * démonstrateur public (`router.project-osrm.org`), dont le profil est ignoré :
- * la durée est alors recalculée à 4,8 km/h (marche) ou 15 km/h (vélo).
+ * Repli OSRM.
+ *
+ * - `osmde` : instance communautaire **multimodale** (préfixes `routed-foot`,
+ *   `routed-bike`, `routed-car`) — le profil demandé est réellement appliqué.
+ * - `demo` : démonstrateur public `router.project-osrm.org`, qui ne connaît
+ *   qu'un profil **automobile**. Il n'est utilisé que pour la voiture : un
+ *   tracé routier recalculé à 4,8 km/h n'a jamais été un itinéraire piéton, et
+ *   le présenter comme tel faisait passer une voiture pour un guidage à pied.
  */
 async function routeWithOsrm(
   from: LatLng,
@@ -500,6 +508,9 @@ async function routeWithOsrm(
   mode: 'walk' | 'bike' | 'car',
   host: 'osmde' | 'demo'
 ): Promise<RoutePlan> {
+  if (host === 'demo' && mode !== 'car') {
+    throw new Error('Ce service ne calcule pas ce mode de déplacement.');
+  }
   const profile = OSRM_PROFILES[mode];
   // Instance communautaire : le profil est porté par le préfixe d'URL
   // (`/routed-foot`, `/routed-bike`, `/routed-car`) et le segment de route
@@ -531,19 +542,14 @@ async function routeWithOsrm(
   }
   if (!geometry.length) throw new Error('Tracé indisponible pour ce mode.');
 
-  // L'instance communautaire applique le profil demandé ; le démonstrateur,
-  // lui, ne sait faire que de la voiture.
-  const speedKmh = host === 'demo' ? (mode === 'walk' ? 4.8 : mode === 'bike' ? 15 : 0) : 0;
-  const durationS = speedKmh
-    ? Math.round(((route.distance || 0) / 1000 / speedKmh) * 3600)
-    : Math.round(route.duration || 0);
+  // Les deux instances appliquent désormais le profil demandé (le démonstrateur
+  // n'est plus sollicité que pour la voiture, cf. garde plus haut).
+  const durationS = Math.round(route.duration || 0);
 
   const provider =
     host === 'osmde'
       ? `OpenStreetMap · OSRM ${mode === 'walk' ? 'piéton' : mode === 'bike' ? 'vélo' : 'voiture'}`
-      : mode === 'car'
-        ? 'OpenStreetMap · OSRM'
-        : 'OpenStreetMap · OSRM (tracé routier)';
+      : 'OpenStreetMap · OSRM';
 
   return {
     mode,
@@ -555,7 +561,15 @@ async function routeWithOsrm(
   };
 }
 
-/** Itinéraire marche / vélo / voiture : Valhalla, puis OSRM (2 serveurs). */
+/**
+ * Itinéraire marche / vélo / voiture.
+ *
+ * Ordre : Valhalla (multimodal), puis l'instance OSRM communautaire
+ * (multimodale), puis — **pour la voiture uniquement** — le démonstrateur
+ * public. Pour la marche et le vélo, si aucun moteur multimodal ne répond, on
+ * ne substitue plus un tracé automobile : l'erreur est explicite, traduisible
+ * et l'interface propose une alternative (`externalMapsUrl`), ou un autre mode.
+ */
 export async function routeOnFootBikeOrCar(
   from: LatLng,
   to: LatLng,
@@ -572,14 +586,24 @@ export async function routeOnFootBikeOrCar(
   } catch (e) {
     failures.push((e as Error).message);
   }
-  try {
-    return await routeWithOsrm(from, to, mode, 'demo');
-  } catch (e) {
-    failures.push((e as Error).message);
+  if (mode === 'car') {
+    try {
+      return await routeWithOsrm(from, to, mode, 'demo');
+    } catch (e) {
+      failures.push((e as Error).message);
+    }
   }
-  throw new Error(
-    `Itinéraire ${TRAVEL_MODES.find((m) => m.id === mode)?.label.toLowerCase() || mode} indisponible pour le moment.`
-  );
+  const label = (TRAVEL_MODES.find((m) => m.id === mode)?.label || mode).toLowerCase();
+  const error = new Error(
+    mode === 'car'
+      ? 'Itinéraire en voiture indisponible pour le moment. Réessayez dans un instant.'
+      : `Itinéraire ${label} indisponible pour le moment. Réessayez dans un instant, ou affichez l’itinéraire dans une autre application.`
+  ) as Error & { modeUnavailable?: TravelMode; retryable?: boolean };
+  // L'interface distingue une panne temporaire d'un mode non couvert : elle
+  // peut ainsi proposer « Réessayer » et une alternative explicite.
+  error.modeUnavailable = mode;
+  error.retryable = true;
+  throw error;
 }
 
 // ---------------------------------------------------------------------------

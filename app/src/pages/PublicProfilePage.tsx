@@ -9,6 +9,7 @@ import BadgeGrid from '../components/BadgeGrid';
 import LevelBadge from '../components/LevelBadge';
 import ReportDialog from '../components/ReportDialog';
 import { blockAccount } from '../lib/safety';
+import ConfirmSheet from '../components/ConfirmSheet';
 import { fmtCoins, fmtNumber, dateStr, formatDistance } from '../lib/coins';
 
 export default function PublicProfilePage(){
@@ -31,17 +32,37 @@ export default function PublicProfilePage(){
     try{ await sendFriendRequest(me,p); toast(`Demande envoyée à ${p.displayName} !`,'success'); }
     catch(e){ toast((e as Error).message,'error'); } finally{setBusy(false);}
   };
-  const onEncourage=async()=>{
-    if(!me||!p) return;
-    const msg=prompt('Petit message d’encouragement (optionnel)')||'';
+  // Encouragement : feuille avec message facultatif (plus de `prompt()`).
+  const [cheerOpen, setCheerOpen] = useState(false);
+  const onEncourage = async (message: string) => {
+    if (!me || !p) return;
     setBusy(true);
-    try{ await sendFriendReaction(me,p.uid,'👏',msg); toast('Encouragement envoyé ! 👏','success'); }
-    catch(e){ toast((e as Error).message,'error'); } finally{setBusy(false);}
+    try {
+      await sendFriendReaction(me, p.uid, '👏', message.trim());
+      toast('Encouragement envoyé ! 👏', 'success');
+      setCheerOpen(false);
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const onBlock=async()=>{
-    if(!me||!p||!confirm(`Bloquer ${p.displayName} ? Vous ne pourrez plus interagir ensemble.`)) return;
-    setBusy(true); try{await blockAccount(me,p);toast('Compte bloqué. Ses contenus et interactions sont masqués.','success');nav('/profile');}catch(e){toast((e as Error).message,'error')}finally{setBusy(false)}
+  // Blocage : confirmation structurée, avec les conséquences réelles.
+  const [blockOpen, setBlockOpen] = useState(false);
+  const onBlock = async () => {
+    if (!me || !p) return;
+    setBusy(true);
+    try {
+      await blockAccount(me, p);
+      toast('Compte bloqué. Ses contenus et interactions sont masqués.', 'success');
+      setBlockOpen(false);
+      nav('/profile');
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setBusy(false);
+    }
   };
 
   if(!p) return <div className="screen"><div className="screen-header"><h1 className="screen-title">Profil public</h1><button className="btn btn-ghost btn-sm" onClick={()=>nav(-1)}>Retour</button></div><div className="empty-state">Profil introuvable.</div></div>;
@@ -64,7 +85,7 @@ export default function PublicProfilePage(){
     {!isMe && (
       <div className="card" style={{display:'flex', gap:8}}>
         <button className="btn btn-gold" style={{flex:1}} onClick={onAddFriend} disabled={busy} data-testid="public-add-friend">+ Ajouter en ami</button>
-        <button className="btn btn-outline" style={{flex:1}} onClick={onEncourage} disabled={busy} data-testid="public-encourage">👏 Encourager</button>
+        <button className="btn btn-outline" style={{flex:1}} onClick={()=>setCheerOpen(true)} disabled={busy} data-testid="public-encourage">👏 Encourager</button>
       </div>
     )}
 
@@ -103,9 +124,37 @@ export default function PublicProfilePage(){
       <div className="card">
         <div className="card-title">Actions</div>
         <p className="card-help">Ajoutez {p.displayName} pour comparer vos pas, défier et voir son fil d’activité.</p>
-        <div className="route-actions"><button className="btn btn-outline btn-sm" onClick={()=>setReportOpen(true)}>Signaler ce profil</button><button className="btn btn-danger btn-sm" onClick={onBlock} disabled={busy} data-testid="block-account">Bloquer ce compte</button></div>
+        <div className="route-actions"><button className="btn btn-outline btn-sm" onClick={()=>setReportOpen(true)}>Signaler ce profil</button><button className="btn btn-danger btn-sm" onClick={()=>setBlockOpen(true)} disabled={busy} data-testid="block-account">Bloquer ce compte</button></div>
       </div>
     )}
+    <ConfirmSheet
+      open={cheerOpen}
+      onClose={() => setCheerOpen(false)}
+      title={p ? `Encourager ${p.displayName}` : 'Encourager'}
+      consequences={['Un 👏 est envoyé immédiatement.', 'Vous pouvez ajouter un petit message (facultatif).']}
+      textField={{ label: 'Message (facultatif)', placeholder: 'Continue comme ça !', maxLength: 120 }}
+      confirmLabel="Envoyer 👏"
+      busy={busy}
+      onConfirm={onEncourage}
+      testId="cheer-sheet"
+    />
+
+    <ConfirmSheet
+      open={blockOpen}
+      onClose={() => setBlockOpen(false)}
+      title={p ? `Bloquer ${p.displayName} ?` : 'Bloquer ce compte ?'}
+      danger
+      consequences={[
+        'Son profil, ses sorties et ses messages sont masqués.',
+        'Vous ne pouvez plus vous envoyer de demandes, messages ou encouragements.',
+        'Vous pouvez débloquer ce compte à tout moment depuis vos réglages.',
+      ]}
+      confirmLabel="Bloquer"
+      busy={busy}
+      onConfirm={onBlock}
+      testId="block-sheet"
+    />
+
     <ReportDialog open={reportOpen} onClose={()=>setReportOpen(false)} targetUid={p.uid} targetType="profile" targetId={p.uid} />
   </div>
 }

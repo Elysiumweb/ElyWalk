@@ -46,7 +46,7 @@ import {
   type GpsQualityLevel,
 } from '../lib/activity';
 import { notifyActivityGoal } from '../lib/notifications';
-import { showEndOfActivityAd } from '../lib/ads';
+import { showEndOfActivityAd, showInterstitial } from '../lib/ads';
 import { enqueueSync, subscribeQueue, type SyncState } from '../lib/syncQueue';
 import { distanceToRoute, getRoute } from '../lib/routes';
 import type { SavedRoute } from '../lib/types';
@@ -538,6 +538,10 @@ export default function ActivityPage() {
 
   async function start() {
     if (!profile || running) return;
+    // Annonce interstitielle au lancement du GPS (placement « Interstitial »).
+    // `showInterstitial` résout toujours — sans fill, sans consentement ou hors
+    // application native — : le départ n'est jamais retardé ni bloqué.
+    void showInterstitial();
     try {
       pointsRef.current = [];
       distanceRef.current = 0;
@@ -742,20 +746,32 @@ export default function ActivityPage() {
         </div>
         <button className="btn btn-ghost btn-sm" onClick={() => navigate(-1)}>Retour</button>
       </div>
-      <div className="activity-map" ref={containerRef} />
+      {/*
+        Composition adaptative (D04) : avant le départ, la carte est compacte
+        pour que « Démarrer la sortie » soit visible sans défilement, même sur
+        320 × 568 ; pendant la sortie, la carte reprend de la place pour suivre
+        le tracé. Le mode et l'objectif restent accessibles avant le départ.
+      */}
+      <div className={`activity-map ${running ? 'activity-map-live' : 'activity-map-compact'}`} ref={containerRef} />
       <div className="activity-panel">
         {plannedRoute && <div className="planned-route-banner" data-testid="planned-route"><div><strong>🧭 {plannedRoute.name}</strong><span>{formatDistance(plannedRoute.distanceM, unitSystem)} · {plannedRoute.elevationGainM} m D+</span></div><button className="btn btn-ghost btn-sm" disabled={running} onClick={() => { setPlannedRoute(null); plannedLineRef.current?.remove(); }}>Quitter</button>{routeDistance != null && <p role="status">{routeDistance <= 50 ? 'Vous êtes sur le tracé.' : `À ${routeDistance} m du tracé le plus proche.`}</p>}</div>}
         <div className="activity-types">
           <button className={type === 'walk' ? 'selected' : ''} disabled={running} onClick={() => setType('walk')}>🚶 Marche</button>
           <button className={type === 'run' ? 'selected' : ''} disabled={running} onClick={() => setType('run')}>🏃 Course</button>
         </div>
-        <div className="activity-stats">
+        {/*
+          Avant le départ, six compteurs à zéro n'apportent rien et repoussent
+          le bouton principal hors de vue (D04). On garde les deux chiffres qui
+          décident du départ (durée et distance) et on déplie tout pendant la
+          sortie.
+        */}
+        <div className={`activity-stats ${running ? '' : 'activity-stats-idle'}`.trim()}>
           <div><strong>{fmtDuration(elapsed)}</strong><span>durée active</span></div>
           <div><strong>{formatDistance(distance, unitSystem)}</strong><span>distance</span></div>
-          <div><strong>{calories}</strong><span>kcal</span></div>
-          <div><strong>{Math.round(liveDeltaSteps).toLocaleString('fr-FR')}</strong><span>pas</span></div>
-          <div><strong>{speedKmh(distance, elapsed).toFixed(1)}</strong><span>km/h</span></div>
-          <div><strong>{paceMinPerKm(distance, elapsed)}</strong><span>allure</span></div>
+          <div className="activity-stat-extra"><strong>{calories}</strong><span>kcal</span></div>
+          <div className="activity-stat-extra"><strong>{Math.round(liveDeltaSteps).toLocaleString('fr-FR')}</strong><span>pas</span></div>
+          <div className="activity-stat-extra"><strong>{speedKmh(distance, elapsed).toFixed(1)}</strong><span>km/h</span></div>
+          <div className="activity-stat-extra"><strong>{paceMinPerKm(distance, elapsed)}</strong><span>allure</span></div>
         </div>
 
         <div className="activity-live-meta">

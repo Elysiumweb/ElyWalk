@@ -4,8 +4,9 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useToast } from '../components/Toast';
 import { watchEstablishments, type Establishment } from '../lib/establishments';
-import { getCurrentPosition } from '../lib/geo';
+import { getCurrentPosition, watchPosition } from '../lib/geo';
 import DirectionsPanel from '../components/DirectionsPanel';
+import NotificationBell from '../components/NotificationBell';
 
 const DEFAULT_CENTER: [number, number] = [46.6, 2.4]; // France
 const DEFAULT_ZOOM = 6;
@@ -17,11 +18,16 @@ export default function MapPage() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const markersRef = useRef<L.Marker[]>([]);
   const userMarkerRef = useRef<L.Marker | null>(null);
+  const accuracyRef = useRef<L.Circle | null>(null);
+  /** Suivi continu actif : la carte suit l'utilisateur tant qu'il ne la déplace pas. */
+  const followRef = useRef(true);
+  const watcherRef = useRef<{ stop: () => void } | null>(null);
   const [selected, setSelected] = useState<Establishment | null>(null);
   const [locating, setLocating] = useState(false);
   const [establishments, setEstablishments] = useState<Establishment[]>([]);
   const [search, setSearch] = useState('');
   const [userPos, setUserPos] = useState<{ lat: number; lng: number } | null>(null);
+  const [accuracy, setAccuracy] = useState<number | null>(null);
   const [directionsFor, setDirectionsFor] = useState<Establishment | null>(null);
 
   // Initialisation de la carte
@@ -39,15 +45,110 @@ export default function MapPage() {
     }).addTo(map);
     L.control.zoom({ position: 'bottomright' }).addTo(map);
     map.on('click', () => setSelected(null));
+    // Déplacer la carte à la main suspend le suivi automatique (l'utilisateur
+    // garde la main) ; le bouton « Me localiser » le réactive.
+    map.on('dragstart', () => { followRef.current = false; });
     mapRef.current = map;
-    // Tente une localisation immédiate silencieuse.
-    void locate(true);
+    // Suivi continu : la position se met à jour pendant les déplacements.
+    startWatching();
     return () => {
+      watcherRef.current?.stop();
+      watcherRef.current = null;
+      accuracyRef.current = null;
+      userMarkerRef.current = null;
       map.remove();
       mapRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /** Dessine (ou déplace) le repère utilisateur et son cercle de précision. */
+  const drawUser = (lat: number, lng: number, precision: number | null, recenter: boolean) => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (!userMarkerRef.current) {
+      userMarkerRef.current = L.marker([lat, lng], {
+        icon: L.divIcon({
+          className: 'ely-user-wrap',
+          html: '<div class="ely-user-dot"><div class="ely-user-pulse"></div></div>',
+          iconSize: [20, 20],
+          iconAnchor: [10, 10],
+        }),
+        zIndexOffset: 900,
+      }).addTo(map);
+    } else {
+      userMarkerRef.current.setLatLng([lat, lng]);
+    }
+    if (precision != null && precision > 0) {
+      if (!accuracyRef.current) {
+        accuracyRef.current = L.circle([lat, lng], {
+          radius: Math.min(precision, 250),
+          color: '#D8CA82',
+          weight: 1,
+          opacity: 0.5,
+          fillColor: '#D8CA82',
+          fillOpacity: 0.08,
+          interactive: false,
+        }).addTo(map);
+      } else {
+        accuracyRef.current.setLatLng([lat, lng]);
+        accuracyRef.current.setRadius(Math.min(precision, 250));
+      }
+    }
+    if (recenter && followRef.current) {
+      map.setView([lat, lng], Math.max(map.getZoom(), 16), { animate: true });
+    }
+  };
+
+  /**
+   * Active le suivi continu de la position.
+   *
+   * Avant, la carte ne demandait la position qu'une seule fois à l'ouverture :
+   * on restait donc figé au point de départ (« je ne me vois pas bouger »).
+   * Le suivi est maintenant permanent tant que l'écran est ouvert, avec un
+   * repère qui avance, un cercle de précision et un recentrage automatique.
+   */
+  const startWatching = () => {
+    watcherRef.current?.stop();
+    setLocating(true);
+    let first = true;
+    watcherRef.current = watchPosition(
+      (coords) => {
+        setUserPos({ lat: coords.lat, lng: coords.lng });
+        setAccuracy(coords.accuracy ?? null);
+        setLocating(false);
+        // Le premier point recadre la carte, puis on suit sans forcer le zoom.
+        drawUser(coords.lat, coords.lng, coords.accuracy ?? null, first || followRef.current);
+        first = false;
+      },
+      (error) => {
+        setLocating(false);
+        toast(error.message || 'Position introuvable. Vérifiez la localisation de votre appareil.', 'error');
+      },
+      { intervalMs: 4000 },
+    );
+  };
+
+  /** Recentrage demandé par l'utilisateur (bouton « Me localiser »). */
+  const locate = async (silent = false) => {
+    followRef.current = true;
+    setLocating(true);
+    try {
+      const pos = await getCurrentPosition({ silent });
+      if (pos) {
+        setUserPos({ lat: pos.lat, lng: pos.lng });
+        setAccuracy(pos.accuracy ?? null);
+        drawUser(pos.lat, pos.lng, pos.accuracy ?? null, true);
+        // Le bouton relance aussi le suivi s'il s'était arrêté (permission
+        // accordée après coup, retour d'arrière-plan…).
+        if (!watcherRef.current) startWatching();
+      }
+    } catch {
+      if (!silent) toast('Position introuvable. Vérifiez la localisation de votre appareil.', 'error');
+    } finally {
+      setLocating(false);
+    }
+  };
 
   // Marqueurs des établissements partenaires
   useEffect(() => {
@@ -78,32 +179,6 @@ export default function MapPage() {
     return unsub;
   }, []);
 
-  const locate = async (silent = false) => {
-    setLocating(true);
-    try {
-      const pos = await getCurrentPosition({ silent });
-      if (!pos) return;
-      const { lat, lng } = pos;
-      const map = mapRef.current;
-      if (!map) return;
-      setUserPos({ lat, lng });
-      map.setView([lat, lng], 17);
-      if (userMarkerRef.current) userMarkerRef.current.remove();
-      userMarkerRef.current = L.marker([lat, lng], {
-        icon: L.divIcon({
-          className: 'ely-user-wrap',
-          html: '<div class="ely-user-dot"><div class="ely-user-pulse"></div></div>',
-          iconSize: [20, 20],
-          iconAnchor: [10, 10],
-        }),
-      }).addTo(map);
-    } catch {
-      if (!silent) toast('Position introuvable. Vérifiez la localisation de votre appareil.', 'error');
-    } finally {
-      setLocating(false);
-    }
-  };
-
   const distance = (e: Establishment) =>
     userPos ? Math.round(L.latLng(userPos.lat, userPos.lng).distanceTo(L.latLng(e.lat, e.lng))) / 1000 : null;
   const nearby = establishments
@@ -122,6 +197,9 @@ export default function MapPage() {
           <div>
             <h1 className="screen-title">Carte</h1>
             <div className="screen-sub">Partenaires autour de vous · vos sorties GPS dans Sortie</div>
+          </div>
+          <div className="header-actions">
+            <NotificationBell />
           </div>
         </div>
         <div className="map-quick-actions">
@@ -165,14 +243,31 @@ export default function MapPage() {
         <div ref={containerRef} className="map-container" data-testid="map-container" />
 
         <button
-          className="map-locate-btn"
+          className={`map-locate-btn ${followRef.current && userPos ? 'map-locate-live' : ''}`}
           onClick={() => locate(false)}
-          disabled={locating}
+          disabled={locating && !userPos}
           data-testid="map-locate-button"
-          aria-label="Me localiser"
+          aria-label={followRef.current && userPos ? 'Suivi de position actif — recentrer' : 'Me localiser'}
+          title={followRef.current && userPos ? 'Vous êtes suivi en temps réel' : 'Me localiser'}
         >
-          {locating ? <div className="spinner" style={{ width: 20, height: 20, borderWidth: 2 }} /> : <LocateIcon />}
+          {locating && !userPos ? <div className="spinner" style={{ width: 20, height: 20, borderWidth: 2 }} /> : <LocateIcon />}
         </button>
+
+        {/* État du suivi : la position se met à jour pendant le déplacement. */}
+        <div className="map-live-status" role="status" aria-live="polite" data-testid="map-live-status">
+          {userPos ? (
+            <>
+              <span className="map-live-dot" aria-hidden="true" />
+              <span>
+                Position en direct
+                {accuracy != null ? ` · ±${Math.round(accuracy)} m` : ''}
+                {!followRef.current ? ' · carte libre' : ''}
+              </span>
+            </>
+          ) : (
+            <span>Position en cours d’acquisition…</span>
+          )}
+        </div>
 
         {selected && (
           <div className="map-card pop-in" data-testid="establishment-card">

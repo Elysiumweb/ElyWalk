@@ -445,6 +445,197 @@ async function sendToUser(
 }
 
 // ---------------------------------------------------------------------------
+// Alertes sociales : rencontres proches (rayon choisi) et rappels d'inscription
+// ---------------------------------------------------------------------------
+
+/** Distance à vol d'oiseau en mètres (haversine). */
+function haversineM(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const R = 6_371_000;
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+
+/**
+ * Préférences d'alerte relues depuis le profil (`users.alerts`), synchronisées
+ * par l'application (Profil → Notifications). Valeurs par défaut alignées sur
+ * `DEFAULT_ALERT_PREFERENCES` côté app : 10 km de rayon, rappel 1 h avant.
+ */
+function readAlertPreferences(fields: Record<string, unknown>): {
+  nearbyEvents: boolean;
+  nearbyRadiusKm: number;
+  eventReminders: boolean;
+  eventReminderMinutes: number;
+} {
+  const raw = (fields.alerts as { mapValue?: { fields?: Record<string, any> } })?.mapValue?.fields || {};
+  const bool = (key: string, fallback: boolean) => {
+    const value = raw[key]?.booleanValue;
+    return typeof value === 'boolean' ? value : fallback;
+  };
+  const num = (key: string, fallback: number) => {
+    const value = raw[key];
+    const n = value?.integerValue != null ? Number(value.integerValue) : value?.doubleValue;
+    return Number.isFinite(n) ? Number(n) : fallback;
+  };
+  return {
+    nearbyEvents: bool('nearbyEvents', true),
+    nearbyRadiusKm: Math.min(100, Math.max(1, num('nearbyRadiusKm', 10))),
+    eventReminders: bool('eventReminders', true),
+    eventReminderMinutes: Math.min(1440, Math.max(5, num('eventReminderMinutes', 60))),
+  };
+}
+
+/** `users.alertsNotified` : empreintes des alertes déjà envoyées. */
+function readNotifiedKeys(fields: Record<string, unknown>): string[] {
+  const values = (fields.alertsNotified as { arrayValue?: { values?: Array<{ stringValue?: string }> } })
+    ?.arrayValue?.values || [];
+  return values.map((v) => v.stringValue || '').filter(Boolean);
+}
+
+/** Garde une liste courte et récente (les 80 dernières alertes). */
+function trimNotifiedKeys(keys: string[]): string[] {
+  return [...new Set(keys)].slice(-80);
+}
+
+/** `YYYY-MM-DD` + `HH:MM` en heure de Paris → horodatage (ms). */
+function eventTimestamp(date?: string, time?: string): number | null {
+  if (!date) return null;
+  const clock = /^\d{2}:\d{2}$/.test(String(time || '')) ? time : '09:00';
+  const parsed = Date.parse(`${date}T${clock}:00+01:00`);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * Envoie les alertes de rencontre : une sortie proposée dans le rayon choisi,
+ * et le rappel d'une rencontre à laquelle l'utilisateur est inscrit.
+ *
+ * Ces alertes n'existaient pas : la première passait totalement inaperçue, la
+ * seconde n'était que facultative et locale (appareil unique).
+ */
+async function processEventAlerts(sa: ServiceAccount): Promise<{ processed: number; sent: number }> {
+  let processed = 0;
+  let sent = 0;
+
+  const events = await runQuery(sa, {
+    from: [{ collectionId: 'communityEvents' }],
+    where: {
+      fieldFilter: { field: { fieldPath: 'status' }, op: 'NOT_EQUAL', value: { stringValue: 'cancelled' } },
+    },
+    limit: 200,
+  });
+  if (events.length === 0) return { processed, sent };
+
+  const now = Date.now();
+  const parsed = events
+    .map((doc) => {
+      const f = doc.fields;
+      const date = (f.date as { stringValue?: string })?.stringValue || '';
+      const time = (f.time as { stringValue?: string })?.stringValue || '';
+      return {
+        id: doc.name.split('/').pop() || '',
+        name: doc.name,
+        title: (f.title as { stringValue?: string })?.stringValue || 'Rencontre ElyWalk',
+        location:
+          (f.location as { stringValue?: string })?.stringValue
+          || (f.establishmentName as { stringValue?: string })?.stringValue
+          || '',
+        lat: Number((f.lat as { doubleValue?: number })?.doubleValue ?? NaN),
+        lng: Number((f.lng as { doubleValue?: number })?.doubleValue ?? NaN),
+        participants: ((f.participants as { arrayValue?: { values?: Array<{ stringValue?: string }> } })
+          ?.arrayValue?.values || []).map((v) => v.stringValue || '').filter(Boolean),
+        waitlist: ((f.waitlist as { arrayValue?: { values?: Array<{ stringValue?: string }> } })
+          ?.arrayValue?.values || []).map((v) => v.stringValue || '').filter(Boolean),
+        creatorUid: (f.creatorUid as { stringValue?: string })?.stringValue || '',
+        startAt: eventTimestamp(date, time),
+      };
+    })
+    .filter((e) => e.startAt != null && (e.startAt as number) > now - 60 * 60 * 1000);
+
+  if (parsed.length === 0) return { processed, sent };
+
+  // Candidats : les inscrits (rappel) et tous ceux qui ont des coordonnées
+  // (rencontre proche). Le rayon dépend de chaque profil, donc on lit les
+  // préférences du compte concerné et non une valeur globale.
+  const candidateUids = new Set<string>();
+  for (const event of parsed) {
+    for (const uid of [...event.participants, ...event.waitlist]) candidateUids.add(uid);
+  }
+
+  for (const uid of candidateUids) {
+    const profileSnap = await runQuery(sa, {
+      from: [{ collectionId: 'users' }],
+      where: { fieldFilter: { field: { fieldPath: '__name__' }, op: 'EQUAL', value: { referenceValue: docName(sa, `users/${uid}`) } } },
+      limit: 1,
+    }).catch(() => []);
+    const fields = profileSnap[0]?.fields || {};
+    const prefs = readAlertPreferences(fields);
+    const origin = {
+      lat: Number((fields.lastLat as { doubleValue?: number })?.doubleValue ?? NaN),
+      lng: Number((fields.lastLng as { doubleValue?: number })?.doubleValue ?? NaN),
+    };
+    let notified = readNotifiedKeys(fields);
+    const added: string[] = [];
+
+    for (const event of parsed) {
+      const start = event.startAt as number;
+      const joined = event.participants.includes(uid) || event.waitlist.includes(uid);
+
+      // 1) Rappel avant le départ, pour les inscrits.
+      if (joined && prefs.eventReminders) {
+        const lead = prefs.eventReminderMinutes * 60_000;
+        if (start - now <= lead && start > now) {
+          const key = `reminder:${event.id}:${start}`;
+          if (!notified.includes(key)) {
+            const when = new Date(start).toLocaleString('fr-FR', { timeZone: 'Europe/Paris', dateStyle: 'short', timeStyle: 'short' });
+            const res = await sendToUser(sa, uid, 'Votre rencontre commence bientôt', `${event.title} · ${when}${event.location ? ` · ${event.location}` : ''}`, {
+              type: 'event',
+              eventId: event.id,
+            });
+            sent += res.sent;
+            notified.push(key);
+            added.push(key);
+            processed++;
+          }
+        }
+      }
+
+      // 2) Rencontre proposée dans le rayon choisi.
+      if (!joined && prefs.nearbyEvents && event.creatorUid !== uid
+          && Number.isFinite(origin.lat) && Number.isFinite(origin.lng)
+          && Number.isFinite(event.lat) && Number.isFinite(event.lng)) {
+        const distance = haversineM(origin, { lat: event.lat, lng: event.lng });
+        if (distance <= prefs.nearbyRadiusKm * 1000) {
+          const key = `nearby:${event.id}:${start}`;
+          if (!notified.includes(key)) {
+            const km = Math.round(distance / 100) / 10;
+            const res = await sendToUser(sa, uid, 'Rencontre près de vous', `${event.title} · à ${km} km${event.location ? ` · ${event.location}` : ''}`, {
+              type: 'event',
+              eventId: event.id,
+            });
+            sent += res.sent;
+            notified.push(key);
+            added.push(key);
+            processed++;
+          }
+        }
+      }
+    }
+
+    if (added.length > 0) {
+      // Le tableau est réécrit en entier (pas d'`increment` possible sur une
+      // liste) : la valeur reste bornée pour ne pas faire grossir le document.
+      await patchFields(sa, docName(sa, `users/${uid}`), {
+        alertsNotified: { arrayValue: { values: trimNotifiedKeys(notified).map((k) => ({ stringValue: k })) } },
+      }).catch(() => undefined);
+    }
+  }
+
+  return { processed, sent };
+}
+
+// ---------------------------------------------------------------------------
 // F11 — Consommateur de notifications (cron)
 // ---------------------------------------------------------------------------
 async function processNotifications(sa: ServiceAccount): Promise<{ processed: number; sent: number }> {
@@ -533,6 +724,14 @@ async function processNotifications(sa: ServiceAccount): Promise<{ processed: nu
     await patchFields(sa, doc.name, { notified: fBool(true) });
     processed++;
   }
+  // 4) Alertes de rencontre : sortie proposée dans le rayon choisi et rappel
+  //    avant une rencontre où l'utilisateur est inscrit.
+  const eventAlerts = await processEventAlerts(sa).catch((e) => {
+    console.error('[cron] event alerts', e);
+    return { processed: 0, sent: 0 };
+  });
+  processed += eventAlerts.processed;
+  sent += eventAlerts.sent;
   return { processed, sent };
 }
 

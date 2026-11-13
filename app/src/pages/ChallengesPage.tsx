@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import Sheet from '../components/Sheet';
+import ConfirmSheet from '../components/ConfirmSheet';
 import Avatar from '../components/Avatar';
 import { getChallengeDefinitions } from '../lib/constants';
 import { claimChallengeReward, listMyChallenges, loadChallengeCatalog, createFriendChallenge, watchFriendChallenges, getFriendChallengeProgress, deleteFriendChallenge, watchFriendships, getProfiles } from '../lib/db';
@@ -29,6 +30,21 @@ export default function ChallengesPage() {
   const [friends, setFriends]=useState<UserProfile[]>([]);
   const [selected, setSelected]=useState<string[]>([]);
   const [busy, setBusy]=useState(false);
+  // Suppression d'un défi entre amis : confirmation structurée (D06).
+  const [pendingChallengeDelete, setPendingChallengeDelete]=useState<FriendChallenge|null>(null);
+  const onDeleteChallenge = async () => {
+    if (!profile || !pendingChallengeDelete?.id) return;
+    setBusy(true);
+    try {
+      await deleteFriendChallenge(profile.uid, pendingChallengeDelete.id);
+      toast('Défi supprimé', 'info');
+      setPendingChallengeDelete(null);
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const load = useCallback(async () => {
     if (!profile) return;
@@ -120,7 +136,7 @@ export default function ChallengesPage() {
           const prog=friendProgress[ch.id!];
           const isCreator=ch.creatorUid===profile?.uid;
           return <div key={ch.id} className="card" data-testid="friend-challenge-card">
-            <div className="challenge-top"><span className="challenge-icon">⚔️</span><div className="row-main"><div className="challenge-kind">DÉFI AMIS · {ch.metric==='steps'?'PAS':'DISTANCE'}</div><h2>{ch.title}</h2><small style={{color:'var(--muted)'}}>par {ch.creatorName} · {daysLeft(ch.endsAt)}</small></div>{isCreator && <button className="btn btn-ghost btn-sm" onClick={async()=>{ if(confirm('Supprimer ce défi ?')){ await deleteFriendChallenge(profile!.uid,ch.id!); toast('Défi supprimé','info'); }}}>✕</button>}</div>
+            <div className="challenge-top"><span className="challenge-icon">⚔️</span><div className="row-main"><div className="challenge-kind">DÉFI AMIS · {ch.metric==='steps'?'PAS':'DISTANCE'}</div><h2>{ch.title}</h2><small style={{color:'var(--muted)'}}>par {ch.creatorName} · {daysLeft(ch.endsAt)}</small></div>{isCreator && <button className="btn btn-ghost btn-sm" aria-label={`Supprimer le défi ${ch.title}`} onClick={()=>setPendingChallengeDelete(ch)}>✕</button>}</div>
             <div style={{marginTop:10}}>
               {prog ? prog.map(p=>(
                 <div key={p.uid} className="list-row">
@@ -153,5 +169,21 @@ export default function ChallengesPage() {
       </div>
       <button className="btn btn-gold" onClick={onCreateFriendChallenge} disabled={busy||selected.length===0}>{busy?'Création...':'Lancer le défi ⚔️'}</button>
     </Sheet>
+
+      <ConfirmSheet
+        open={!!pendingChallengeDelete}
+        onClose={() => setPendingChallengeDelete(null)}
+        title={pendingChallengeDelete ? `Supprimer « ${pendingChallengeDelete.title} » ?` : 'Supprimer ce défi ?'}
+        danger
+        consequences={[
+          'Le défi disparaît pour vous et pour tous les participants.',
+          'La progression enregistrée sur ce défi est perdue.',
+          'Les pas déjà validés restent comptés dans votre total.',
+        ]}
+        confirmLabel="Supprimer le défi"
+        busy={busy}
+        onConfirm={onDeleteChallenge}
+        testId="delete-challenge-sheet"
+      />
   </div>;
 }

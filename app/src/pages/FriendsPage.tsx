@@ -28,6 +28,8 @@ import ActivityFeed from '../components/ActivityFeed';
 import QRCode, { shareFriendCode } from '../components/QRCode';
 import { fmtNumber, dateStr } from '../lib/coins';
 import type { UserProfile, FriendRequest, DirectMessage } from '../lib/types';
+import NotificationBell from '../components/NotificationBell';
+import ConfirmSheet from '../components/ConfirmSheet';
 
 export default function FriendsPage() {
   const { profile } = useAuth();
@@ -121,7 +123,36 @@ export default function FriendsPage() {
   }, [requests]);
 
   const doSearch = async () => { setSearchResults(await searchUsersByName(code)); };
-  const remove = async (uid:string) => { if(!profile||!confirm('Supprimer cet ami ?'))return; await removeFriendship(profile.uid,uid); toast('Ami supprimé.','info'); };
+  /** Retrait d'un ami : confirmation structurée (plus de `confirm()`). */
+  const [pendingRemove, setPendingRemove] = useState<{ uid: string; name: string } | null>(null);
+  const [removing, setRemoving] = useState(false);
+  const remove = async () => {
+    if (!profile || !pendingRemove) return;
+    setRemoving(true);
+    try {
+      await removeFriendship(profile.uid, pendingRemove.uid);
+      toast('Ami supprimé.', 'info');
+      setPendingRemove(null);
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setRemoving(false);
+    }
+  };
+
+  /** Encouragement : feuille avec champ (plus de `prompt()`). */
+  const [pendingCheer, setPendingCheer] = useState<{ uid: string; name: string } | null>(null);
+  const sendCheer = async (message: string) => {
+    if (!profile || !pendingCheer) return;
+    try {
+      await sendFriendReaction(profile, pendingCheer.uid, '👏', message);
+      toast('Encouragement envoyé !', 'success');
+      setPendingCheer(null);
+    } catch (e) {
+      // La feuille reste ouverte : le message saisi n'est pas perdu.
+      toast((e as Error).message, 'error');
+    }
+  };
   /**
    * Partage du code de parrainage.
    *
@@ -189,9 +220,12 @@ export default function FriendsPage() {
           <h1 className="screen-title">Amis</h1>
           <div className="screen-sub">Partagez vos stats d’activité</div>
         </div>
-        <button className="btn btn-gold btn-sm" onClick={() => setAddOpen(true)} data-testid="add-friend-button">
-          + Ajouter
-        </button>
+        <div className="header-actions">
+          <NotificationBell />
+          <button className="btn btn-gold btn-sm" onClick={() => setAddOpen(true)} data-testid="add-friend-button">
+            + Ajouter
+          </button>
+        </div>
       </div>
 
       <div className="chip-row" style={{marginBottom:8}}>
@@ -266,7 +300,7 @@ export default function FriendsPage() {
                 </div>
               </div>
               <button className="icon-danger" title="Message" onClick={()=>openChat(f.uid,f.displayName)} aria-label="Message">💬</button>
-              <button className="icon-danger" onClick={()=>profile&&sendFriendReaction(profile,f.uid,'👏',prompt('Petit message (optionnel)')||'').then(()=>toast('Encouragement envoyé !','success'))} aria-label="Encourager">👏</button><button className="icon-danger" onClick={()=>remove(f.uid)} aria-label="Supprimer">✕</button>
+              <button className="icon-danger" onClick={()=>setPendingCheer({ uid: f.uid, name: f.displayName })} aria-label={`Encourager ${f.displayName}`}>👏</button><button className="icon-danger" onClick={()=>setPendingRemove({ uid: f.uid, name: f.displayName })} aria-label={`Retirer ${f.displayName} de mes amis`}>✕</button>
             </div>
           ))
         )}
@@ -327,6 +361,30 @@ export default function FriendsPage() {
         </div>
       </Sheet>
 
+      <ConfirmSheet
+        open={!!pendingRemove}
+        title={`Retirer ${pendingRemove?.name || 'cet ami'} ?`}
+        danger
+        busy={removing}
+        confirmLabel="Retirer cet ami"
+        consequences={[
+          'Vous ne verrez plus ses sorties ni ses statistiques.',
+          'La conversation et les encouragements existants ne sont pas effacés.',
+          'Vous pourrez renvoyer une demande d’ami plus tard avec son code.',
+        ]}
+        onConfirm={remove}
+        onClose={() => setPendingRemove(null)}
+        testId="remove-friend-sheet"
+      />
+      <ConfirmSheet
+        open={!!pendingCheer}
+        title={`Encourager ${pendingCheer?.name || 'cet ami'}`}
+        confirmLabel="Envoyer l’encouragement"
+        textField={{ label: 'Petit message (facultatif)', placeholder: 'Continue comme ça !', maxLength: 160 }}
+        onConfirm={(text) => sendCheer(text)}
+        onClose={() => setPendingCheer(null)}
+        testId="cheer-sheet"
+      />
       <Sheet open={!!msgOpen} onClose={closeChat} title={`💬 ${msgOpen?.name||''}`}>
         <div style={{maxHeight:'50vh', overflow:'auto', marginBottom:12}}>
           {chatMessages.length===0 ? <div className="empty-state">Aucun message. Dites bonjour ! 👋</div> : chatMessages.map(m=>(

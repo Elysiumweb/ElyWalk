@@ -25,6 +25,8 @@ import { closeChallengeCatalogEntry, describeCatalogState, publishChallengeCatal
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { backfillBlockedUsers, reviewReport, watchReports } from '../lib/safety';
+import Sheet from '../components/Sheet';
+import ConfirmSheet from '../components/ConfirmSheet';
 
 type Tab = 'partners' | 'withdrawals' | 'establishments' | 'reports' | 'challenges' | 'maintenance';
 
@@ -182,12 +184,38 @@ export default function AdminPage() {
     reload();
   };
 
-  const moderate = async (report: ContentReport, status: ReportStatus) => {
-    if (!profile) return;
-    const note = prompt('Note d’action conservée dans l’historique', status === 'resolved' ? 'Contenu traité' : status === 'dismissed' ? 'Signalement non fondé' : 'Examen en cours');
-    if (note === null) return;
-    try { await reviewReport(report.id!, profile.uid, status, note); toast('Signalement mis à jour.', 'success'); }
-    catch (e) { toast((e as Error).message, 'error'); }
+  /**
+   * Modération d'un signalement (D06).
+   *
+   * La note d'action est conservée dans l'historique : elle est donc pré-remplie
+   * selon la décision, modifiable, et sa valeur survit à un échec d'envoi. Plus
+   * de `prompt()` natif, qui perdait le texte saisi en cas d'erreur réseau.
+   */
+  const [pendingModeration, setPendingModeration] = useState<{ report: ContentReport; status: ReportStatus } | null>(null);
+  const [moderationBusy, setModerationBusy] = useState(false);
+  const openModeration = (report: ContentReport, status: ReportStatus) => {
+    setPendingModeration({ report, status });
+  };
+  const defaultModerationNote = (status: ReportStatus) =>
+    status === 'resolved' ? 'Contenu traité' : status === 'dismissed' ? 'Signalement non fondé' : 'Examen en cours';
+  const moderate = async (note: string) => {
+    if (!profile || !pendingModeration?.report.id) return;
+    setModerationBusy(true);
+    try {
+      await reviewReport(pendingModeration.report.id, profile.uid, pendingModeration.status, note.trim());
+      toast('Signalement mis à jour.', 'success');
+      setPendingModeration(null);
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setModerationBusy(false);
+    }
+  };
+  const MODERATION_LABELS: Record<ReportStatus, { title: string; confirm: string; consequences: string[] }> = {
+    open: { title: 'Rouvrir ce signalement ?', confirm: 'Rouvrir', consequences: ['Le signalement redevient visible dans la file.'] },
+    reviewing: { title: 'Prendre en charge ce signalement ?', confirm: 'Prendre en charge', consequences: ['Le signalement passe en « en cours d’examen ».', 'Votre note est ajoutée à l’historique.'] },
+    resolved: { title: 'Marquer ce signalement comme résolu ?', confirm: 'Résoudre', consequences: ['La décision est datée et conservée dans l’historique du signalement.', 'L’auteur du signalement en est informé.'] },
+    dismissed: { title: 'Classer ce signalement sans suite ?', confirm: 'Classer', consequences: ['Le signalement est clos sans sanction.', 'La décision reste consultable dans l’historique.'] },
   };
 
   const onLogoFile = async (file: File | null) => {
@@ -230,15 +258,55 @@ export default function AdminPage() {
     }
   };
 
-  const editEstablishment = async (e: Establishment) => { const description=prompt('Nouvelle description',e.description); if(description===null)return; const openingHours=prompt('Horaires',e.openingHours||'')||''; const website=prompt('Site web',e.website||'')||''; const phone=prompt('Téléphone',e.phone||'')||''; const offerText=prompt('Offre ElyCoins / réduction',e.offerText||'')||''; await updateEstablishment(e.id!,{description,openingHours,website,phone,offerText}); toast('Fiche mise à jour.','success'); reload(); };
-  const removeEstablishment = async (id: string) => {
-    if (!confirm('Supprimer définitivement cet établissement ?')) return;
+  // Édition d'une fiche : un seul formulaire au lieu de cinq `prompt()` en
+  // cascade (annuler au troisième champ perdait les deux premiers).
+  const [editTarget, setEditTarget] = useState<Establishment | null>(null);
+  const [editDraft, setEditDraft] = useState({ description: '', openingHours: '', website: '', phone: '', offerText: '' });
+  const [editBusy, setEditBusy] = useState(false);
+  const editEstablishment = (e: Establishment) => {
+    setEditDraft({
+      description: e.description || '',
+      openingHours: e.openingHours || '',
+      website: e.website || '',
+      phone: e.phone || '',
+      offerText: e.offerText || '',
+    });
+    setEditTarget(e);
+  };
+  const saveEstablishment = async () => {
+    if (!editTarget?.id) return;
+    if (!editDraft.description.trim()) {
+      toast('La description est requise.', 'error');
+      return;
+    }
+    setEditBusy(true);
     try {
-      await deleteEstablishment(id);
-      toast('Établissement supprimé.', 'info');
+      await updateEstablishment(editTarget.id, editDraft);
+      toast('Fiche mise à jour.', 'success');
+      setEditTarget(null);
       reload();
     } catch (e) {
       toast((e as Error).message, 'error');
+    } finally {
+      setEditBusy(false);
+    }
+  };
+
+  // Suppression d'une fiche : confirmation structurée (D06).
+  const [pendingEstDelete, setPendingEstDelete] = useState<Establishment | null>(null);
+  const [estDeleteBusy, setEstDeleteBusy] = useState(false);
+  const removeEstablishment = async () => {
+    if (!pendingEstDelete?.id) return;
+    setEstDeleteBusy(true);
+    try {
+      await deleteEstablishment(pendingEstDelete.id);
+      toast('Établissement supprimé.', 'info');
+      setPendingEstDelete(null);
+      reload();
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setEstDeleteBusy(false);
     }
   };
 
@@ -476,7 +544,7 @@ export default function AdminPage() {
           </p>
         </div>
       ) : tab === 'reports' ? (
-        <div className="card" data-testid="moderation-queue"><div className="card-title">File de modération</div><p className="card-help">Chaque décision est datée et conservée dans l’historique du signalement.</p>{reports.length===0?<div className="empty-state">Aucun signalement.</div>:reports.map(report=><article key={report.id} style={{padding:'12px 0',borderBottom:'1px solid var(--gold-border)'}} data-testid="report-row"><div style={{display:'flex',justifyContent:'space-between',gap:8}}><strong>{report.targetType} · {report.reason}</strong><span className="badge">{report.status}</span></div><div className="row-sub">Contenu {report.targetId} · signalé le {new Date(report.createdAt).toLocaleString('fr-FR')}</div>{report.details&&<p>{report.details}</p>}<div className="route-actions">{report.status==='open'&&<button className="btn btn-outline btn-sm" onClick={()=>moderate(report,'reviewing')}>Prendre en charge</button>}<button className="btn btn-gold btn-sm" onClick={()=>moderate(report,'resolved')}>Résoudre</button><button className="btn btn-ghost btn-sm" onClick={()=>moderate(report,'dismissed')}>Classer sans suite</button></div>{report.history.length>0&&<div className="moderation-history">{report.history.map((action,index)=><div key={index}>{new Date(action.createdAt).toLocaleString('fr-FR')} · {action.status} · {action.note||'Sans note'}</div>)}</div>}</article>)}</div>
+        <div className="card" data-testid="moderation-queue"><div className="card-title">File de modération</div><p className="card-help">Chaque décision est datée et conservée dans l’historique du signalement.</p>{reports.length===0?<div className="empty-state">Aucun signalement.</div>:reports.map(report=><article key={report.id} style={{padding:'12px 0',borderBottom:'1px solid var(--gold-border)'}} data-testid="report-row"><div style={{display:'flex',justifyContent:'space-between',gap:8}}><strong>{report.targetType} · {report.reason}</strong><span className="badge">{report.status}</span></div><div className="row-sub">Contenu {report.targetId} · signalé le {new Date(report.createdAt).toLocaleString('fr-FR')}</div>{report.details&&<p>{report.details}</p>}<div className="route-actions">{report.status==='open'&&<button className="btn btn-outline btn-sm" onClick={()=>openModeration(report,'reviewing')}>Prendre en charge</button>}<button className="btn btn-gold btn-sm" onClick={()=>openModeration(report,'resolved')}>Résoudre</button><button className="btn btn-ghost btn-sm" onClick={()=>openModeration(report,'dismissed')}>Classer sans suite</button></div>{report.history.length>0&&<div className="moderation-history">{report.history.map((action,index)=><div key={index}>{new Date(action.createdAt).toLocaleString('fr-FR')} · {action.status} · {action.note||'Sans note'}</div>)}</div>}</article>)}</div>
       ) : (
         <>
           <div className="card" data-testid="admin-establishment-form">
@@ -557,7 +625,7 @@ export default function AdminPage() {
                     <div className="row-title">{e.name}</div>
                     <div className="row-sub">{e.address}</div>
                   </div>
-                  <button className="btn btn-ghost btn-sm" onClick={() => editEstablishment(e)}>Modifier</button><button className="btn btn-danger btn-sm" onClick={() => removeEstablishment(e.id!)} data-testid="delete-establishment-button">
+                  <button className="btn btn-ghost btn-sm" onClick={() => editEstablishment(e)}>Modifier</button><button className="btn btn-danger btn-sm" onClick={() => setPendingEstDelete(e)} data-testid="delete-establishment-button">
                     Supprimer
                   </button>
                 </div>
@@ -566,6 +634,98 @@ export default function AdminPage() {
           </div>
         </>
       )}
+      <ConfirmSheet
+        open={!!pendingModeration}
+        onClose={() => setPendingModeration(null)}
+        title={pendingModeration ? MODERATION_LABELS[pendingModeration.status].title : 'Signalement'}
+        consequences={pendingModeration ? MODERATION_LABELS[pendingModeration.status].consequences : []}
+        textField={{ label: 'Note d’action (conservée dans l’historique)', placeholder: 'Ex. contenu masqué, avertissement envoyé', maxLength: 300 }}
+        initialText={pendingModeration ? defaultModerationNote(pendingModeration.status) : ''}
+        confirmLabel={pendingModeration ? MODERATION_LABELS[pendingModeration.status].confirm : 'Confirmer'}
+        busy={moderationBusy}
+        onConfirm={moderate}
+        testId="moderation-sheet"
+      />
+
+      <Sheet
+        open={!!editTarget}
+        onClose={() => setEditTarget(null)}
+        title={editTarget ? `Modifier « ${editTarget.name} »` : 'Modifier la fiche'}
+        testId="edit-establishment-sheet"
+      >
+        <div className="field">
+          <label htmlFor="est-edit-description">Description</label>
+          <textarea
+            id="est-edit-description"
+            className="input"
+            value={editDraft.description}
+            onChange={(e) => setEditDraft((d) => ({ ...d, description: e.target.value }))}
+            maxLength={400}
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="est-edit-hours">Horaires</label>
+          <input
+            id="est-edit-hours"
+            className="input"
+            value={editDraft.openingHours}
+            onChange={(e) => setEditDraft((d) => ({ ...d, openingHours: e.target.value }))}
+            placeholder="Lun–Sam · 8h–20h"
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="est-edit-website">Site web</label>
+          <input
+            id="est-edit-website"
+            className="input"
+            type="url"
+            inputMode="url"
+            value={editDraft.website}
+            onChange={(e) => setEditDraft((d) => ({ ...d, website: e.target.value }))}
+            placeholder="https://…"
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="est-edit-phone">Téléphone</label>
+          <input
+            id="est-edit-phone"
+            className="input"
+            type="tel"
+            inputMode="tel"
+            value={editDraft.phone}
+            onChange={(e) => setEditDraft((d) => ({ ...d, phone: e.target.value }))}
+          />
+        </div>
+        <div className="field">
+          <label htmlFor="est-edit-offer">Offre ElyCoins / réduction</label>
+          <input
+            id="est-edit-offer"
+            className="input"
+            value={editDraft.offerText}
+            onChange={(e) => setEditDraft((d) => ({ ...d, offerText: e.target.value }))}
+            placeholder="Ex. −10 % avec 200 EC"
+          />
+        </div>
+        <button className="btn btn-gold" onClick={saveEstablishment} disabled={editBusy} data-testid="save-establishment-button">
+          {editBusy ? 'Enregistrement…' : 'Enregistrer'}
+        </button>
+      </Sheet>
+
+      <ConfirmSheet
+        open={!!pendingEstDelete}
+        onClose={() => setPendingEstDelete(null)}
+        title={pendingEstDelete ? `Supprimer « ${pendingEstDelete.name} » ?` : 'Supprimer cet établissement ?'}
+        danger
+        consequences={[
+          'La fiche disparaît de la carte pour tous les utilisateurs.',
+          'Les avantages ElyCoins associés ne sont plus proposés.',
+          'Cette action est définitive.',
+        ]}
+        confirmLabel="Supprimer"
+        busy={estDeleteBusy}
+        onConfirm={removeEstablishment}
+        testId="delete-establishment-sheet"
+      />
     </div>
   );
 }

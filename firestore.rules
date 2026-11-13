@@ -186,12 +186,37 @@ service cloud.firestore {
       let changed = request.resource.data.diff(resource.data).affectedKeys();
       return economyUnchanged() && withoutBlockedBy() && changed.hasOnly([
         'displayName','photoURL','paypalEmail','referredBy','referralRejected','signupIp','lastIp','hwid','hwids',
-        'dailyStepGoal','strideLengthCm','bio','onboardingDone','todaySteps','todayDate','health','unitSystem','activityPrivacy','blockedUsers'
+        'dailyStepGoal','strideLengthCm','bio','onboardingDone','todaySteps','todayDate','health','unitSystem','activityPrivacy','blockedUsers',
+        // Alertes : préférences (dont le rayon des rencontres proches) et
+        // dernière position approximative, utilisées par le cron pour envoyer
+        // une alerte de rencontre dans le rayon choisi. Ces champs ne
+        // contiennent aucun identifiant et sont bornés dans `validAlertFields()`.
+        'alerts','lastLat','lastLng'
       ]) && numberBetween(request.resource.data.todaySteps, 0, 60000)
+        && validAlertFields()
         // Lorsque la liste accompagne une modification de profil, seul le delta
         // est contrôlé (une entrée ajoutée ou retirée), pas la forme complète.
         && (!changed.hasAny(['blockedUsers'])
           || (request.resource.data.blockedUsers is list && blockedListDeltaOk()));
+    }
+    // Préférences d'alerte et position approximative (rayon des rencontres).
+    // Borne explicite : le cron lit ces valeurs pour décider d'un envoi.
+    function validAlertFields() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return (!changed.hasAny(['alerts'])
+          || (request.resource.data.alerts is map
+            && request.resource.data.alerts.keys().hasOnly([
+              'messages','friendRequests','nearbyEvents','nearbyRadiusKm',
+              'eventReminders','eventReminderMinutes','updatedAt'
+            ])
+            && request.resource.data.alerts.nearbyRadiusKm is number
+            && numberBetween(request.resource.data.alerts.nearbyRadiusKm, 1, 100)
+            && request.resource.data.alerts.eventReminderMinutes is number
+            && numberBetween(request.resource.data.alerts.eventReminderMinutes, 5, 1440)))
+        && (!changed.hasAny(['lastLat'])
+          || (request.resource.data.lastLat is number && numberBetween(request.resource.data.lastLat, -90, 90)))
+        && (!changed.hasAny(['lastLng'])
+          || (request.resource.data.lastLng is number && numberBetween(request.resource.data.lastLng, -180, 180)));
     }
     function validStepCredit(uid) {
       let day = request.resource.data.lastValidatedDate;

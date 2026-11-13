@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import Sheet from '../components/Sheet';
 import ReportDialog from '../components/ReportDialog';
+import ConfirmSheet from '../components/ConfirmSheet';
 import {
   getActivitySession,
   deleteActivitySession,
@@ -49,6 +50,8 @@ export default function ActivityDetailPage() {
   const drawnRef = useRef(false);
   const [session, setSession] = useState<ActivitySession | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
   const [busy, setBusy] = useState(false);
   const [visibility, setVisibility] = useState<'private' | 'friends' | 'link'>('private');
   const [reportOpen, setReportOpen] = useState(false);
@@ -90,8 +93,11 @@ export default function ActivityDetailPage() {
 
   useEffect(() => {
     if (!id) return;
+    let cancelled = false;
     setLoading(true);
+    setLoadError(null);
     getActivitySession(id).then(async (s) => {
+      if (cancelled) return;
       setSession(s);
       if (s) {
         setVisibility((s.visibility as 'private' | 'friends' | 'link') || 'private');
@@ -102,20 +108,51 @@ export default function ActivityDetailPage() {
           setPrivateNote('');
         }
       }
-    }).catch(() => setSession(null)).finally(() => setLoading(false));
-  }, [id, profile?.uid]);
+    }).catch((e) => {
+      // Une lecture échouée n'est plus confondue avec une sortie inexistante :
+      // l'écran distingue « introuvable » d'« erreur, réessayer ».
+      if (!cancelled) {
+        setSession(null);
+        setLoadError((e as Error).message || 'Sortie indisponible pour le moment.');
+      }
+    }).finally(() => {
+      if (!cancelled) setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [id, profile?.uid, reloadToken]);
 
-  // Init carte
+  /*
+    Initialisation de la carte **quand le conteneur et la sortie existent**.
+
+    Avant : un effet `[]` lancé pendant l'écran de chargement, alors que le
+    conteneur n'était pas encore monté — la carte n'était jamais créée et il
+    restait un grand rectangle vide (aucune classe Leaflet, aucun enfant). Cet
+    effet dépend maintenant de l'identifiant de la sortie : il est rejoué après
+    l'arrivée des données, nettoyé au changement de sortie, et la taille est
+    recalculée au bon moment.
+  */
   useEffect(() => {
-    if (!containerRef.current || mapRef.current) return;
+    if (!session?.id || !containerRef.current || mapRef.current) return;
     const map = L.map(containerRef.current, { zoomControl: false });
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>', maxZoom: 19 }).addTo(map);
     L.control.zoom({ position: 'bottomright' }).addTo(map);
     mapRef.current = map;
-    return () => { map.remove(); mapRef.current = null; drawnRef.current = false; };
-  }, []);
+    drawnRef.current = false;
+    // Le conteneur vient d'apparaître (hauteur calculée par le CSS) : on
+    // réinvalide la taille pour éviter les tuiles grises.
+    const sizeTimer = setTimeout(() => map.invalidateSize(), 120);
+    const resize = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => map.invalidateSize()) : null;
+    if (resize && containerRef.current) resize.observe(containerRef.current);
+    return () => {
+      clearTimeout(sizeTimer);
+      resize?.disconnect();
+      map.remove();
+      mapRef.current = null;
+      drawnRef.current = false;
+    };
+  }, [session?.id]);
 
-  // Tracé du parcours
+  // Tracé du parcours (dessiné une seule fois par carte créée).
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !session || drawnRef.current) return;
@@ -134,7 +171,7 @@ export default function ActivityDetailPage() {
     }
     setTimeout(() => map.invalidateSize(), 120);
     drawnRef.current = true;
-  }, [session]);
+  }, [session, session?.id]);
 
   const onShare = async () => {
     if (!profile || !session) return;
@@ -221,13 +258,14 @@ export default function ActivityDetailPage() {
     }
   };
 
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const onDelete = async () => {
     if (!profile || !session?.id) return;
-    if (!confirm('Supprimer cette sortie et son tracé GPS ? Cette action est définitive.')) return;
     setBusy(true);
     try {
       await deleteActivitySession(profile.uid, session.id);
       toast('Sortie et tracé GPS supprimés.', 'success');
+      setDeleteOpen(false);
       navigate('/activity');
     } catch (e) {
       toast((e as Error).message, 'error');
@@ -316,7 +354,35 @@ export default function ActivityDetailPage() {
     try { localStorage.setItem(MAP_STYLE_KEY, style); } catch { /* ignore */ }
   };
 
-  if (loading) return <div className="screen"><div className="spinner" style={{ margin: '40px auto' }} /></div>;
+  if (loading) {
+    return (
+      <div className="screen" data-testid="activity-detail-screen">
+        <div className="screen-header"><div><h1 className="screen-title">Sortie</h1></div></div>
+        <div className="card" role="status" aria-live="polite">
+          <div className="activity-detail-skeleton" aria-hidden="true" />
+          <div className="row-sub" style={{ marginTop: 10 }}>Chargement de la sortie et de la carte…</div>
+        </div>
+        <div className="spinner" style={{ margin: '18px auto' }} />
+      </div>
+    );
+  }
+  if (!session && loadError) {
+    return (
+      <div className="screen" data-testid="activity-detail-screen">
+        <div className="screen-header"><div><h1 className="screen-title">Sortie indisponible</h1></div></div>
+        <div className="card" role="alert">
+          <div className="card-title">La sortie n’a pas pu être chargée</div>
+          <p className="muted-text">{loadError}</p>
+          <div className="two-col" style={{ marginTop: 10 }}>
+            <button className="btn btn-gold" onClick={() => setReloadToken((n) => n + 1)} data-testid="activity-detail-retry">
+              🔄 Réessayer
+            </button>
+            <button className="btn btn-ghost" onClick={() => navigate('/activity')}>← Mes sorties</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
   if (!session) {
     return (
       <div className="screen" data-testid="activity-detail-screen">
@@ -350,7 +416,20 @@ export default function ActivityDetailPage() {
         </div>
         <button className="btn btn-ghost btn-sm" onClick={() => navigate(-1)}>Retour</button>
       </div>
-      <div className="activity-map" ref={containerRef} data-testid="activity-detail-map" style={{ height: 'min(46vh, 440px)', borderRadius: 16, margin: '0 12px' }} />
+      {/*
+        La carte est rendue dès que la sortie est connue ; les états « aucun
+        point », « chargement » et « erreur » sont explicites plutôt qu'un grand
+        rectangle vide (D03).
+      */}
+      <div className="activity-detail-map-wrap" style={{ borderRadius: 16, margin: '0 12px' }}>
+        <div className="activity-map" ref={containerRef} data-testid="activity-detail-map" style={{ height: 'min(46vh, 440px)', borderRadius: 16 }} />
+        {(session.points || []).length === 0 && (
+          <div className="activity-map-empty" role="status" data-testid="activity-detail-map-empty">
+            <strong>Aucun tracé enregistré</strong>
+            <span>Cette sortie n’a pas de points GPS (GPS indisponible ou sortie manuelle). Les statistiques restent exactes.</span>
+          </div>
+        )}
+      </div>
       <div className="card" style={{ margin: '12px' }}>
         <div className="activity-stats">
           <div><strong>{formatDistance(session.distanceM || 0, unitSystem)}</strong><span>distance</span></div>
@@ -456,7 +535,7 @@ export default function ActivityDetailPage() {
         </small>
 
         <button className="btn btn-outline" style={{ marginTop: 8, width: '100%' }} onClick={() => navigate('/activity')}>Voir toutes mes sorties</button>
-        {isOwner && <button className="btn btn-danger" style={{ marginTop: 8, width: '100%' }} onClick={onDelete} disabled={busy}>🗑 Supprimer cette sortie et son tracé GPS</button>}
+        {isOwner && <button className="btn btn-danger" style={{ marginTop: 8, width: '100%' }} onClick={() => setDeleteOpen(true)} disabled={busy}>🗑 Supprimer cette sortie et son tracé GPS</button>}
       </div>
 
       <Sheet open={editing} onClose={() => setEditing(false)} title="Renommer et annoter" testId="activity-edit-sheet">
@@ -504,6 +583,21 @@ export default function ActivityDetailPage() {
         </div>
         <button className="btn btn-gold" onClick={saveEdit} disabled={busy}>{busy ? 'Enregistrement…' : 'Enregistrer'}</button>
       </Sheet>
+      <ConfirmSheet
+        open={deleteOpen}
+        onClose={() => setDeleteOpen(false)}
+        title="Supprimer cette sortie ?"
+        danger
+        consequences={[
+          'Le tracé GPS et toutes les statistiques de cette sortie sont effacés.',
+          'Les encouragements reçus sur cette sortie disparaissent aussi.',
+          'Cette action est définitive : aucun retour en arrière n’est possible.',
+        ]}
+        confirmLabel="Supprimer la sortie"
+        busy={busy}
+        onConfirm={onDelete}
+        testId="delete-activity-sheet"
+      />
       <ReportDialog open={reportOpen} onClose={() => setReportOpen(false)} targetUid={session.uid} targetType="activity" targetId={session.id!} />
     </div>
   );

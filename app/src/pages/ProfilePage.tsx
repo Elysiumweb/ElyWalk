@@ -1,58 +1,36 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useI18n } from '../context/LocaleContext';
 import { useToast } from '../components/Toast';
 import Sheet from '../components/Sheet';
 import Avatar from '../components/Avatar';
-import BadgeGrid, { BadgePreview } from '../components/BadgeGrid';
 import QRCode, { shareFriendCode } from '../components/QRCode';
 import LevelBadge from '../components/LevelBadge';
-import { logout, updateAuthProfile, changePassword, changeEmail, deleteAuthAccount, reauthenticateAccount, frAuthError } from '../lib/auth-service';
-import { updateUserFields, setReferredBy, exportAccountData, deleteAccountData, listUserBadges, watchUserBadges, getReferralDashboard, updateActivityPrivacy, getBestStreak } from '../lib/db';
+import { logout, updateAuthProfile } from '../lib/auth-service';
+import { updateUserFields, setReferredBy, listUserBadges, getReferralDashboard } from '../lib/db';
 import { toFirestoreAvatarDataUrl, deleteAvatar, shrinkStoredAvatar } from '../lib/avatar';
-import { getNotificationSettings, setReminderEnabled, setReminderSchedule, setPushEnabled, type NotificationSettings, type ReminderSchedule } from '../lib/notifications';
-import BlockedAccounts from '../components/BlockedAccounts';
-import { useI18n, type Locale } from '../context/LocaleContext';
-import { ACCOUNT_DELETION_URL, DATA_DELETION_URL, BADGE_DEFINITIONS } from '../lib/constants';
-import { openAdPrivacyOptions } from '../lib/ads';
+import { DATA_DELETION_URL } from '../lib/constants';
 import { isUnshareableOrigin, shareUrlForReferral } from '../lib/share';
-import { exportFilename, findResidualData } from '../lib/account';
-import { shareJsonFile } from '../lib/export';
-import { useAppearance, APPEARANCE_OPTIONS } from '../lib/appearance';
 import { APP_VERSION_LABEL } from '../lib/version';
 import { isPresidentUid } from '../lib/constants';
-import { fmtCoins, fmtNumber, formatDistance } from '../lib/coins';
-import type { UserBadge, BadgeDefinition, UserProfile } from '../lib/types';
+import { fmtCoins, fmtNumber } from '../lib/coins';
+import type { UserProfile } from '../lib/types';
+import NotificationBell from '../components/NotificationBell';
+import { useAlerts } from '../context/AlertsContext';
+import ConfirmSheet from '../components/ConfirmSheet';
+import BlockedAccounts from '../components/BlockedAccounts';
 
 export default function ProfilePage() {
   const { profile } = useAuth();
   const { toast } = useToast();
-  const { locale, setLocale, t } = useI18n();
-  // Audit § 2.7 — préférence d'affichage (Système / Sombre / Contraste renforcé).
-  const { appearance, setAppearance } = useAppearance();
+  const { t } = useI18n();
   const navigate = useNavigate();
 
   const [busy, setBusy] = useState(false);
-  const [exportStep, setExportStep] = useState('');
-  const [securityOpen, setSecurityOpen] = useState(false);
-  const [currentPassword, setCurrentPassword] = useState('');
-  const [nextPassword, setNextPassword] = useState('');
-
-  const [emailOpen, setEmailOpen] = useState(false);
-  const [emailPassword, setEmailPassword] = useState('');
-  const [nextEmail, setNextEmail] = useState('');
-
-  const [notifSettings, setNotifSettings] = useState<NotificationSettings | null>(null);
-
-  useEffect(() => {
-    getNotificationSettings().then(setNotifSettings).catch(() => undefined);
-  }, []);
 
   const [referralOpen, setReferralOpen] = useState(false);
   const [referralCode, setReferralCode] = useState('');
-
-  const [paypalOpen, setPaypalOpen] = useState(false);
-  const [paypalEmail, setPaypalEmail] = useState(profile?.paypalEmail || '');
 
   const [editOpen, setEditOpen] = useState(false);
   const [editName, setEditName] = useState(profile?.displayName || '');
@@ -92,15 +70,6 @@ export default function ProfilePage() {
     }
   };
 
-  // Badges
-  const [badges, setBadges] = useState<UserBadge[]>([]);
-  const [badgeSheet, setBadgeSheet] = useState<{ def: BadgeDefinition; badge?: UserBadge } | null>(null);
-  useEffect(() => {
-    if (!profile) return;
-    const unsub = watchUserBadges(profile.uid, setBadges);
-    return unsub;
-  }, [profile?.uid]);
-
   // Referral dashboard
   const [referralData, setReferralData] = useState<{ total: number; active: number; earned: number; items: { uid: string; displayName: string; claimed: boolean; rejected?: boolean; createdAt: number; active?: boolean; totalSteps?: number }[] } | null>(null);
   useEffect(() => {
@@ -109,17 +78,6 @@ export default function ProfilePage() {
   }, [profile?.uid]);
 
   const [qrOpen, setQrOpen] = useState(false);
-  // F07 : la « meilleure série » est calculée sur l'historique, elle n'est plus
-  // confondue avec la série en cours.
-  const [bestStreak, setBestStreak] = useState<number | null>(null);
-  useEffect(() => {
-    if (!profile) return;
-    let cancelled = false;
-    void getBestStreak(profile.uid)
-      .then((value) => { if (!cancelled) setBestStreak(value); })
-      .catch(() => undefined);
-    return () => { cancelled = true; };
-  }, [profile?.uid, profile?.streak]);
   const [privacyOpen, setPrivacyOpen] = useState(false);
 
   const isAdmin = isPresidentUid(profile?.uid);
@@ -132,21 +90,6 @@ export default function ProfilePage() {
       if (!ok) throw new Error('Code invalide ou parrain déjà défini.');
       toast('Parrain enregistré ! Le bonus est vérifié automatiquement.', 'success');
       setReferralOpen(false);
-    } catch (e) {
-      toast((e as Error).message, 'error');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const savePaypal = async () => {
-    if (!profile) return;
-    setBusy(true);
-    try {
-      if (!paypalEmail.includes('@')) throw new Error('E-mail PayPal invalide.');
-      await updateUserFields(profile.uid, { paypalEmail: paypalEmail.trim() });
-      toast('E-mail PayPal enregistré.', 'success');
-      setPaypalOpen(false);
     } catch (e) {
       toast((e as Error).message, 'error');
     } finally {
@@ -235,62 +178,10 @@ export default function ProfilePage() {
     }
   };
 
-  const onLogout = async () => { if (confirm('Voulez-vous vraiment vous déconnecter ?')) await logout(); };
-  const onChangePassword = async () => { setBusy(true); try { await changePassword(currentPassword, nextPassword); toast('Mot de passe modifié.','success'); setSecurityOpen(false); } catch(e){toast(frAuthError(e),'error')} finally{setBusy(false)} };
-  const onChangeEmail = async () => { if(!profile)return; setBusy(true); try { await changeEmail(emailPassword, nextEmail); await updateUserFields(profile.uid, { email: nextEmail.trim() }); toast('Adresse e-mail mise à jour.','success'); setEmailOpen(false); setEmailPassword(''); setNextEmail(''); } catch(e){toast(frAuthError(e),'error')} finally{setBusy(false)} };
-  const onToggleReminder = async (v: boolean) => { await setReminderEnabled(v); setNotifSettings((s) => s ? { ...s, reminder: v } : s); };
-  const onTogglePush = async (v: boolean) => { if(!profile)return; await setPushEnabled(profile.uid, v); setNotifSettings((s) => s ? { ...s, push: v } : s); };
-  const onScheduleChange = async (patch: Partial<ReminderSchedule>) => { if (!notifSettings) return; const schedule = { ...notifSettings.schedule, ...patch }; setNotifSettings({ ...notifSettings, schedule, reminder: schedule.enabled }); try { await setReminderSchedule(schedule); } catch (e) { toast((e as Error).message, 'error'); } };
-  const onPrivacyOptions = async () => { openAdPrivacyOptions(); };
-  const onExport = async () => {
-    if(!profile) return;
-    setBusy(true); setExportStep('Préparation de l’export…');
-    try {
-      const data = await exportAccountData(profile.uid);
-      const warnings = (data.warnings as string[] | undefined) || [];
-      setExportStep('Génération du fichier…');
-      const filename = exportFilename(profile.uid);
-      const json = JSON.stringify(data, null, 2);
-      await shareJsonFile(json, filename, 'Mes données ElyWalk');
-      toast(warnings.length ? `Export terminé avec ${warnings.length} partie(s) incomplète(s).` : 'Export téléchargé sur votre appareil.', warnings.length ? 'error' : 'success');
-    } catch (e) {
-      toast((e as Error).message || 'Export impossible.', 'error');
-    } finally { setBusy(false); setExportStep(''); }
-  };
-  /**
-   * Suppression du compte (F03).
-   *
-   * L'ordre compte : on réauthentifie d'abord (Firebase exige une connexion
-   * récente), on efface ensuite les données, et seulement à la fin le compte
-   * d'authentification. Si l'effacement s'interrompt, le compte reste donc
-   * utilisable pour reprendre la suppression — l'inverse laisserait des données
-   * orphelines définitivement inaccessibles.
-   */
-  const onDelete = async () => {
-    if (!profile) return;
-    const typed = prompt(
-      `Suppression définitive.\n\nSaisissez SUPPRIMER pour confirmer, ou votre mot de passe.\n(laissez vide pour les comptes Google)`
-    );
-    if (typed === null) return;
-    const ok = typed.trim() === 'SUPPRIMER' || typed.trim() === '' || typed.trim().length > 0;
-    if (!ok) return;
-    setBusy(true);
-    try {
-      setExportStep('Vérification de votre identité…');
-      const password = typed.trim() && typed.trim() !== 'SUPPRIMER' ? typed.trim() : undefined;
-      if (password) await reauthenticateAccount(password);
-      else await reauthenticateAccount(); // comptes Google : réauthentification par popup si nécessaire
-      setExportStep('Suppression de vos sorties…');
-      await deleteAvatar(profile.uid);
-      await deleteAccountData(profile.uid, (step) => setExportStep(`${step}…`));
-      setExportStep('Vérification finale…');
-      const residues = await findResidualData(profile.uid);
-      if (residues.length) {
-        toast(`Certaines données (${residues.join(', ')}) seront purgées côté serveur. Vérifiez régulièrement votre compte.`, 'error');
-      }
-      await deleteAuthAccount();
-    } catch (e) { toast(frAuthError(e), 'error'); }
-    finally { setBusy(false); setExportStep(''); }
+  const [logoutOpen, setLogoutOpen] = useState(false);
+  const onLogout = async () => {
+    await logout();
+    setLogoutOpen(false);
   };
   const copyText = async (value: string, label: string) => { await navigator.clipboard.writeText(value); toast(`${label} copié !`, 'success'); };
   const onShare = async () => {
@@ -319,14 +210,13 @@ export default function ProfilePage() {
 
   if (!profile) return null;
 
-  const totalDistance = (profile.totalSteps * (profile.strideLengthCm||75))/100;
-
   return (
     <div className="screen" data-testid="profile-screen">
       <div className="screen-header">
         <div>
           <h1 className="screen-title">Profil</h1>
         </div>
+        <div className="header-actions"><NotificationBell /></div>
       </div>
 
       <div className="gold-hero" style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
@@ -366,30 +256,6 @@ export default function ProfilePage() {
         Modifier mon profil
       </button>
       <div className="section-gap" />
-
-      <div className="card" data-testid="badges-card">
-        <div className="card-title">Badges · {badges.length}/{BADGE_DEFINITIONS.length}</div>
-        <BadgeGrid badges={badges} onSelect={(def,b)=>setBadgeSheet({def,badge:b})} />
-        {badges.length===0 && <p className="card-help" style={{marginTop:10}}>Validez vos pas, lancez une sortie GPS ou maintenez une série pour débloquer vos premiers trophées !</p>}
-      </div>
-
-      <div className="card">
-        <div className="card-title">Statistiques</div>
-        <div className="stat-grid" style={{gridTemplateColumns:'1fr 1fr'}}>
-          <div className="stat"><div className="stat-value">{fmtNumber(profile.totalSteps)}</div><div className="stat-label">pas cumulés</div></div>
-          <div className="stat"><div className="stat-value">{formatDistance(totalDistance, profile.unitSystem || 'metric')}</div><div className="stat-label">distance totale</div></div>
-          <div className="stat">
-            <div className="stat-value" data-testid="profile-best-streak">{bestStreak ?? profile.streak}</div>
-            <div className="stat-label">meilleure série</div>
-          </div>
-          <div className="stat">
-            <div className="stat-value">{profile.streak}</div>
-            <div className="stat-label">série en cours</div>
-          </div>
-          <div className="stat"><div className="stat-value">{fmtNumber(profile.totalCalories)}</div><div className="stat-label">kcal totales</div></div>
-        </div>
-        <div className="row-sub" style={{marginTop:8}}>Membre depuis {new Date(profile.createdAt).toLocaleDateString('fr-FR')}</div>
-      </div>
 
       <div className="card">
         <div className="card-title">Parrainage</div>
@@ -437,141 +303,60 @@ export default function ProfilePage() {
         ) : <div className="empty-state">Chargement...</div>}
       </div>
 
-      <div className="card">
-        <div className="card-title">Paiement</div>
-        <div className="list-row">
-          <div className="row-main">
-            <div className="row-title" style={{ fontSize: 14 }}>{profile.paypalEmail || 'Aucun e-mail PayPal'}</div>
-            <div className="row-sub">Compte de réception des retraits</div>
-          </div>
-          <button className="btn btn-ghost btn-sm" onClick={() => setPaypalOpen(true)} data-testid="edit-paypal-button">
-            Modifier
+      {/*
+        D07 — le profil était une seule colonne de dix cartes (identité,
+        trophées, statistiques, parrainage, paiement, confidentialité,
+        apparence, langue, notifications, données) : les réglages et la
+        progression se perdaient au milieu du reste.
+
+        Le profil ne garde que l'identité, le palier, le parrainage et deux
+        destinations explicites : « Progression » (statistiques, paliers,
+        collection de badges) et « Réglages » (notifications, apparence,
+        langue, paiement, confidentialité, compte). Aucun accès n'est perdu :
+        chaque carte déplacée vit sur l'un de ces deux écrans.
+      */}
+      <div className="card" data-testid="profile-destinations">
+        <div className="card-title">{t('profile.goto')}</div>
+        <div className="profile-destinations">
+          <button
+            className="profile-destination"
+            onClick={() => navigate('/progression')}
+            data-testid="profile-go-progression"
+          >
+            <span className="profile-destination-icon" aria-hidden="true">🏆</span>
+            <span className="profile-destination-main">
+              <span className="profile-destination-title">{t('profile.goto.progression')}</span>
+              <span className="profile-destination-hint">{t('profile.goto.progression.hint')}</span>
+            </span>
+            <span aria-hidden="true">›</span>
+          </button>
+          <button
+            className="profile-destination"
+            onClick={() => navigate('/settings')}
+            data-testid="profile-go-settings"
+          >
+            <span className="profile-destination-icon" aria-hidden="true">⚙️</span>
+            <span className="profile-destination-main">
+              <span className="profile-destination-title">{t('profile.goto.settings')}</span>
+              <span className="profile-destination-hint">{t('profile.goto.settings.hint')}</span>
+            </span>
+            <span aria-hidden="true">›</span>
           </button>
         </div>
       </div>
 
-      <div className="card">
-        <div className="card-title">Confidentialité du fil d’activité</div>
-        <p className="card-help">Choisissez ce que vos amis voient dans leur fil.</p>
-        <div className="list-row">
-          <div className="row-main"><div className="row-title" style={{fontSize:13}}>Objectifs atteints</div><div className="row-sub">Quand vous validez 10k pas</div></div>
-          <button className={`btn btn-sm ${profile.activityPrivacy?.shareGoals!==false?'btn-gold':'btn-ghost'}`} onClick={async()=>{
-            const current = profile.activityPrivacy?.shareGoals !== false;
-            await updateActivityPrivacy(profile.uid, { ...(profile.activityPrivacy||{}), shareGoals: !current });
-            toast(!current?'Objectifs partagés':'Objectifs masqués','info');
-          }}>{profile.activityPrivacy?.shareGoals===false?'Masqué':'Partagé'}</button>
-        </div>
-        <div className="list-row">
-          <div className="row-main"><div className="row-title" style={{fontSize:13}}>Sorties GPS</div><div className="row-sub">Fin de sortie</div></div>
-          <button className={`btn btn-sm ${profile.activityPrivacy?.shareActivities!==false?'btn-gold':'btn-ghost'}`} onClick={async()=>{
-            const current = profile.activityPrivacy?.shareActivities !== false;
-            await updateActivityPrivacy(profile.uid, { ...(profile.activityPrivacy||{}), shareActivities: !current });
-            toast(!current?'Sorties partagées':'Sorties masquées','info');
-          }}>{profile.activityPrivacy?.shareActivities===false?'Masqué':'Partagé'}</button>
-        </div>
-        <div className="list-row">
-          <div className="row-main"><div className="row-title" style={{fontSize:13}}>Badges</div><div className="row-sub">Trophées débloqués</div></div>
-          <button className={`btn btn-sm ${profile.activityPrivacy?.shareBadges!==false?'btn-gold':'btn-ghost'}`} onClick={async()=>{
-            const current = profile.activityPrivacy?.shareBadges !== false;
-            await updateActivityPrivacy(profile.uid, { ...(profile.activityPrivacy||{}), shareBadges: !current });
-            toast(!current?'Badges partagés':'Badges masqués','info');
-          }}>{profile.activityPrivacy?.shareBadges===false?'Masqué':'Partagé'}</button>
-        </div>
-        <div className="list-row">
-          <div className="row-main"><div className="row-title" style={{fontSize:13}}>Défis</div><div className="row-sub">Victoires et challenges</div></div>
-          <button className={`btn btn-sm ${profile.activityPrivacy?.shareChallenges!==false?'btn-gold':'btn-ghost'}`} onClick={async()=>{
-            const current = profile.activityPrivacy?.shareChallenges !== false;
-            await updateActivityPrivacy(profile.uid, { ...(profile.activityPrivacy||{}), shareChallenges: !current });
-            toast(!current?'Défis partagés':'Défis masqués','info');
-          }}>{profile.activityPrivacy?.shareChallenges===false?'Masqué':'Partagé'}</button>
-        </div>
-      </div>
 
-      <div className="card">
-        <div className="card-title">Affichage</div>
-        <div className="appearance-options" role="radiogroup" aria-label="Thème d’affichage">
-          {APPEARANCE_OPTIONS.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              role="radio"
-              aria-checked={appearance === option.value}
-              className={`appearance-option ${appearance === option.value ? 'appearance-option-active' : ''}`}
-              onClick={() => void setAppearance(option.value)}
-              data-testid={`appearance-${option.value}`}
-            >
-              <span className="appearance-option-label">{option.label}</span>
-              <span className="appearance-option-hint">{option.hint}</span>
-            </button>
-          ))}
-        </div>
-        <small className="card-help">La charte noir et or est conservée ; seul le confort de lecture change. Les réglages système de taille de texte restent respectés.</small>
-      </div>
-
-      <div className="card"><div className="field"><label>{t('settings.language')}</label><select className="input" value={locale} onChange={e=>void setLocale(e.target.value as Locale)} data-testid="language-select"><option value="fr">Français</option><option value="en">English</option></select><small className="card-help">Les libellés traduits, dates et nombres utilisent cette langue.</small></div></div>
-
-      <div className="card">
-        <div className="card-title">Notifications</div>
-        {notifSettings && (
-          <>
-            <div className="list-row">
-              <div className="row-main">
-                <div className="row-title" style={{ fontSize: 14 }}>Rappels de marche</div>
-                <div className="row-sub">{notifSettings.schedule.time} · {notifSettings.schedule.days.length} jour(s) par semaine</div>
-              </div>
-              <button
-                className={`btn btn-sm ${notifSettings.reminder ? 'btn-gold' : 'btn-ghost'}`}
-                onClick={() => onToggleReminder(!notifSettings.reminder)}
-                data-testid="toggle-reminder-button"
-              >
-                {notifSettings.reminder ? 'Activé' : 'Désactivé'}
-              </button>
-            </div>
-            {notifSettings.reminder && <div className="reminder-settings">
-              <div className="chip-row" aria-label="Jours de rappel">{['D','L','M','M','J','V','S'].map((label, day) => <button key={day} className={`chip ${notifSettings.schedule.days.includes(day) ? 'chip-active' : ''}`} aria-pressed={notifSettings.schedule.days.includes(day)} onClick={() => onScheduleChange({ days: notifSettings.schedule.days.includes(day) ? notifSettings.schedule.days.filter(d => d !== day) : [...notifSettings.schedule.days, day].sort() })}>{label}</button>)}</div>
-              <div className="field"><label>Heure du rappel</label><input className="input" type="time" value={notifSettings.schedule.time} onChange={e => onScheduleChange({ time: e.target.value })} /></div>
-              <div className="two-col"><div className="field"><label>Silence à partir de</label><input className="input" type="time" value={notifSettings.schedule.quietStart} onChange={e => onScheduleChange({ quietStart: e.target.value })} /></div><div className="field"><label>Jusqu’à</label><input className="input" type="time" value={notifSettings.schedule.quietEnd} onChange={e => onScheduleChange({ quietEnd: e.target.value })} /></div></div>
-              <label className="check-row"><input type="checkbox" checked={notifSettings.schedule.goalAware} onChange={e => onScheduleChange({ goalAware: e.target.checked })} /> Adapter le message à mon objectif quotidien</label>
-            </div>}
-            <div className="list-row">
-              <div className="row-main">
-                <div className="row-title" style={{ fontSize: 14 }}>Notifications push</div>
-                <div className="row-sub">Demandes d’amis, retraits et actualités</div>
-              </div>
-              <button
-                className={`btn btn-sm ${notifSettings.push ? 'btn-gold' : 'btn-ghost'}`}
-                onClick={() => onTogglePush(!notifSettings.push)}
-                data-testid="toggle-push-button"
-              >
-                {notifSettings.push ? 'Activé' : 'Désactivé'}
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-
-      <BlockedAccounts />
-
-      <div className="card"><div className="card-title">Compte & données</div>
-        <button className="btn btn-ghost" onClick={()=>setSecurityOpen(true)}>Changer le mot de passe</button>
-        <button className="btn btn-ghost" onClick={()=>setEmailOpen(true)} data-testid="change-email-button">Changer l’adresse e-mail</button><div className="section-gap" />
-        <button className="btn btn-outline" onClick={onPrivacyOptions}>Confidentialité des annonces (LevelPlay · Meta)</button><div className="section-gap" />
-        <button className="btn btn-outline" onClick={onExport} disabled={busy} data-testid="export-account">Exporter toutes mes données (RGPD)</button>
-        <p className="muted-xs" style={{ marginTop: 'var(--space-1)' }}>
-          Fichier JSON complet : sorties et tracés GPS, pas quotidiens, transactions, messages, amis,
-          parcours, défis, badges, retraits. Aucune limite de profondeur d’historique.
-        </p><div className="section-gap" />
-        <a className="btn btn-outline" href={DATA_DELETION_URL} target="_blank" rel="noopener noreferrer">Supprimer une partie de mes données</a><div className="section-gap" />
-        <button className="btn btn-danger" onClick={onDelete} disabled={busy} data-testid="delete-account">Supprimer définitivement mon compte</button>
-        {busy && exportStep ? (
-          <p className="muted-xs" role="status" aria-live="polite" data-testid="account-progress" style={{ marginTop: 'var(--space-2)' }}>
-            {exportStep}
-          </p>
-        ) : null}
-        <p className="muted-xs" style={{ marginTop: 'var(--space-2)' }}>
-          Procédure détaillée, données supprimées et durées de conservation :{' '}
-          <a href={ACCOUNT_DELETION_URL} target="_blank" rel="noopener noreferrer">{ACCOUNT_DELETION_URL}</a>
+      <div className="card" data-testid="profile-account-shortcut">
+        <div className="card-title">Compte & données</div>
+        <p className="card-help">
+          Mot de passe, e-mail, export RGPD, suppression du compte, comptes bloqués et confidentialité
+          des annonces se règlent au même endroit.
         </p>
+        <button className="btn btn-outline" onClick={() => navigate('/settings')} data-testid="profile-account-settings">
+          Ouvrir les réglages du compte
+        </button>
+        <div className="section-gap" />
+        <a className="btn btn-outline" href={DATA_DELETION_URL} target="_blank" rel="noopener noreferrer">Supprimer une partie de mes données</a>
         <div className="legal-links"><a href="/legal/terms">CGU</a> · <a href="/legal/privacy">Confidentialité</a> · <a href="/legal/notices">Mentions légales</a> · <a href="mailto:contact@elysium-esport.fr?subject=Feedback%20ElyWalk">Donner mon avis</a> · <button className="text-button inline-link" onClick={()=>navigate('/whats-new')}>Nouveautés</button> · <button className="text-button inline-link" onClick={()=>navigate('/diagnostics')} data-testid="diagnostics-link">Diagnostic</button><br/>{APP_VERSION_LABEL}</div>
       </div>
 
@@ -581,18 +366,22 @@ export default function ProfilePage() {
         </button>
       )}
       <div className="section-gap" />
-      <button className="btn btn-danger" onClick={onLogout} data-testid="logout-button">
+      <button className="btn btn-danger" onClick={() => setLogoutOpen(true)} data-testid="logout-button">
         Se déconnecter
       </button>
-
-      <Sheet open={securityOpen} onClose={()=>setSecurityOpen(false)} title="Changer le mot de passe"><div className="field"><label>Mot de passe actuel</label><input className="input" type="password" value={currentPassword} onChange={e=>setCurrentPassword(e.target.value)}/></div><div className="field"><label>Nouveau mot de passe</label><input className="input" type="password" value={nextPassword} onChange={e=>setNextPassword(e.target.value)}/></div><button className="btn btn-gold" onClick={onChangePassword} disabled={busy||nextPassword.length<6}>Enregistrer</button></Sheet>
-
-      <Sheet open={emailOpen} onClose={()=>setEmailOpen(false)} title="Changer l’adresse e-mail" testId="change-email-sheet">
-        <p className="onboarding-copy">Pour votre sécurité, confirmez votre mot de passe actuel puis saisissez la nouvelle adresse.</p>
-        <div className="field"><label>Mot de passe actuel</label><input className="input" type="password" value={emailPassword} onChange={e=>setEmailPassword(e.target.value)} data-testid="email-password-input"/></div>
-        <div className="field"><label>Nouvelle adresse e-mail</label><input className="input" type="email" value={nextEmail} onChange={e=>setNextEmail(e.target.value)} placeholder="vous@exemple.com" data-testid="new-email-input"/></div>
-        <button className="btn btn-gold" onClick={onChangeEmail} disabled={busy||emailPassword.length<1||!nextEmail.includes('@')} data-testid="save-email-button">Enregistrer</button>
-      </Sheet>
+      <ConfirmSheet
+        open={logoutOpen}
+        onClose={() => setLogoutOpen(false)}
+        title="Se déconnecter ?"
+        consequences={[
+          'Vous devrez vous reconnecter pour retrouver votre profil.',
+          'Vos pas continuent d’être comptés sur cet appareil.',
+          'Aucune donnée n’est supprimée.',
+        ]}
+        confirmLabel="Se déconnecter"
+        onConfirm={onLogout}
+        testId="logout-sheet"
+      />
 
       <Sheet open={editOpen} onClose={() => setEditOpen(false)} title="Modifier mon profil" testId="edit-profile-sheet">
         <div className="profile-edit-photo">
@@ -706,27 +495,6 @@ export default function ProfilePage() {
         <button className="btn btn-gold" onClick={saveReferral} disabled={busy} data-testid="save-referral-button">
           {busy ? '...' : 'Enregistrer'}
         </button>
-      </Sheet>
-
-      <Sheet open={paypalOpen} onClose={() => setPaypalOpen(false)} title="E-mail PayPal" testId="paypal-email-sheet">
-        <div className="field">
-          <label>E-mail du compte PayPal</label>
-          <input
-            className="input"
-            type="email"
-            value={paypalEmail}
-            onChange={(e) => setPaypalEmail(e.target.value)}
-            placeholder="vous@paypal.com"
-            data-testid="profile-paypal-input"
-          />
-        </div>
-        <button className="btn btn-gold" onClick={savePaypal} disabled={busy} data-testid="save-paypal-button">
-          {busy ? '...' : 'Enregistrer'}
-        </button>
-      </Sheet>
-
-      <Sheet open={!!badgeSheet} onClose={()=>setBadgeSheet(null)} title={badgeSheet?.def.title||'Badge'}>
-        {badgeSheet && <BadgePreview def={badgeSheet.def} badge={badgeSheet.badge} />}
       </Sheet>
 
       <Sheet open={qrOpen} onClose={()=>setQrOpen(false)} title="Mon QR ami">
