@@ -409,6 +409,29 @@ service cloud.firestore {
     // autorisée aux autres utilisateurs (pseudo, photo, bio, niveau, pas).
     // F02 — catalogue autoritaire des campagnes : montants et fenêtres de
     // validité définis par l'administration, jamais par le client.
+    // Version publiée sur le Play Store (écran de mise à jour au démarrage).
+    //
+    // Lecture : toute session authentifiée — l'écran de mise à jour doit pouvoir
+    // s'afficher même avant l'onboarding. Écriture : président uniquement, et
+    // uniquement les champs attendus, bornés. Aucune donnée personnelle ici.
+    match /appRelease/{docId} {
+      allow read: if auth();
+      allow write: if president()
+        && docId == 'current'
+        && request.resource.data.keys().hasOnly([
+          'latestVersion','minSupportedVersion','notes','publishedAt','enabled','updatedAt'
+        ])
+        && request.resource.data.latestVersion is string
+        && request.resource.data.latestVersion.size() <= 20
+        && request.resource.data.latestVersion.matches('^[0-9]+(\.[0-9]+){1,3}$')
+        && (!('minSupportedVersion' in request.resource.data)
+          || (request.resource.data.minSupportedVersion is string
+            && request.resource.data.minSupportedVersion.size() <= 20
+            && request.resource.data.minSupportedVersion.matches('^[0-9]+(\.[0-9]+){1,3}$')))
+        && (!('notes' in request.resource.data)
+          || (request.resource.data.notes is string && request.resource.data.notes.size() <= 600))
+        && (!('enabled' in request.resource.data) || request.resource.data.enabled is bool);
+    }
     match /challengeCatalog/{challengeId} {
       allow read: if auth();
       allow write: if president();

@@ -756,6 +756,66 @@ async function processPayouts(sa: ServiceAccount): Promise<{ processed: number }
   return { processed };
 }
 
+
+// ---------------------------------------------------------------------------
+// Version publiée sur le Play Store (écran de mise à jour au démarrage)
+// ---------------------------------------------------------------------------
+//
+// L'application compare sa version installée à `appRelease/current.latestVersion`
+// et affiche un écran de mise à jour si elle est en retard. Ce document est
+// normalement entretenu par l'administration, mais il peut prendre du retard sur
+// une publication Play : ce cron relit la version **réellement publiée** via
+// l'API Android Publisher et corrige le document, sans intervention.
+async function syncPublishedRelease(sa: ServiceAccount, env: Env): Promise<{ version: string } | { version: null }> {
+  const packageName = env.PACKAGE_NAME || 'com.elysium.elywalk';
+  const token = await getAccessToken(sa, 'https://www.googleapis.com/auth/androidpublisher');
+  const res = await fetch(
+    `https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${packageName}/tracks/production/releases`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (!res.ok) throw new Error(`play releases failed: HTTP ${res.status}`);
+  const data = (await res.json()) as {
+    releases?: Array<{ versionCodes?: string[]; status?: string }>;
+  };
+  const codes = (data.releases || [])
+    .flatMap((release) => release.versionCodes || [])
+    .map((code) => Number.parseInt(code, 10))
+    .filter((code) => Number.isFinite(code));
+  if (codes.length === 0) return { version: null };
+
+  // Convention du build (android/app/build.gradle) : versionCode = MAJEUR*10000
+  // + MINEUR*100 + CORRECTIF. On retrouve donc `versionName` sans le stocker.
+  const code = Math.max(...codes);
+  const major = Math.floor(code / 10000);
+  const minor = Math.floor((code % 10000) / 100);
+  const patch = code % 100;
+  const version = `${major}.${minor}.${patch}`;
+
+  // Le document est le même que celui édité à la main par le président : on ne
+  // touche qu'à `latestVersion` et `publishedAt`, jamais à `notes`,
+  // `minSupportedVersion` ni `enabled` (choix produit, pas technique).
+  await patchFields(sa, docName(sa, 'appRelease/current'), {
+    latestVersion: fString(version),
+    publishedAt: fInt(Date.now()),
+  }).catch(async () => {
+    // Document absent : création via PATCH sans masque (upsert Firestore REST).
+    const token2 = await getAccessToken(sa, FIRESTORE_SCOPE);
+    await fetch(`${FIRESTORE(sa.project_id)}/appRelease/current`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${token2}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fields: {
+          latestVersion: fString(version),
+          publishedAt: fInt(Date.now()),
+          enabled: fBool(true),
+        },
+      }),
+    }).catch(() => undefined);
+  });
+
+  return { version };
+}
+
 // ---------------------------------------------------------------------------
 // Routeur
 // ---------------------------------------------------------------------------
@@ -817,6 +877,12 @@ export default {
         return json({ ok: true, ...res });
       }
 
+      // Version publiée sur le Play Store → `appRelease/current` (cron).
+      if (request.method === 'GET' && path === '/cron/sync-release') {
+        const result = await syncPublishedRelease(sa, env);
+        return json({ ok: true, ...result });
+      }
+
       // F11 — Consommateur de notifications (cron)
       if (request.method === 'GET' && path === '/cron/process-notifications') {
         const res = await processNotifications(sa);
@@ -837,7 +903,14 @@ export default {
 
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     const sa = parseServiceAccount(env);
-    const job = event.cron === '0 * * * *' ? processPayouts(sa) : processNotifications(sa);
+    // Chaque déclencheur a un rôle unique et identifiable par son expression,
+    // sinon la version publiée ne serait jamais relue.
+    const job =
+      event.cron === '0 * * * *'
+        ? processPayouts(sa)
+        : event.cron === '15 */6 * * *'
+          ? syncPublishedRelease(sa, env).then(() => undefined)
+          : processNotifications(sa);
     ctx.waitUntil(job.catch(error => console.error('[cron]', event.cron, error)));
   },
 };

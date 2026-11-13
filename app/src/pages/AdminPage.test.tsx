@@ -19,6 +19,8 @@ vi.mock('../context/AuthContext', () => ({
 vi.mock('../components/Toast', () => ({ useToast: () => ({ toast: vi.fn() }) }));
 vi.mock('react-router-dom', () => ({ useNavigate: () => () => undefined, useLocation: () => ({ key: 'default' }) }));
 vi.mock('../lib/db', () => ({
+  // Panneau « Mise à jour » : le document de version est lu et écrit via db.ts.
+  setPublishedRelease: vi.fn(async () => undefined),
   listAllPartnerRequests: vi.fn(async () => []),
   updatePartnerRequestStatus: vi.fn(async () => undefined),
   listAllWithdrawals: vi.fn(async () => []),
@@ -33,7 +35,12 @@ vi.mock('../lib/establishments', () => ({
   resizeLogoToDataUrl: vi.fn(),
 }));
 vi.mock('../lib/firebase', () => ({ db: {} }));
-vi.mock('firebase/firestore', () => ({ collection: vi.fn(), getDocs: vi.fn(async () => ({ docs: [] })) }));
+vi.mock('firebase/firestore', () => ({
+  collection: vi.fn(),
+  getDocs: vi.fn(async () => ({ docs: [] })),
+  doc: vi.fn(() => ({})),
+  getDoc: vi.fn(async () => ({ exists: () => false, data: () => ({}) })),
+}));
 vi.mock('../lib/challenges', () => ({
   closeChallengeCatalogEntry: vi.fn(),
   describeCatalogState: () => [],

@@ -23,6 +23,7 @@ export default function WhatsNewPage() {
           <li>✍️ <strong>Confirmations claires</strong> : les actions sensibles (déconnexion, suppression d’un compte, d’une sortie ou d’un parcours, blocage) expliquent leurs conséquences avant d’agir, et conservent ce que vous avez saisi en cas d’erreur</li>
           <li>🎨 Lisibilité et accessibilité : contraste renforcé, cibles tactiles plus grandes, zoom réactivé</li>
           <li>📢 Une publicité s’affiche au départ et à l’arrivée d’une sortie GPS, y compris depuis « Rencontres »</li>
+          <li>⬆️ <strong>Nouvel écran de mise à jour au lancement</strong> : quand une version plus récente est publiée sur le Play Store, ElyWalk vous prévient dès l’ouverture — avec un bouton « Mettre à jour » qui ouvre directement la fiche, et un simple « Plus tard » si la mise à jour est facultative</li>
         </ul>
       </div>
 

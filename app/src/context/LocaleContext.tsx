@@ -20,6 +20,20 @@ export const dictionaries = {
     'profile.goto.progression.hint': 'Statistiques, paliers et tous mes badges',
     'profile.goto.settings': 'Réglages',
     'profile.goto.settings.hint': 'Notifications, apparence, langue, paiement, compte',
+    // Écran de mise à jour (détection de la version publiée sur le Play Store).
+    'update.recommended.title': 'Une nouvelle version est disponible',
+    'update.recommended.body': 'Une version plus récente d’ElyWalk est disponible sur le Play Store. La mettre à jour prend moins d’une minute et conserve votre profil, vos pas et vos ElyCoins.',
+    'update.required.title': 'Mise à jour nécessaire',
+    'update.required.body': 'Cette version d’ElyWalk n’est plus prise en charge. Installez la nouvelle version pour continuer à compter vos pas et à utiliser l’application.',
+    'update.required.note': 'Votre profil, votre série et vos ElyCoins sont conservés après la mise à jour.',
+    'update.installed': 'Installée',
+    'update.available': 'Disponible',
+    'update.whatsnew': 'Nouveautés',
+    'update.action': 'Mettre à jour',
+    'update.opening': 'Ouverture du Play Store…',
+    'update.later': 'Plus tard',
+    'update.hint': 'La mise à jour se télécharge depuis le Play Store. Pensez à activer les mises à jour automatiques pour ne plus y penser.',
+
   },
   en: {
     'nav.home': 'Home', 'nav.map': 'Map', 'nav.friends': 'Friends', 'nav.leaderboard': 'Leaderboard', 'nav.wallet': 'Wallet', 'nav.profile': 'Profile',
@@ -35,6 +49,19 @@ export const dictionaries = {
     'profile.goto.progression.hint': 'Statistics, levels and all my badges',
     'profile.goto.settings': 'Settings',
     'profile.goto.settings.hint': 'Notifications, appearance, language, payment, account',
+    'update.recommended.title': 'A new version is available',
+    'update.recommended.body': 'A newer version of ElyWalk is available on the Play Store. Updating takes less than a minute and keeps your profile, your steps and your ElyCoins.',
+    'update.required.title': 'Update required',
+    'update.required.body': 'This version of ElyWalk is no longer supported. Install the new version to keep counting your steps and using the app.',
+    'update.required.note': 'Your profile, your streak and your ElyCoins are kept after the update.',
+    'update.installed': 'Installed',
+    'update.available': 'Available',
+    'update.whatsnew': 'What’s new',
+    'update.action': 'Update now',
+    'update.opening': 'Opening the Play Store…',
+    'update.later': 'Later',
+    'update.hint': 'The update downloads from the Play Store. Turn on automatic updates so you never have to think about it.',
+
   },
 } as const;
 export type TranslationKey = keyof typeof dictionaries.fr;

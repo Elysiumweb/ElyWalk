@@ -40,6 +40,26 @@ alerte (les anciens non-lus ne rejouent plus).
 s'affiche désormais au départ **et** à l'arrivée, y compris quand la sortie est
 lancée depuis « Rencontres ».
 
+### Écran de mise à jour au lancement
+
+Une version installée pouvait rester des mois en retard sur le Play Store sans
+que rien ne le signale. Désormais, **au lancement** :
+
+- l'application compare sa version à la version publiée et affiche un écran
+  « Une nouvelle version est disponible » — versions installée et disponible,
+  notes de version, bouton **Mettre à jour** (fiche Play Store) et **Plus
+  tard** (report de 24 h, mémorisé pour cette version précise) ;
+- si la version installée est inférieure à `minSupportedVersion`, l'écran
+  devient **obligatoire** : aucune fermeture possible (ni Échap ni fond).
+
+La version publiée vient de trois sources, dans cet ordre : lecture du Play
+Store sans ouvrir d'écran (natif), document Firestore `appRelease/current`
+tenu à jour automatiquement par le worker (cron `/cron/sync-release` toutes les
+6 h, API Android Publisher), et panneau d'administration
+(**Administration → Mise à jour**) pour les notes, la version minimale et la
+suspension. Aucun échec de contrôle ne bloque le démarrage : hors ligne ou Play
+Store absent, l'application s'ouvre normalement.
+
 ### Audit d'interface
 
 - **D01 / D10** — jetons de thème sémantiques (contraste WCAG : le crème sur or

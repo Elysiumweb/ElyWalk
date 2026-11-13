@@ -2057,3 +2057,35 @@ registerSyncHandler('activity.finish', async (task) => {
   };
   await finishActivitySession(uid, sessionId, data);
 });
+
+// ---------------------------------------------------------------------------
+// Version publiée sur le Play Store (écran de mise à jour)
+// ---------------------------------------------------------------------------
+
+/**
+ * Déclare la version publiée — réservé au président (règle `appRelease`).
+ *
+ * Le worker Cloudflare tient ce document à jour automatiquement depuis l'API
+ * Play (`/cron/sync-release`) ; cette écriture sert à corriger à la main, ou à
+ * suspendre les notifications de mise à jour (`enabled: false`) sans publier
+ * de nouvelle version de l'application.
+ */
+export async function setPublishedRelease(release: {
+  latestVersion: string;
+  minSupportedVersion?: string;
+  notes?: string;
+  enabled?: boolean;
+}): Promise<void> {
+  const payload: Record<string, unknown> = {
+    latestVersion: release.latestVersion.trim(),
+    publishedAt: Date.now(),
+    updatedAt: Date.now(),
+    enabled: release.enabled !== false,
+  };
+  const min = (release.minSupportedVersion || '').trim();
+  const notes = (release.notes || '').trim();
+  if (min) payload.minSupportedVersion = min;
+  if (notes) payload.notes = notes.slice(0, 600);
+  if (release.enabled === false) payload.enabled = false;
+  await setDoc(doc(db, 'appRelease', 'current'), payload, { merge: true });
+}

@@ -364,6 +364,62 @@ npm install @capacitor-community/play-integrity
 npx cap sync
 ```
 
+## Écran de mise à jour au démarrage (« nouvelle version disponible »)
+
+Depuis 2.2.3, l'application compare sa version installée à la version publiée
+sur le Play Store **au lancement**, et affiche un écran qui propose la mise à
+jour. Deux niveaux :
+
+- **recommandée** : « Plus tard » est possible, l'écran ne revient pas avant
+  24 h (report mémorisé pour cette version précise) ;
+- **obligatoire** : aucun bouton de fermeture, ni Échap ni clic sur le fond.
+
+### D'où vient la « dernière version » ?
+
+1. **Le worker** (`/cron/sync-release`, toutes les 6 h) relit l'API **Android
+   Publisher** (`tracks/production/releases`), déduit `versionName` du
+   `versionCode` et l'écrit dans `appRelease/current`. Rien à faire à la main
+   après une publication Play.
+   - Le compte de service (`GOOGLE_APPLICATION_CREDENTIALS`) doit avoir accès à
+     l'application dans Play Console (*Utilisateurs et autorisations* →
+     « Afficher les données de l'application »).
+   - Endpoint testable à la main :
+     `curl https://<worker>.workers.dev/cron/sync-release`.
+2. **Le Play Store lui-même** (Android uniquement) : l'app tente une lecture
+   sans ouvrir d'écran ; si elle réussit elle prime sur Firestore.
+3. **L'administration** : Profil → Administration → onglet **Mise à jour**, qui
+   publie `notes` (affichées sur l'écran), `minSupportedVersion` (bascule en
+   obligatoire) et permet de **suspendre** l'écran sans publier de version.
+
+### Mise en place (une fois)
+
+```bash
+# 1. Autoriser l'API Play dans le projet du compte de service
+gcloud services enable androidpublisher.googleapis.com
+
+# 2. Déployer le worker (le cron `15 */6 * * *` se met en place au déploiement)
+cd worker && npx wrangler deploy
+
+# 3. Vérifier
+curl https://<worker>.workers.dev/cron/sync-release   # → {"ok":true,"version":"2.2.3"}
+
+# 4. Déclarer les notes de version et l'éventuelle version minimale
+#    Profil → Administration → Mise à jour (ou document `appRelease/current`).
+```
+
+### Déclencher une mise à jour obligatoire
+
+Renseigner `minSupportedVersion` (ex. `2.2.3`). Toute version strictement
+inférieure voit un écran sans échappatoire : à réserver aux changements de
+contrat d'API ou aux correctifs de sécurité, sinon on bloque des utilisateurs
+qui n'ont pas encore la mise à jour dans le Play Store.
+
+### Pour tester sans publier
+
+Écrire `appRelease/current` avec un `latestVersion` supérieur à `package.json`
+(onglet Administration → Mise à jour). Pour ne plus être dérangé pendant les
+tests : bouton **Suspendre l'écran de mise à jour** (`enabled: false`).
+
 ## Android
 
 ```bash

@@ -706,3 +706,82 @@
 @media (prefers-reduced-motion: reduce) {
   .event-highlight { animation: none; }
 }
+
+/* ---------------------------------------------------------------------------
+   Écran de mise à jour (démarrage, avant l'application)
+   Il reprend la mécanique de dialogue de `.sheet-overlay`, mais se centre : il
+   s'agit d'une décision à prendre, pas d'une feuille à faire glisser.
+--------------------------------------------------------------------------- */
+.update-overlay {
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+  z-index: 200; /* au-dessus des feuilles, sous rien d'autre */
+}
+.update-sheet {
+  width: 100%;
+  max-width: 460px;
+  margin: 0 auto;
+  padding: var(--space-5) var(--space-4) var(--space-4);
+  border-radius: var(--radius);
+  border: 1px solid var(--gold-border);
+  background: var(--surface);
+  text-align: center;
+  max-height: calc(100dvh - 2 * var(--space-4));
+  overflow-y: auto;
+}
+.update-emblem {
+  font-size: 34px;
+  line-height: 1;
+  margin-bottom: var(--space-2);
+}
+.update-title {
+  font-family: var(--font-display);
+  font-size: var(--text-lg, 19px);
+  color: var(--gold);
+  margin: 0 0 var(--space-2);
+}
+.update-copy {
+  color: var(--muted);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  margin: 0 0 var(--space-3);
+}
+.update-versions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  margin-bottom: var(--space-3);
+  background: var(--surface-2);
+  border: 1px solid var(--gold-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+}
+.update-versions span { display: flex; flex-direction: column; gap: 2px; }
+.update-versions small { color: var(--muted); font-size: var(--text-xs); }
+.update-versions strong { color: var(--white); }
+.update-notes {
+  text-align: left;
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  margin-bottom: var(--space-3);
+}
+.update-notes-title {
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--gold);
+  margin-bottom: 4px;
+}
+.update-notes p { margin: 0; font-size: var(--text-sm); color: var(--muted); line-height: 1.5; white-space: pre-line; }
+.update-warning {
+  font-size: var(--text-sm);
+  color: var(--danger);
+  margin: 0 0 var(--space-3);
+}
+.update-actions { display: flex; flex-direction: column; gap: var(--space-2); }
+.update-actions .btn { min-height: 48px; width: 100%; }
+.update-hint { margin: var(--space-3) 0 0; font-size: var(--text-xs); color: var(--muted); line-height: 1.4; }

@@ -8,6 +8,9 @@ import {
   listAllWithdrawals,
   updateWithdrawalStatus,
 } from '../lib/db';
+import { setPublishedRelease } from '../lib/db';
+import { APP_VERSION } from '../lib/version';
+import { compareVersions } from '../lib/appRelease';
 import {
   createEstablishment,
   deleteEstablishment,
@@ -22,13 +25,13 @@ import { fmtCoins, fmtEuros, fmtNumber } from '../lib/coins';
 import type { ContentReport, PartnerRequest, ReportStatus, Withdrawal } from '../lib/types';
 import { getChallengeDefinitions } from '../lib/constants';
 import { closeChallengeCatalogEntry, describeCatalogState, publishChallengeCatalog, setChallengeCatalogEntry, type ChallengeCatalogEntry } from '../lib/challenges';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { backfillBlockedUsers, reviewReport, watchReports } from '../lib/safety';
 import Sheet from '../components/Sheet';
 import ConfirmSheet from '../components/ConfirmSheet';
 
-type Tab = 'partners' | 'withdrawals' | 'establishments' | 'reports' | 'challenges' | 'maintenance';
+type Tab = 'partners' | 'withdrawals' | 'establishments' | 'reports' | 'challenges' | 'release' | 'maintenance';
 
 export default function AdminPage() {
   const { profile } = useAuth();
@@ -144,6 +147,57 @@ export default function AdminPage() {
   const [estLogo, setEstLogo] = useState<string | null>(null);
   const [estBusy, setEstBusy] = useState(false);
   const [backfillBusy, setBackfillBusy] = useState(false);
+
+  /**
+   * Version publiée sur le Play Store (écran de mise à jour au démarrage).
+   *
+   * Le worker relit l'API Play toutes les 6 h et corrige `latestVersion` ; ce
+   * panneau sert à publier les **notes de version** et à décider du caractère
+   * obligatoire (`minSupportedVersion`), choix produit que Play ne peut pas
+   * déduire. « Suspendre » n'éteint que l'écran de mise à jour, jamais les
+   * autres alertes.
+   */
+  const [release, setRelease] = useState<{ latestVersion: string; minSupportedVersion?: string; notes?: string; enabled?: boolean } | null>(null);
+  const [releaseLatest, setReleaseLatest] = useState('');
+  const [releaseMin, setReleaseMin] = useState('');
+  const [releaseNotes, setReleaseNotes] = useState('');
+  const [releaseEnabled, setReleaseEnabled] = useState(true);
+  const [releaseBusy, setReleaseBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getDoc(doc(db, 'appRelease', 'current'))
+      .then((snapshot) => {
+        if (cancelled) return;
+        const data = (snapshot.data() || {}) as { latestVersion?: string; minSupportedVersion?: string; notes?: string; enabled?: boolean };
+        setRelease(data.latestVersion ? { ...data, latestVersion: data.latestVersion } : null);
+        setReleaseLatest(data.latestVersion || APP_VERSION);
+        setReleaseMin(data.minSupportedVersion || '');
+        setReleaseNotes(data.notes || '');
+        setReleaseEnabled(data.enabled !== false);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const saveRelease = async (enabledOverride?: boolean) => {
+    setReleaseBusy(true);
+    try {
+      await setPublishedRelease({
+        latestVersion: releaseLatest.trim() || APP_VERSION,
+        minSupportedVersion: releaseMin.trim(),
+        notes: releaseNotes,
+        enabled: enabledOverride ?? releaseEnabled,
+      });
+      toast('Version publiée mise à jour.', 'success');
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setReleaseBusy(false);
+    }
+  };
 
   const isAdmin = isPresidentUid(profile?.uid);
 
@@ -353,6 +407,13 @@ export default function AdminPage() {
           Barème des défis
         </button>
         <button
+          className={`chip ${tab === 'release' ? 'chip-active' : ''}`}
+          onClick={() => setTab('release')}
+          data-testid="admin-tab-release"
+        >
+          Mise à jour
+        </button>
+        <button
           className={`chip ${tab === 'maintenance' ? 'chip-active' : ''}`}
           onClick={() => setTab('maintenance')}
           data-testid="admin-tab-maintenance"
@@ -437,6 +498,94 @@ export default function AdminPage() {
               </div>
             ))
           )}
+        </div>
+      ) : tab === 'release' ? (
+        <div className="card" data-testid="admin-release">
+          <div className="card-title">Mise à jour de l’application</div>
+          <p className="card-help">
+            Au lancement, ElyWalk compare sa version installée à la version publiée sur le Play
+            Store. Si elle est en retard, un écran propose la mise à jour. Le worker relit l’API Play
+            toutes les 6 heures : <code>latestVersion</code> se corrige tout seul.
+          </p>
+          <p className="card-help">
+            Ce panneau sert à publier les <strong>notes de version</strong> et à décider du caractère
+            obligatoire. Version installée de référence de ce build :{' '}
+            <strong>{APP_VERSION}</strong>.
+          </p>
+
+          <div className="field">
+            <label htmlFor="release-latest">Dernière version publiée</label>
+            <input
+              id="release-latest"
+              className="input"
+              inputMode="numeric"
+              placeholder="2.3.0"
+              value={releaseLatest}
+              onChange={(e) => setReleaseLatest(e.target.value)}
+              data-testid="release-latest"
+            />
+            <small className="field-help">
+              {release
+                ? `Document actuel : ${release.latestVersion}${release.enabled === false ? ' (écran suspendu)' : ''}`
+                : 'Aucun document de version : l’écran de mise à jour est inactif.'}
+              {release && compareVersions(releaseLatest || APP_VERSION, release.latestVersion) < 0
+                ? ' — attention : vous déclarez une version plus ancienne que celle du Play Store.'
+                : ''}
+            </small>
+          </div>
+
+          <div className="field">
+            <label htmlFor="release-min">Version minimale supportée (vide = mise à jour facultative)</label>
+            <input
+              id="release-min"
+              className="input"
+              inputMode="numeric"
+              placeholder="2.2.2"
+              value={releaseMin}
+              onChange={(e) => setReleaseMin(e.target.value)}
+              data-testid="release-min"
+            />
+            <small className="field-help">
+              En dessous de cette version, l’écran de mise à jour ne peut pas être fermé.
+            </small>
+          </div>
+
+          <div className="field">
+            <label htmlFor="release-notes">Notes de version affichées</label>
+            <textarea
+              id="release-notes"
+              className="input"
+              rows={4}
+              maxLength={600}
+              placeholder="Une ligne par nouveauté."
+              value={releaseNotes}
+              onChange={(e) => setReleaseNotes(e.target.value)}
+              data-testid="release-notes"
+            />
+            <small className="field-help">{releaseNotes.length}/600 caractères</small>
+          </div>
+
+          <div className="route-actions">
+            <button
+              className="btn btn-gold"
+              onClick={() => void saveRelease()}
+              disabled={releaseBusy}
+              data-testid="release-save"
+            >
+              {releaseBusy ? 'Enregistrement…' : 'Publier ces informations'}
+            </button>
+            <button
+              className="btn btn-outline"
+              onClick={() => {
+                setReleaseEnabled((value) => !value);
+                void saveRelease(!releaseEnabled);
+              }}
+              disabled={releaseBusy}
+              data-testid="release-toggle"
+            >
+              {releaseEnabled ? 'Suspendre l’écran de mise à jour' : 'Réactiver l’écran de mise à jour'}
+            </button>
+          </div>
         </div>
       ) : tab === 'maintenance' ? (
         <div className="card" data-testid="admin-maintenance">
