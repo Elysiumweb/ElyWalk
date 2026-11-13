@@ -6,7 +6,7 @@ button, .tab, .chip { user-select: none; }
 .toast-stack { pointer-events: none; }
 .toast { display: flex; align-items: center; gap: 10px; pointer-events: auto; }
 .toast span { flex: 1; }
-.toast button { width: 34px; height: 34px; flex: 0 0 auto; border: 0; border-radius: 50%; background: rgba(255,255,255,.06); color: var(--muted); cursor: pointer; }
+.toast button { width: 44px; height: 44px; flex: 0 0 auto; border: 0; border-radius: 50%; background: rgba(255,255,255,.06); color: var(--muted); cursor: pointer; }
 
 /* Strong, consistent keyboard affordances. */
 :where(button, a, input, textarea, [tabindex]):focus-visible {
@@ -87,7 +87,7 @@ button, .tab, .chip { user-select: none; }
 .wallet-actions { margin-top: 2px; }
 .transaction-icon { width: 34px; height: 34px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 10px; color: var(--gold); background: var(--gold-dim); }
 
-.sheet-close { position: absolute; top: 10px; right: 12px; width: 40px; height: 40px; border: 0; border-radius: 50%; background: var(--surface-2); color: var(--muted); cursor: pointer; }
+.sheet-close { position: absolute; top: 8px; right: 10px; width: 44px; height: 44px; border: 0; border-radius: 50%; background: var(--surface-2); color: var(--muted); cursor: pointer; }
 .map-container .leaflet-tile-pane { filter: none; }
 .map-empty { position: absolute; z-index: 15; top: 50%; left: 50%; transform: translate(-50%,-50%); width: min(82%,340px); padding: 18px; text-align: center; border: 1px solid var(--gold-border); border-radius: var(--radius); background: rgba(17,17,17,.92); box-shadow: 0 10px 30px #0008; pointer-events: none; }
 .map-empty strong, .map-empty span { display: block; }
@@ -116,4 +116,67 @@ button, .tab, .chip { user-select: none; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: .01ms !important; }
+}
+
+/* ============================================================================
+   D05 — Lisibilité, cibles tactiles et noms accessibles.
+   Ces règles sont volontairement en fin de feuille : elles corrigent des
+   valeurs historiques (10–11 px, fermetures de 30–34 px) sans réécrire chaque
+   composant. Les cibles de conception passent à 44 × 44 px minimum.
+   ============================================================================ */
+
+/* ---- Tailles de texte plancher -------------------------------------------- */
+/* Les informations secondaires ne descendent plus sous 12 px et le corps
+   courant reste entre 14 et 16 px. */
+.screen-sub, .muted-text, .card-help, .field-help, .row-sub,
+.secondary-actions .text-button, .legal-consent, .onboarding-copy {
+  font-size: max(13px, var(--text-sm));
+}
+.muted-xs, .stat-label, .goal-label, .validation-success small,
+.password-strength, .summary-range, .summary-compare,
+.activity-privacy, .activity-points, .activity-gps-hint,
+.activity-pause-note, .notification-row-time, .badge,
+.directions-address, .directions-title, .row-sub {
+  font-size: max(12px, var(--text-xs));
+}
+/* Les mentions de licence des fonds de carte restent discrètes mais lisibles. */
+.leaflet-control-attribution { font-size: 11px !important; }
+
+/* ---- Cibles tactiles ------------------------------------------------------ */
+.sheet-close,
+.map-card-close,
+.map-locate-btn,
+.notification-bell,
+.nav-close,
+.toast button,
+.icon-danger {
+  min-width: 44px;
+  min-height: 44px;
+}
+.map-card-close { width: 44px; height: 44px; display: inline-grid; place-items: center; }
+.sheet-close { width: 44px; height: 44px; }
+.toast button { width: 44px; height: 44px; }
+.icon-danger { padding: 10px; }
+
+/* Boutons compacts : 40 px de haut mais 44 px de zone cliquable réelle. */
+.btn-sm { min-height: 44px; }
+.chip { min-height: 40px; height: auto; padding-block: 6px; }
+.chip-row { height: auto; min-height: 56px; }
+.activity-live-meta .chip,
+.activity-goal .chip,
+.filter-row .chip { min-height: 40px; height: auto; }
+
+/* Champs : 44 px de haut minimum, 16 px de texte (pas de zoom iOS au focus). */
+.input { min-height: 48px; font-size: max(16px, var(--text-md)); }
+select.input { font-size: max(16px, var(--text-md)); }
+.check-row { min-height: 44px; align-items: center; }
+.check-row input[type='checkbox'] { width: 22px; height: 22px; flex: 0 0 auto; }
+
+/* Libellés de navigation : 12 px minimum, la cible garde 48 px. */
+.tab { font-size: max(12px, var(--text-xs)); }
+.tab-label { font-size: max(12px, var(--text-xs)); }
+
+@media (max-height: 700px) {
+  /* Rien de plus : la hauteur ne doit jamais faire rétrécir le texte. */
+  .screen-sub { font-size: 13px; }
 }

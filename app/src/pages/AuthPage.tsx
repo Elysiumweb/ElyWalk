@@ -86,38 +86,49 @@ export default function AuthPage() {
         </button>
       </div>
 
+      {/*
+        Chaque libellé est associé à son champ par `htmlFor`/`id` (D05) : les
+        lecteurs d'écran annonçaient « zone de texte » sans dire quoi saisir, et
+        toucher le libellé ne focalisait pas le champ.
+      */}
       {mode === 'register' && (
         <div className="field">
-          <label>Nom / Pseudo</label>
+          <label htmlFor="auth-name">Nom / Pseudo</label>
           <input
+            id="auth-name"
             className="input"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Votre pseudo"
+            autoComplete="nickname"
             data-testid="auth-name-input"
           />
         </div>
       )}
       <div className="field">
-        <label>Adresse e-mail</label>
+        <label htmlFor="auth-email">Adresse e-mail</label>
         <input
+          id="auth-email"
           className="input"
           type="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="vous@exemple.com"
+          autoComplete="email"
           data-testid="auth-email-input"
         />
       </div>
       <div className="field">
-        <label>Mot de passe</label>
+        <label htmlFor="auth-password">Mot de passe</label>
         <div className="password-field">
           <input
+            id="auth-password"
             className="input"
             type={showPassword ? 'text' : 'password'}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="••••••••"
+            autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
             data-testid="auth-password-input"
           />
           <button type="button" className="password-toggle" onClick={() => setShowPassword(v => !v)} aria-label={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'} aria-pressed={showPassword}>
@@ -127,8 +138,9 @@ export default function AuthPage() {
         {mode === 'register' && password && <div className={`password-strength strength-${passwordScore}`}><span style={{width:`${Math.max(15,passwordScore*25)}%`}} />Force : {strengthLabel}</div>}
       </div>
       <div className="field">
-        <label>Code de parrainage (optionnel)</label>
+        <label htmlFor="auth-referral">Code de parrainage (optionnel)</label>
         <input
+          id="auth-referral"
           className="input"
           value={referral}
           onChange={(e) => setReferral(e.target.value.toUpperCase())}

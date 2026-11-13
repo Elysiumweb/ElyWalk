@@ -1,9 +1,10 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { App as CapApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { LocaleProvider } from './context/LocaleContext';
+import { AlertsProvider } from './context/AlertsContext';
 import { ToastProvider } from './components/Toast';
 import TabBar from './components/TabBar';
 import AdBanner from './components/AdBanner';
@@ -30,11 +31,16 @@ import ActivityPage from './pages/ActivityPage';
 import ActivityDetailPage from './pages/ActivityDetailPage';
 import EventsPage from './pages/EventsPage';
 import RoutesPage from './pages/RoutesPage';
+import SettingsPage from './pages/SettingsPage';
+import ProgressionPage from './pages/ProgressionPage';
 import ProductStatus from './components/ProductStatus';
 import SyncStatus from './components/SyncStatus';
 import { setupNotifications, syncPushRegistration, listenNotificationNavigation } from './lib/notifications';
 import { listenEventReminderTaps } from './lib/eventReminders';
 import { installDiagnostics } from './lib/diagnostics';
+import UpdateScreen from './components/UpdateScreen';
+import { checkForUpdate } from './lib/appUpdate';
+import type { UpdateDecision } from './lib/appRelease';
 
 function Shell() {
   const { user, profile, loading, setPendingReferralCode } = useAuth();
@@ -126,6 +132,33 @@ function Shell() {
     };
   }, [profile?.onboardingDone, profile?.uid]);
 
+  /*
+    Mise à jour publiée sur le Play Store : contrôle au lancement, avant de
+    laisser entrer dans l'application. Le contrôle est silencieux en cas
+    d'échec (hors ligne, Play Store absent) — il ne retarde jamais l'accès.
+    L'écran revient au retour au premier plan (l'utilisateur a pu mettre à jour
+    entre-temps, ou la version publiée a changé).
+  */
+  const [updateDecision, setUpdateDecision] = useState<UpdateDecision | null>(null);
+  const updateCheckedRef = useRef(false);
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      const decision = await checkForUpdate();
+      if (cancelled) return;
+      updateCheckedRef.current = true;
+      setUpdateDecision(decision.available && !decision.dismissed ? decision : null);
+    };
+    void run();
+    const sub = CapApp.addListener('appStateChange', ({ isActive }) => {
+      if (isActive && updateCheckedRef.current) void run();
+    });
+    return () => {
+      cancelled = true;
+      void sub.then((handle) => handle.remove());
+    };
+  }, []);
+
   if (loading) {
     return (
       <div className="loading-screen" data-testid="loading-screen">
@@ -134,6 +167,16 @@ function Shell() {
         </div>
         <div className="spinner" />
       </div>
+    );
+  }
+
+  // Une mise à jour obligatoire passe avant tout : authentification comprise.
+  if (updateDecision) {
+    return (
+      <UpdateScreen
+        decision={updateDecision}
+        onDismiss={() => setUpdateDecision(null)}
+      />
     );
   }
 
@@ -149,6 +192,8 @@ function Shell() {
         <Route path="/leaderboard" element={<LeaderboardPage />} />
         <Route path="/wallet" element={<WalletPage />} />
         <Route path="/profile" element={<ProfilePage />} />
+        <Route path="/progression" element={<ProgressionPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
         <Route path="/partners" element={<PartnersPage />} />
         <Route path="/admin" element={<AdminPage />} />
         <Route path="/history" element={<HistoryPage />} />
@@ -178,7 +223,9 @@ export default function App() {
       <LocaleProvider>
       <ToastProvider>
         <AuthProvider>
-          <Shell />
+          <AlertsProvider>
+            <Shell />
+          </AlertsProvider>
         </AuthProvider>
       </ToastProvider>
       </LocaleProvider>

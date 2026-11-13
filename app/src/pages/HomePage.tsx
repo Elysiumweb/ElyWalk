@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
+import NotificationBell from '../components/NotificationBell';
 import ProgressRing from '../components/ProgressRing';
 import Sheet from '../components/Sheet';
 import { pedometer } from '../lib/pedometer';
@@ -187,15 +188,21 @@ export default function HomePage() {
           <h1 className="screen-title">ElyWalk</h1>
           <div className="screen-sub">Bonjour, {profile?.displayName}</div>
         </div>
-        <span className="badge" data-testid="home-balance-badge">
-          <CoinIcon /> {fmtCoins(profile?.elycoins || 0)} EC
-        </span>
+        <div className="header-actions">
+          <span className="badge" data-testid="home-balance-badge">
+            <CoinIcon /> {fmtCoins(profile?.elycoins || 0)} EC
+          </span>
+          <NotificationBell />
+        </div>
       </div>
 
       <div className="gold-hero">
         <img src="/deco-1.webp" className="hero-deco" alt="" />
         <ProgressRing progress={steps / dailyGoal}>
-          <div className="display" style={{ fontSize: 34, color: '#fff' }} data-testid="today-steps-value">
+          {/* Compteur principal : couleur de texte du thème (blanc en sombre,
+              presque noir en clair). Le `#fff` figé devenait invisible sur
+              l'ivoire du thème clair (D01). */}
+          <div className="display" style={{ fontSize: 34, color: 'var(--white)' }} data-testid="today-steps-value">
             {fmtNumber(steps)}
           </div>
           <div className="goal-label">

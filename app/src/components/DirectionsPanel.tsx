@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useToast } from './Toast';
 import AddressAutocomplete from './AddressAutocomplete';
 import NavigationView from './NavigationView';
 import { haversineM, type Coords } from '../lib/geo';
+import { showInterstitial } from '../lib/ads';
 import {
   externalMapsUrl,
   formatDuration,
@@ -66,6 +67,10 @@ export default function DirectionsPanel({
   onMapReady,
 }: DirectionsPanelProps) {
   const { toast } = useToast();
+  const overlayRef = useRef<HTMLDivElement | null>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   const mapElRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const layersRef = useRef<L.LayerGroup | null>(null);
@@ -121,6 +126,25 @@ export default function DirectionsPanel({
     }
   }, [origin?.lat, origin?.lng, editingStart]);
 
+  /**
+   * Ouverture « Itinéraire » : on localise l'utilisateur immédiatement.
+   *
+   * Avant, la feuille s'ouvrait sans point de départ (« Position non
+   * détectée ») : l'utilisateur devait appuyer sur « Ma position » puis
+   * attendre un second calcul. Depuis les Rencontres comme depuis la carte
+   * partenaire, le trajet est désormais demandé dès l'ouverture, sur la carte
+   * ElyWalk.
+   */
+  const autoLocatedRef = useRef(false);
+  useEffect(() => {
+    if (!open) { autoLocatedRef.current = false; return; }
+    if (autoLocatedRef.current) return;
+    if (startPoint || origin) { autoLocatedRef.current = true; return; }
+    autoLocatedRef.current = true;
+    void Promise.resolve(onLocate()).catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
   // Adresse réelle du point de départ (affichée sous le nom).
   useEffect(() => {
     if (!open || !startPoint) return;
@@ -167,7 +191,15 @@ export default function DirectionsPanel({
     mapRef.current = map;
     onMapReady?.(map);
     setTimeout(() => map.invalidateSize(), 80);
+    // La feuille s'ouvre dans un conteneur qui vient d'apparaître : sans cette
+    // seconde invalidation, Leaflet garde la taille 0 px mesurée à l'ouverture
+    // et n'affiche qu'un rectangle gris.
+    // `ResizeObserver` n'existe pas sur toutes les WebViews anciennes : la
+    // hauteur est alors recalculée à la fin du calcul d'itinéraire.
+    const resize = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => map.invalidateSize()) : null;
+    if (resize && mapElRef.current) resize.observe(mapElRef.current);
     return () => {
+      resize?.disconnect();
       map.remove();
       mapRef.current = null;
       layersRef.current = null;
@@ -175,7 +207,61 @@ export default function DirectionsPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
+  /**
+   * Comportement modal : Escape / retour Android ferment la feuille, le focus
+   * reste à l'intérieur et revient au déclencheur à la fermeture.
+   *
+   * `role="dialog" aria-modal="true"` ne suffisait pas : sans piège de focus,
+   * la tabulation partait derrière la surcouche, dans la barre d'onglets — ce
+   * qui rendait « Itinéraire » inutilisable au clavier.
+   */
+  useEffect(() => {
+    if (!open) return;
+    previousFocusRef.current = document.activeElement as HTMLElement | null;
+    const overlay = overlayRef.current;
+    const focusables = () =>
+      Array.from(
+        overlay?.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), a[href], input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        ) || []
+      );
+    requestAnimationFrame(() => {
+      if (!overlay) return;
+      const active = document.activeElement as HTMLElement | null;
+      if (!active || !overlay.contains(active)) overlay.focus();
+    });
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const items = focusables();
+      if (!items.length) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      const prev = previousFocusRef.current;
+      if (prev && prev.isConnected) prev.focus();
+    };
+  }, [open]);
+
   // Calcul de l'itinéraire à chaque changement de mode / point de départ.
+  // `attempt` permet de relancer le calcul après une erreur, sans changer de
+  // mode ni de point de départ (« Réessayer »).
+  const [attempt, setAttempt] = useState(0);
+
   useEffect(() => {
     if (!open || !destPoint) return;
     if (!startPoint) return;
@@ -198,7 +284,22 @@ export default function DirectionsPanel({
     return () => {
       cancelled = true;
     };
-  }, [open, mode, startPoint?.lat, startPoint?.lng, destPoint?.lat, destPoint?.lng]);
+  }, [open, mode, attempt, startPoint?.lat, startPoint?.lng, destPoint?.lat, destPoint?.lng]);
+
+  /**
+   * Alternative explicite quand le mode demandé ne peut pas être calculé.
+   *
+   * On ne substitue jamais un tracé automobile à un mode actif : on propose un
+   * autre **mode réel** (à pied par défaut, transports pour un trajet urbain)
+   * que l'utilisateur choisit lui-même.
+   */
+  const alternativeMode: TravelMode | null = (() => {
+    if (!error) return null;
+    if (mode === 'walk') return 'transit';
+    if (mode === 'bike') return 'walk';
+    if (mode === 'transit') return 'walk';
+    return 'walk';
+  })();
 
   // Tracé + repères sur la carte.
   useEffect(() => {
@@ -279,7 +380,15 @@ export default function DirectionsPanel({
   };
 
   return (
-    <div className="directions-overlay" role="dialog" aria-modal="true" aria-label="Itinéraire" data-testid="directions-panel">
+    <div
+      className="directions-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Itinéraire vers ${destination?.name || 'la destination'}`}
+      data-testid="directions-panel"
+      ref={overlayRef}
+      tabIndex={-1}
+    >
       <div className="directions-head">
         <div style={{ minWidth: 0 }}>
           <div className="directions-title">Itinéraire vers</div>
@@ -362,13 +471,54 @@ export default function DirectionsPanel({
             </div>
           )}
           {startPoint && !loading && error && (
-            <div className="directions-error">
+            <div className="directions-error" role="alert" data-testid="directions-error">
               <span>⚠️ {error}</span>
               {straightLineM != null && (
                 <span className="muted-text">
                   À vol d’oiseau : {formatRouteDistance(straightLineM)}
                 </span>
               )}
+              {/*
+                Aucun tracé automobile n'est plus présenté comme piéton : quand
+                le mode demandé n'a pas pu être calculé, on le dit et on propose
+                une alternative explicite (autre mode, nouvel essai, ou
+                ouverture dans une application externe sur action volontaire).
+              */}
+              <div className="directions-alt">
+                <span className="muted-xs">
+                  Le mode « {TRAVEL_MODES.find((m) => m.id === mode)?.short} » n’a pas pu être
+                  calculé. Voici ce que vous pouvez faire :
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-outline btn-sm"
+                  onClick={() => setAttempt((n) => n + 1)}
+                  data-testid="directions-retry"
+                >
+                  🔄 Réessayer
+                </button>
+                {alternativeMode && (
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => setMode(alternativeMode)}
+                    data-testid="directions-alternative-mode"
+                  >
+                    {TRAVEL_MODES.find((m) => m.id === alternativeMode)?.icon}{' '}
+                    Essayer {TRAVEL_MODES.find((m) => m.id === alternativeMode)?.label.toLowerCase()}
+                  </button>
+                )}
+                {destPoint && (
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => window.open(externalMapsUrl(destPoint, mode, startPoint), '_blank', 'noopener')}
+                    data-testid="directions-external-fallback"
+                  >
+                    Ouvrir l’itinéraire dans une autre application
+                  </button>
+                )}
+              </div>
             </div>
           )}
           {startPoint && !loading && !error && plan && (
@@ -451,20 +601,25 @@ export default function DirectionsPanel({
           <button
             type="button"
             className="btn btn-gold directions-start-nav"
-            onClick={() => setNavOpen(true)}
+            onClick={() => {
+              // Interstitiel au lancement du GPS (même placement que la sortie
+              // GPS). Il résout toujours : le guidage s'ouvre immédiatement.
+              void showInterstitial();
+              setNavOpen(true);
+            }}
             data-testid="directions-start-navigation"
           >
             🧭 Démarrer le guidage
           </button>
         )}
 
-        {destPoint && (
+        {plan && destPoint && (
           <button
             className="btn btn-ghost btn-sm"
             onClick={() => window.open(externalMapsUrl(destPoint, mode, startPoint), '_blank', 'noopener')}
             data-testid="directions-external"
           >
-            Ouvrir dans Google Maps
+            Ouvrir dans une autre application de cartes
           </button>
         )}
         <p className="muted-xs directions-credits">

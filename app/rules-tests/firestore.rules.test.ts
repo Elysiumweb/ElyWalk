@@ -320,3 +320,45 @@ describe('F12 — lectures d’amis sans dépassement de budget', () => {
     await assertFails(updateDoc(doc(as(ALICE), 'users/alice'), { bio: 'x', blockedBy: [BOB] }));
   });
 });
+
+// Alertes de rencontre : le rayon « rencontres proches » et la dernière
+// position approximative sont écrits par le client et lus par le cron. Sans
+// ces champs autorisés, l'ajustement du rayon restait une préférence locale et
+// aucune alerte ne pouvait partir quand l'application était fermée.
+describe('alertes — préférences et position approximative', () => {
+  const base = (uid: string) => ({
+    uid, displayName: uid, photoURL: null, role: 'user', createdAt: 1,
+    totalSteps: 0, totalCalories: 0, streak: 0, todaySteps: 0, todayDate: '2026-11-12',
+    elycoins: 0, referralCode: uid.toUpperCase(), dailyStepGoal: 10000,
+    unitSystem: 'metric', onboardingDone: true, lastValidatedDate: '2026-11-12',
+  });
+  const alerts = (extra: Record<string, unknown> = {}) => ({
+    messages: true, friendRequests: true, nearbyEvents: true, nearbyRadiusKm: 10,
+    eventReminders: true, eventReminderMinutes: 60, updatedAt: Date.now(), ...extra,
+  });
+
+  it('accepte un rayon dans les bornes et une position valide', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'users/alice'), base(ALICE));
+    });
+    await assertSucceeds(updateDoc(doc(as(ALICE), 'users/alice'), { alerts: alerts({ nearbyRadiusKm: 25 }) }));
+    await assertSucceeds(updateDoc(doc(as(ALICE), 'users/alice'), { alerts: alerts(), lastLat: 48.85, lastLng: 2.35 }));
+  });
+
+  it('refuse un rayon hors bornes ou une position impossible', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'users/alice'), base(ALICE));
+    });
+    await assertFails(updateDoc(doc(as(ALICE), 'users/alice'), { alerts: alerts({ nearbyRadiusKm: 500 }) }));
+    await assertFails(updateDoc(doc(as(ALICE), 'users/alice'), { alerts: alerts({ eventReminderMinutes: 99999 }) }));
+    await assertFails(updateDoc(doc(as(ALICE), 'users/alice'), { lastLat: 120 }));
+    await assertFails(updateDoc(doc(as(ALICE), 'users/alice'), { alerts: alerts({ unknownKey: true }) }));
+  });
+
+  it('interdit d’écrire les alertes d’un autre compte', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'users/bob'), base(BOB));
+    });
+    await assertFails(updateDoc(doc(as(ALICE), 'users/bob'), { alerts: alerts() }));
+  });
+});

@@ -337,7 +337,11 @@ describe('routeOnFootBikeOrCar', () => {
     }
   });
 
-  it('utilise le démonstrateur OSRM en dernier recours et recalcule la durée', async () => {
+  it('ne présente jamais un tracé automobile comme un itinéraire à pied', async () => {
+    // Le démonstrateur `router.project-osrm.org` ne connaît qu'un profil
+    // automobile : l'utiliser pour la marche revenait à annoncer un guidage
+    // piéton qui suivait les routes. On vérifie qu'il n'est plus sollicité et
+    // que l'échec est explicite (l'interface propose alors une alternative).
     const calls: string[] = [];
     const original = globalThis.fetch;
     globalThis.fetch = (async (input: any) => {
@@ -354,11 +358,35 @@ describe('routeOnFootBikeOrCar', () => {
       } as any;
     }) as any;
     try {
-      const plan = await routeOnFootBikeOrCar(from, to, 'walk');
+      await expect(routeOnFootBikeOrCar(from, to, 'walk')).rejects.toThrow(/indisponible/i);
       expect(calls.some((url) => url.includes('routed-foot'))).toBe(true);
+      expect(calls.some((url) => url.includes('project-osrm'))).toBe(false);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('utilise le démonstrateur OSRM pour la voiture, où son profil est correct', async () => {
+    const calls: string[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (input: any) => {
+      const url = String(input);
+      calls.push(url);
+      if (!url.includes('project-osrm')) throw new Error('502');
+      return {
+        ok: true,
+        json: async () => ({
+          routes: [
+            { distance: 4800, duration: 600, geometry: '_p~iF~ps|U_ulLnnqC_mqNvxq`@', legs: [{ steps: [] }] },
+          ],
+        }),
+      } as any;
+    }) as any;
+    try {
+      const plan = await routeOnFootBikeOrCar(from, to, 'car');
       expect(calls[calls.length - 1]).toContain('project-osrm');
-      // 4,8 km à 4,8 km/h = 1 h = 3600 s.
-      expect(plan.durationS).toBe(3600);
+      expect(plan.mode).toBe('car');
+      expect(plan.durationS).toBe(600);
       expect(plan.provider).toContain('OSRM');
     } finally {
       globalThis.fetch = original;

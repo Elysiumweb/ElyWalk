@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useToast } from './Toast';
-import { getCurrentPosition, haversineM, type Coords } from '../lib/geo';
+import { getCurrentPosition, haversineM, watchPosition, type Coords } from '../lib/geo';
 import {
   formatDuration,
   formatRouteDistance,
@@ -197,8 +197,6 @@ export default function NavigationView({
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    let watchId: number | null = null;
-    let interval: ReturnType<typeof setInterval> | null = null;
 
     const apply = (pos: Coords) => {
       const next = { lat: pos.lat, lng: pos.lng };
@@ -208,36 +206,32 @@ export default function NavigationView({
     };
 
     // 1) Position immédiate, puis suivi continu.
+    //
+    // Le suivi passait uniquement par `navigator.geolocation`, qui n'existe pas
+    // dans la WebView Capacitor : le guidage restait figé sur la position de
+    // l'ouverture. `watchPosition` (lib/geo) utilise le suivi natif sur mobile
+    // et le navigateur ailleurs, et se nettoie au démontage.
     void getCurrentPosition({ silent: true })
       .then((pos) => {
         if (pos && !cancelled) apply(pos);
       })
       .catch(() => undefined);
 
-    if (typeof navigator !== 'undefined' && navigator.geolocation) {
-      watchId = navigator.geolocation.watchPosition(
-        (pos) => {
-          if (cancelled) return;
-          apply({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-        },
-        () => undefined,
-        { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 }
-      );
-    } else {
-      // Capacitor sans `watchPosition` : rafraîchissement périodique.
-      interval = setInterval(() => {
-        void getCurrentPosition({ silent: true })
-          .then((pos) => {
-            if (pos && !cancelled) apply(pos);
-          })
-          .catch(() => undefined);
-      }, 8000);
-    }
+    const watcher = watchPosition(
+      (coords) => {
+        if (!cancelled) apply(coords);
+      },
+      (error) => {
+        // Le dernier point connu reste affiché : un trou de signal d'une
+        // seconde ne doit pas faire disparaître le repère.
+        console.warn('[guidage] position', error.message);
+      },
+      { intervalMs: 3000 },
+    );
 
     return () => {
       cancelled = true;
-      if (watchId != null) navigator.geolocation?.clearWatch(watchId);
-      if (interval) clearInterval(interval);
+      watcher.stop();
     };
   }, [open]);
 

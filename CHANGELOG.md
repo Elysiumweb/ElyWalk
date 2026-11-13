@@ -1,5 +1,92 @@
 # Changelog
 
+## 2.2.3 — 2026-11-13
+
+### Six défauts signalés — corrigés
+
+**1. « Ce mode est indisponible » sur un itinéraire à pied, à vélo ou en voiture.**
+Le panneau d'itinéraire n'avait aucun mode de repli : dès que le serveur de
+routage du mode choisi ne répondait pas (Valhalla saturé, profil vélo absent),
+l'écran se contentait d'annoncer l'indisponibilité. Désormais chaque mode a une
+chaîne de secours explicite — marche → transports puis marche, vélo → marche,
+transports → marche, voiture → OSRM (profil voiture) — et si aucune trace
+crédible n'existe, le panneau propose **Réessayer** ou un mode alternatif nommé
+plutôt que de substituer silencieusement un tracé voiture.
+
+**2. Toucher « Itinéraire » ouvrait une application externe.** Toutes les
+Rencontres, transports compris, s'ouvrent maintenant sur la carte ElyWalk avec
+le tracé dessiné (`NavigationView`), sans redirection vers Google Maps ni Apple
+Plans.
+
+**3. Le marqueur de position ne bougeait plus après l'ouverture.** La carte
+lisait une position unique au montage. `MapPage` suit désormais
+`watchPosition` (mise à jour ~3 s, suivie désactivée dès que l'utilisateur
+déplace la carte) ; `NavigationView` et la sortie GPS ont reçu le même
+correctif.
+
+**4. Alertes manquantes.** Ajout d'une cloche in-app + notifications système
+pour : message reçu, demande d'ami, rencontre proposée dans un rayon réglable
+(**10 km par défaut**, 1–100 km) et rappel des rencontres où l'on est inscrit
+(15 min à la veille). Les préférences sont synchronisées sur le profil et le
+cron du worker envoie les mêmes alertes application fermée, avec déduplication
+(`alertsNotified`).
+
+**5. Aucun signal en réception d'un message.** La cloche affiche un compteur
+non lu, un toast à l'arrivée, et une notification système si l'application est
+en arrière-plan. Seuls les messages reçus après l'ouverture déclenchent une
+alerte (les anciens non-lus ne rejouent plus).
+
+**6. Publicité manquante au départ d'une sortie GPS.** Un interstitiel
+s'affiche désormais au départ **et** à l'arrivée, y compris quand la sortie est
+lancée depuis « Rencontres ».
+
+### Écran de mise à jour au lancement
+
+Une version installée pouvait rester des mois en retard sur le Play Store sans
+que rien ne le signale. Désormais, **au lancement** :
+
+- l'application compare sa version à la version publiée et affiche un écran
+  « Une nouvelle version est disponible » — versions installée et disponible,
+  notes de version, bouton **Mettre à jour** (fiche Play Store) et **Plus
+  tard** (report de 24 h, mémorisé pour cette version précise) ;
+- si la version installée est inférieure à `minSupportedVersion`, l'écran
+  devient **obligatoire** : aucune fermeture possible (ni Échap ni fond).
+
+La version publiée vient de trois sources, dans cet ordre : lecture du Play
+Store sans ouvrir d'écran (natif), document Firestore `appRelease/current`
+tenu à jour automatiquement par le worker (cron `/cron/sync-release` toutes les
+6 h, API Android Publisher), et panneau d'administration
+(**Administration → Mise à jour**) pour les notes, la version minimale et la
+suspension. Aucun échec de contrôle ne bloque le démarrage : hors ligne ou Play
+Store absent, l'application s'ouvre normalement.
+
+### Audit d'interface
+
+- **D01 / D10** — jetons de thème sémantiques (contraste WCAG : le crème sur or
+  passait de 1,62:1 à 13,65:1), icône adaptative régénérée (symbole seul, zone
+  de sécurité 58 %).
+- **D02 / D05** — panneau « Itinéraire » réellement feuilleté (carte en
+  `min-height`, superposition fixe au-dessus de la barre d'onglets), zoom
+  viewport rétabli.
+- **D03** — carte de l'écran de sortie initialisée après montage
+  (`ResizeObserver` optionnel, plus d'écran gris).
+- **D04** — hiérarchie de l'écran de sortie : carte compacte avant le départ,
+  six compteurs dépliés seulement pendant la sortie.
+- **D06** — plus aucun `confirm()` / `prompt()` natif : `ConfirmSheet` énonce
+  les conséquences, sépare les actions dangereuses, conserve la saisie en cas
+  d'échec (déconnexion, suppression de compte, de sortie, de parcours, de défi,
+  d'établissement, blocage, réservation d'offre, modération).
+- **D07** — le profil ne porte plus dix cartes empilées : « Progression »
+  (paliers, statistiques, collection de badges) et « Réglages » (notifications,
+  apparence, langue, compte, confidentialité, paiement) deviennent deux écrans
+  dédiés, sans perdre aucun accès.
+- **D08** — libellés de formulaire associés (`htmlFor`/`id`), `autocomplete`
+  sur les champs d'authentification, cibles tactiles ≥ 44 px, texte ≥ 12 px,
+  champs à 16 px pour éviter le zoom iOS. Les nouveaux écrans sont traduits
+  (`fr` **et** `en`).
+- **Deep-link** — ouvrir une notification de rencontre met la carte concernée
+  en évidence au lieu de laisser chercher dans la liste.
+
 ## 2.2.2 — 2026-11-12
 
 ### « Les amis chargent en boucle » — corrigé

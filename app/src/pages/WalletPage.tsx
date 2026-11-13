@@ -9,6 +9,8 @@ import { MIN_PAYPAL_COINS, isPresidentUid } from '../lib/constants';
 import { updateUserFields } from '../lib/db';
 import { showWithdrawalAd } from '../lib/ads';
 import type { Withdrawal, CoinTransaction } from '../lib/types';
+import NotificationBell from '../components/NotificationBell';
+import ConfirmSheet from '../components/ConfirmSheet';
 
 export default function WalletPage() {
   const { profile } = useAuth();
@@ -37,10 +39,37 @@ export default function WalletPage() {
     if (profile?.paypalEmail) setPaypalEmail(profile.paypalEmail);
   }, [profile?.paypalEmail]);
 
+  /**
+   * Étape de confirmation : l'opération n'est plus lancée depuis un `confirm()`
+   * natif. La feuille explique d'abord le résultat (débit, minimum, délai) puis
+   * l'utilisateur valide explicitement (D06). Une annulation laisse le montant
+   * et l'e-mail saisis.
+   */
+  const [pending, setPending] = useState<{ type: 'paypal' | 'donation'; coins: number } | null>(null);
+
   const submit = async (type: 'paypal' | 'donation') => {
     if (!profile) return;
     const coins = Math.floor(Number(amount));
-    if (!confirm(`Confirmer l’opération de ${fmtCoins(coins)} ElyCoins ?`)) return;
+    if (!Number.isFinite(coins) || coins <= 0) {
+      toast('Saisissez un montant valide avant de confirmer.', 'error');
+      return;
+    }
+    if (type === 'paypal') {
+      if (coins < MIN_PAYPAL_COINS) {
+        toast(`Minimum ${MIN_PAYPAL_COINS} ElyCoins (1 €) pour un retrait.`, 'error');
+        return;
+      }
+      if (!paypalEmail.includes('@')) {
+        toast('Renseignez une adresse PayPal valide.', 'error');
+        return;
+      }
+    }
+    setPending({ type, coins });
+  };
+
+  /** Exécution réelle, après confirmation explicite. */
+  const runConversion = async (type: 'paypal' | 'donation', coins: number) => {
+    if (!profile) return;
     setBusy(true);
     try {
       if (!coins || coins <= 0) throw new Error('Montant invalide.');
@@ -62,9 +91,12 @@ export default function WalletPage() {
       );
       setPaypalOpen(false);
       setDonateOpen(false);
+      setPending(null);
       setAmount('');
       reload();
     } catch (e) {
+      // Échec : la feuille de confirmation reste ouverte avec la saisie, donc
+      // l'utilisateur peut réessayer sans tout ressaisir.
       toast((e as Error).message, 'error');
     } finally {
       setBusy(false);
@@ -88,6 +120,7 @@ export default function WalletPage() {
           <h1 className="screen-title">Portefeuille</h1>
           <div className="screen-sub">Vos ElyCoins</div>
         </div>
+        <div className="header-actions"><NotificationBell /></div>
       </div>
 
       <div className="gold-card">
@@ -180,61 +213,102 @@ export default function WalletPage() {
           ))}
       </div>
 
+      {/* Vrais formulaires : Entrée valide, libellés associés, saisie conservée
+          en cas d'erreur (D06). */}
       <Sheet open={paypalOpen} onClose={() => setPaypalOpen(false)} title="Retrait PayPal" testId="paypal-sheet">
-        <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 14 }}>
-          1000 ElyCoins = 1 €. Le paiement sera envoyé sur votre compte PayPal.
-        </p>
-        <div className="field">
-          <label>E-mail du compte PayPal</label>
-          <input
-            className="input"
-            type="email"
-            value={paypalEmail}
-            onChange={(e) => setPaypalEmail(e.target.value)}
-            placeholder="vous@paypal.com"
-            data-testid="paypal-email-input"
-          />
-        </div>
-        <div className="field">
-          <label>ElyCoins à convertir (min. {MIN_PAYPAL_COINS})</label>
-          <input
-            className="input"
-            inputMode="numeric"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            placeholder="1000"
-            data-testid="paypal-amount-input"
-          />
-          {Number(amount) > 0 && (
-            <div style={{ color: 'var(--gold)', fontSize: 13, marginTop: 6 }}>
-              = {fmtEuros(Math.floor(Number(amount)))}
-            </div>
-          )}
-        </div>
-        <button className="btn btn-gold" onClick={() => submit('paypal')} disabled={busy} data-testid="confirm-paypal-button">
-          {busy ? '...' : 'Demander le retrait'}
-        </button>
+        <form onSubmit={(event) => { event.preventDefault(); void submit('paypal'); }}>
+          <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 14 }}>
+            1000 ElyCoins = 1 €. Le paiement sera envoyé sur votre compte PayPal après validation.
+          </p>
+          <div className="field">
+            <label htmlFor="paypal-email">E-mail du compte PayPal</label>
+            <input
+              id="paypal-email"
+              className="input"
+              type="email"
+              autoComplete="email"
+              value={paypalEmail}
+              onChange={(e) => setPaypalEmail(e.target.value)}
+              placeholder="vous@paypal.com"
+              data-testid="paypal-email-input"
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="paypal-amount">ElyCoins à convertir (min. {MIN_PAYPAL_COINS})</label>
+            <input
+              id="paypal-amount"
+              className="input"
+              inputMode="numeric"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="1000"
+              data-testid="paypal-amount-input"
+            />
+            {Number(amount) > 0 && (
+              <div style={{ color: 'var(--gold)', fontSize: 13, marginTop: 6 }}>
+                = {fmtEuros(Math.floor(Number(amount)))}
+              </div>
+            )}
+          </div>
+          <button className="btn btn-gold" type="submit" disabled={busy} data-testid="confirm-paypal-button">
+            {busy ? '…' : 'Demander le retrait'}
+          </button>
+        </form>
       </Sheet>
 
       <Sheet open={donateOpen} onClose={() => setDonateOpen(false)} title="Donation à Elysium" testId="donate-sheet">
-        <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 14 }}>
-          Transformez vos ElyCoins en soutien direct à l’association Elysium. 💛
-        </p>
-        <div className="field">
-          <label>ElyCoins à donner</label>
-          <input
-            className="input"
-            inputMode="numeric"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            placeholder="100"
-            data-testid="donate-amount-input"
-          />
-        </div>
-        <button className="btn btn-gold" onClick={() => submit('donation')} disabled={busy} data-testid="confirm-donate-button">
-          {busy ? '...' : 'Faire le don'}
-        </button>
+        <form onSubmit={(event) => { event.preventDefault(); void submit('donation'); }}>
+          <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 14 }}>
+            Transformez vos ElyCoins en soutien direct à l’association Elysium. 💛
+          </p>
+          <div className="field">
+            <label htmlFor="donate-amount">ElyCoins à donner</label>
+            <input
+              id="donate-amount"
+              className="input"
+              inputMode="numeric"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              placeholder="100"
+              data-testid="donate-amount-input"
+            />
+          </div>
+          <button className="btn btn-gold" type="submit" disabled={busy} data-testid="confirm-donate-button">
+            {busy ? '…' : 'Faire le don'}
+          </button>
+        </form>
       </Sheet>
+
+      {/*
+        Confirmation structurée : le résultat de l'opération est annoncé avant
+        validation (débit, montant, délai), et l'action est séparée visuellement
+        des actions courantes.
+      */}
+      <ConfirmSheet
+        open={!!pending}
+        title={pending?.type === 'donation' ? 'Confirmer la donation' : 'Confirmer le retrait'}
+        danger
+        busy={busy}
+        confirmLabel={pending?.type === 'donation' ? 'Donner ces ElyCoins' : 'Demander le retrait'}
+        consequences={
+          pending
+            ? pending.type === 'donation'
+              ? [
+                  `${fmtCoins(pending.coins)} ElyCoins seront définitivement débités de votre solde.`,
+                  'Les ElyCoins donnés ne peuvent pas être récupérés ni convertis en euros.',
+                  'La donation soutient directement l’association Elysium.',
+                ]
+              : [
+                  `${fmtCoins(pending.coins)} ElyCoins seront débités (soit ${fmtEuros(pending.coins)}).`,
+                  `Le paiement sera envoyé à ${paypalEmail || 'votre compte PayPal'} après traitement.`,
+                  'Le délai de traitement dépend de PayPal ; vous serez notifié du résultat.',
+                ]
+            : []
+        }
+        onConfirm={() => { if (pending) return runConversion(pending.type, pending.coins); }}
+        onClose={() => setPending(null)}
+        testId="wallet-confirm-sheet"
+      />
     </div>
   );
 }

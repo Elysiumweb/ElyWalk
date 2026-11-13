@@ -5,6 +5,7 @@ import { useToast } from '../components/Toast';
 import { createPartnerRequest, listPartnerOffers, redeemPartnerOffer } from '../lib/db';
 import type { PartnerOffer } from '../lib/types';
 import { fmtCoins } from '../lib/coins';
+import ConfirmSheet from '../components/ConfirmSheet';
 
 export default function PartnersPage() {
   const { profile } = useAuth();
@@ -19,7 +20,22 @@ export default function PartnersPage() {
   const [sent, setSent] = useState(false);
   const [offers, setOffers] = useState<PartnerOffer[]>([]);
   useEffect(()=>{listPartnerOffers().then(setOffers).catch(()=>undefined)},[]);
-  const redeem = async (offer: PartnerOffer) => { if(!profile||!confirm(`Dépenser ${fmtCoins(offer.coins)} EC pour « ${offer.title} » ?`))return; setBusy(true); try{await redeemPartnerOffer(profile,offer);toast('Offre réservée ! Présentez la demande au partenaire.','success')}catch(e){toast((e as Error).message,'error')}finally{setBusy(false)} };
+  // Réservation d'une offre : la confirmation énonce le coût et le solde restant
+  // avant d'engager les ElyCoins (plus de `confirm()` natif).
+  const [pendingOffer, setPendingOffer] = useState<PartnerOffer | null>(null);
+  const redeem = async () => {
+    if (!profile || !pendingOffer) return;
+    setBusy(true);
+    try {
+      await redeemPartnerOffer(profile, pendingOffer);
+      toast('Offre réservée ! Présentez la demande au partenaire.', 'success');
+      setPendingOffer(null);
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const submit = async () => {
     if (!profile) return;
@@ -52,8 +68,28 @@ export default function PartnersPage() {
 
       <div className="card">
         <div className="card-title">Offres partenaires</div>
-        {offers.length===0?<div className="empty-state" data-testid="partner-offers-empty-state"><div className="display">Aucune offre pour le moment</div>De nouvelles offres seront publiées prochainement.</div>:offers.map(o=><div className="list-row" key={o.id}><div className="row-main"><div className="row-title">{o.title}</div><div className="row-sub">{o.partnerName} · {o.description}</div></div><button className="btn btn-gold btn-sm" disabled={busy} onClick={()=>redeem(o)}>{fmtCoins(o.coins)} EC</button></div>)}
+        {offers.length===0?<div className="empty-state" data-testid="partner-offers-empty-state"><div className="display">Aucune offre pour le moment</div>De nouvelles offres seront publiées prochainement.</div>:offers.map(o=><div className="list-row" key={o.id}><div className="row-main"><div className="row-title">{o.title}</div><div className="row-sub">{o.partnerName} · {o.description}</div></div><button className="btn btn-gold btn-sm" disabled={busy} onClick={()=>setPendingOffer(o)}>{fmtCoins(o.coins)} EC</button></div>)}
       </div>
+
+      <ConfirmSheet
+        open={!!pendingOffer}
+        onClose={() => setPendingOffer(null)}
+        title={pendingOffer ? `Réserver « ${pendingOffer.title} » ?` : 'Réserver cette offre ?'}
+        consequences={
+          pendingOffer
+            ? [
+                `${fmtCoins(pendingOffer.coins)} EC seront débités de votre solde.`,
+                `Solde après réservation : ${fmtCoins(Math.max(0, (profile?.elycoins || 0) - pendingOffer.coins))} EC.`,
+                'Les ElyCoins dépensés ne sont pas remboursés, même si vous ne présentez pas la demande.',
+                'Présentez la demande au partenaire depuis votre portefeuille.',
+              ]
+            : []
+        }
+        confirmLabel="Réserver"
+        busy={busy}
+        onConfirm={redeem}
+        testId="redeem-offer-sheet"
+      />
 
       <div className="card" data-testid="partner-request-card">
         <div className="card-title">Devenir partenaire</div>

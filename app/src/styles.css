@@ -35,6 +35,32 @@
   --ad-banner-h: 0px;
   --font-display: 'Orbitron', sans-serif;
   --font-body: 'Space Grotesk', sans-serif;
+
+  /* ---- Jetons sémantiques de surface (D01) -------------------------------
+     Les cartes, feuilles et barres utilisaient des dégradés sombres codés en
+     dur (#1c1c1f, #17171a…). En thème clair, le texte devenait sombre mais le
+     fond restait noir : d'où les cartes illisibles. Toutes les surfaces
+     dérivent maintenant de ces jetons, redéfinis par thème. */
+  --surface-card-top: #1c1c1f;
+  --surface-card-bottom: #17171a;
+  --surface-hero-top: #1d1d20;
+  --surface-hero-bottom: #151517;
+  --surface-float: rgba(17, 17, 17, 0.95);
+  --surface-float-strong: rgba(11, 11, 12, 0.92);
+  --surface-sheet-top: rgba(20, 20, 22, 0.98);
+  --surface-sheet-bottom: rgba(14, 14, 15, 0.99);
+  --shadow-card: 0 12px 32px rgba(0, 0, 0, 0.35);
+  --shadow-float: 0 18px 44px rgba(0, 0, 0, 0.6);
+  --scrim: rgba(0, 0, 0, 0.65);
+  /* Or « d'action » : dégradé des boutons principaux. Le texte posé dessus est
+     `--on-gold`, choisi pour rester à ≥ 4,5:1 au point le plus clair comme au
+     point le plus sombre du dégradé (auparavant : blanc/crème sur or clair,
+     soit ≈ 1,6:1). */
+  --gold-grad-a: #ecdfa6;
+  --gold-grad-b: #d8ca82;
+  --gold-grad-c: #b7a75f;
+  --on-gold: #16150f;
+  --on-gold-muted: rgba(22, 21, 15, 0.78);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
@@ -63,7 +89,7 @@ a { color: var(--gold); }
 .two-col{display:grid;grid-template-columns:1fr 1fr;gap:10px}.badge-grid{display:flex;gap:8px;flex-wrap:wrap}.legal-links{text-align:center;margin-top:14px;font-size:12px}
 .step-chart{height:180px;display:flex;align-items:flex-end;gap:5px;overflow-x:auto;padding-top:20px}.chart-column{min-width:22px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:160px}.chart-column div{width:16px;background:var(--gold);border-radius:5px 5px 0 0}.chart-column span,.chart-column small{font-size:var(--text-xs);color:var(--muted)}
 .tab-icon{position:relative;line-height:0}.tab-badge{position:absolute;top:-8px;right:-10px;background:var(--danger);color:white;border-radius:9px;padding:2px 5px;font-size:9px;line-height:1}.icon-danger{background:none;border:0;color:var(--danger);padding:8px}.profile-public{text-align:center}.profile-public .avatar{margin:auto}.profile-public h2{margin:10px}.profile-public p{color:var(--muted)}
-.map-search{position:absolute;z-index:500;top:82px;left:12px;right:12px}.nearby-list{background:rgba(17,17,17,.95);border-radius:10px;max-height:150px;overflow:auto}.nearby-list:empty{display:none}.nearby-list button{display:flex;width:100%;justify-content:space-between;background:none;border:0;color:white;padding:8px 12px}.nearby-list span{color:var(--muted);font-size:var(--text-xs)}.partner-details{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;font-size:var(--text-xs)}.partner-details span,.partner-details a,.partner-details strong{color:var(--gold)}.whats-new{padding-left:22px;color:#ddd}.whats-new li{margin:12px 0}
+.map-search{position:absolute;z-index:500;top:82px;left:12px;right:12px}.nearby-list{background:var(--surface-float);border-radius:10px;max-height:150px;overflow:auto}.nearby-list:empty{display:none}.nearby-list button{display:flex;width:100%;justify-content:space-between;background:none;border:0;color:var(--white);padding:8px 12px}.nearby-list span{color:var(--muted);font-size:var(--text-xs)}.partner-details{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;font-size:var(--text-xs)}.partner-details span,.partner-details a,.partner-details strong{color:var(--gold)}.whats-new{padding-left:22px;color:#ddd}.whats-new li{margin:12px 0}
 
 h1, h2, h3, .display { font-family: var(--font-display); letter-spacing: 0.04em; }
 
@@ -210,7 +236,7 @@ img.avatar {
 
 /* ---- Sheet ---- */
 .sheet-overlay {
-  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.65);
+  position: fixed; inset: 0; background: var(--scrim);
   display: flex; align-items: flex-end; z-index: 100;
   animation: fadeIn 0.2s;
 }
@@ -436,21 +462,25 @@ body {
 /* ---- Cartes : surface en dégradé + liseré haut ---- */
 .card, .gold-hero, .sheet {
   background:
-    linear-gradient(180deg, rgba(216, 202, 130, 0.055), transparent 34%),
-    linear-gradient(180deg, #1c1c1f, #17171a);
-  border: 1px solid rgba(216, 202, 130, 0.16);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+    linear-gradient(180deg, var(--gold-dim), transparent 34%),
+    linear-gradient(180deg, var(--surface-card-top), var(--surface-card-bottom));
+  border: 1px solid var(--gold-border);
+  box-shadow: var(--shadow-card);
 }
 .gold-hero {
   background:
-    radial-gradient(ellipse 120% 80% at 50% -20%, rgba(216, 202, 130, 0.16), transparent 55%),
-    linear-gradient(180deg, #1d1d20, #151517);
-  border-color: rgba(216, 202, 130, 0.28);
+    radial-gradient(ellipse 120% 80% at 50% -20%, var(--gold-dim), transparent 55%),
+    linear-gradient(180deg, var(--surface-hero-top), var(--surface-hero-bottom));
+  border-color: var(--gold-border);
 }
 
 /* ---- Boutons or : dégradé métallique + lueur ---- */
 .btn-gold {
-  background: linear-gradient(160deg, #ecdfa6 0%, #d8ca82 45%, #b7a75f 100%);
+  /* Texte sombre sur or : contraste calculé ≥ 4,6:1 au milieu du dégradé, et
+     ≥ 6:1 aux deux extrémités (D01). Le blanc/crème précédent plafonnait à
+     ≈ 1,6:1. */
+  color: var(--on-gold);
+  background: linear-gradient(160deg, var(--gold-grad-a) 0%, var(--gold-grad-b) 45%, var(--gold-grad-c) 100%);
   box-shadow: 0 6px 22px rgba(216, 202, 130, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.35);
   position: relative;
   overflow: hidden;
@@ -669,12 +699,12 @@ img.podium-avatar {
 .map-card {
   position: absolute; left: 14px; right: 14px; bottom: 16px; z-index: 30;
   background:
-    linear-gradient(180deg, rgba(216, 202, 130, 0.07), transparent 40%),
-    linear-gradient(180deg, #1e1e21, #161618);
-  border: 1px solid rgba(216, 202, 130, 0.3);
+    linear-gradient(180deg, var(--gold-dim), transparent 40%),
+    linear-gradient(180deg, var(--surface-card-top), var(--surface-card-bottom));
+  border: 1px solid var(--gold-border);
   border-radius: 18px;
   padding: 16px;
-  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.6);
+  box-shadow: var(--shadow-float);
 }
 .map-card-logo {
   width: 52px; height: 52px; border-radius: 12px; object-fit: cover;
@@ -682,7 +712,7 @@ img.podium-avatar {
 }
 .map-card-close {
   background: var(--surface-2); border: none; color: var(--muted);
-  width: 30px; height: 30px; border-radius: 50%; cursor: pointer; flex-shrink: 0;
+  width: 44px; height: 44px; border-radius: 50%; cursor: pointer; flex-shrink: 0;
 }
 
 /* ---- Pins établissements (or) ---- */
@@ -802,12 +832,20 @@ img.podium-avatar {
 .activity-screen { min-height: calc(100% - var(--tabbar-h)); max-width: 700px; width: 100%; margin: 0 auto; padding-bottom: calc(var(--tabbar-h) + var(--ad-banner-h, 0px) + 20px); }
 .activity-header { display: flex; justify-content: space-between; align-items: center; padding: calc(env(safe-area-inset-top, 0px) + 16px) 16px 10px; }
 .activity-map { height: min(52vh, 500px); min-height: 300px; background: #18181a; }
+/* D04 — avant le départ, la carte est compacte : « Démarrer la sortie » entre
+   dans la première vue d'un écran de 320 × 568, sans défilement. Pendant la
+   sortie, la carte reprend de la hauteur pour suivre le tracé. */
+.activity-map-compact { height: clamp(150px, 30vh, 240px); min-height: 150px; }
+.activity-map-live { height: min(52vh, 500px); min-height: 260px; }
 .activity-panel { margin: -18px 12px 12px; position: relative; z-index: 2; background: var(--surface); border: 1px solid var(--gold-border); border-radius: 18px; padding: 15px; box-shadow: 0 10px 28px rgba(0,0,0,.25); }
 .activity-panel .activity-types { margin-bottom: 12px; }
 .activity-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin-bottom: 14px; }
 .activity-stats div { display: flex; flex-direction: column; gap: 3px; text-align: center; }
 .activity-stats strong { color: var(--gold); font-family: var(--font-display); font-size: 15px; }
 .activity-stats span { color: var(--muted); font-size: var(--text-xs); }
+/* Compteurs secondaires masqués avant le départ (voir ActivityPage). */
+.activity-stats-idle { grid-template-columns: repeat(2, 1fr); }
+.activity-stats-idle .activity-stat-extra { display: none; }
 .activity-privacy { color: var(--muted); font-size: var(--text-xs); text-align: center; margin-top: 10px; }
 .activity-history { margin: 12px; }
 .activity-history-icon { font-size: 22px; }

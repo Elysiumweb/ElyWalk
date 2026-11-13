@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import NotificationBell from '../components/NotificationBell';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import { listMyDailySteps, updateUserFields } from '../lib/db';
@@ -156,7 +157,7 @@ export default function HistoryPage() {
   };
 
   return <div className="screen" data-testid="history-screen">
-    <div className="screen-header"><div><h1 className="screen-title">Activité</h1><div className="screen-sub">Calendrier, historique et estimation personnalisée</div></div></div>
+    <div className="screen-header"><div><h1 className="screen-title">Activité</h1><div className="screen-sub">Calendrier, historique et estimation personnalisée</div></div><div className="header-actions"><NotificationBell /></div></div>
 
     {/* ===== Résumés semaine / mois ===== */}
     <div className="card summary-card" data-testid="weekly-summary">

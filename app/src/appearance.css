@@ -13,19 +13,39 @@
   --surface: #fffdf6;
   --surface-2: #f1ecdd;
   --white: #1a1915;
-  --muted: #5b5647;
-  --gold: #7c6a1e;
+  --muted: #4f4a3c; /* ≥ 4,5:1 sur ivoire */
+  --gold: #6f5f18; /* assombri : lisible sur fond clair */
   --gold-dim: rgba(124, 106, 30, 0.13);
-  --gold-border: rgba(124, 106, 30, 0.32);
-  --danger: #a83a2e;
-  --success: #2c6f36;
+  --gold-border: rgba(124, 106, 30, 0.34);
+  --danger: #9c3227;
+  --success: #26602f;
+
+  /* Surfaces dérivées : plus aucun dégradé noir codé en dur ne subsiste en
+     thème clair (D01). Cartes et feuilles prennent un ivoire chaud. */
+  --surface-card-top: #fffdf6;
+  --surface-card-bottom: #f4efe1;
+  --surface-hero-top: #fffdf7;
+  --surface-hero-bottom: #f0ebdc;
+  --surface-float: rgba(255, 253, 246, 0.97);
+  --surface-float-strong: rgba(255, 253, 246, 0.94);
+  --surface-sheet-top: #fffdf6;
+  --surface-sheet-bottom: #f7f2e4;
+  --shadow-card: 0 10px 26px rgba(52, 44, 18, 0.14);
+  --shadow-float: 0 16px 36px rgba(52, 44, 18, 0.22);
+  --scrim: rgba(30, 26, 14, 0.45);
+  /* Bouton or : on garde le dégradé métallique, avec le même texte sombre. */
+  --gold-grad-a: #e7d794;
+  --gold-grad-b: #cdbc6d;
+  --gold-grad-c: #a9994f;
+  --on-gold: #14130d;
 }
 
 [data-theme='light'] .tabbar {
   background: rgba(255, 253, 246, 0.98);
   box-shadow: 0 -8px 24px rgba(52, 44, 18, 0.14);
 }
-[data-theme='light'] .btn-gold { color: #fffdf6; }
+/* Le bouton or conserve son texte sombre (`--on-gold`) : l'ancienne règle
+   forçait un crème sur or, d'où un contraste d'environ 1,6:1 (D01). */
 [data-theme='light'] .btn-ghost { background: var(--surface-2); color: var(--white); }
 [data-theme='light'] .gold-hero .stat { background: rgba(255, 255, 255, 0.66); }
 [data-theme='light'] .gold-hero { background: radial-gradient(ellipse 100% 70% at 50% -10%, rgba(124, 106, 30, 0.12), transparent), var(--surface); }
@@ -39,6 +59,31 @@
 [data-theme='light'] .verification-banner { color: #fff; }
 [data-theme='light'] .map-container .leaflet-tile-pane { filter: saturate(0.85) brightness(1.02); }
 [data-theme='light'] .leaflet-container { background: #e9e4d5; }
+/* Contrôles Leaflet en thème clair : les fonds étaient figés en noir. */
+[data-theme='light'] .map-container .leaflet-control-zoom a,
+[data-theme='light'] .directions-map .leaflet-control-zoom a,
+[data-theme='light'] .nav-map .leaflet-control-zoom a {
+  background: var(--surface) !important;
+  color: var(--gold) !important;
+  border-bottom-color: var(--gold-border) !important;
+}
+[data-theme='light'] .map-header { background: linear-gradient(180deg, var(--surface) 30%, rgba(255, 253, 246, 0.7) 70%, transparent); }
+[data-theme='light'] .map-card { background: var(--surface); box-shadow: var(--shadow-float); }
+[data-theme='light'] .nearby-list { color: var(--white); }
+[data-theme='light'] .nav-map { background: #e9e4d5; }
+[data-theme='light'] .nav-map .leaflet-tile-pane { filter: saturate(0.85) brightness(1.02); }
+[data-theme='light'] .nav-instruction {
+  background: linear-gradient(180deg, #fffdf6, #f4efe1);
+  box-shadow: var(--shadow-float);
+}
+[data-theme='light'] .nav-close { background: rgba(255, 253, 246, 0.94); }
+[data-theme='light'] .activity-map-empty { background: rgba(255, 253, 246, 0.94); }
+[data-theme='light'] .activity-map,
+[data-theme='light'] .directions-map,
+[data-theme='light'] .map-container { background: #e9e4d5; }
+[data-theme='light'] .offline-banner,
+[data-theme='light'] .verification-banner { color: #fff; }
+
 
 /* ---- Contraste renforcé -------------------------------------------------
    Même charte sombre, mais textes discrets éclaircis, bordures franches et
