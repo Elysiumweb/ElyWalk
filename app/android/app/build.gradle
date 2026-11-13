@@ -7,8 +7,8 @@ apply plugin: 'com.android.application'
 // (2.2.2 -> 20202) au lieu d'être saisi deux fois.
 // ---------------------------------------------------------------------------
 def packageJsonFile = new File(rootProject.projectDir, '../../package.json')
-def appVersionName = '2.2.3'
-def appVersionCode = 20203
+def appVersionName = '2.2.4'
+def appVersionCode = 20204
 try {
     def pkg = new groovy.json.JsonSlurper().parse(packageJsonFile)
     if (pkg.version) {
