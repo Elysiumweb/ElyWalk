@@ -47,8 +47,8 @@ export default function NotificationBell({ className = '' }: { className?: strin
           <div className="empty-state" data-testid="notification-empty">
             <strong>Aucune notification</strong>
             <span>
-              Les messages, demandes d’ami et rencontres proches apparaîtront ici. Les alertes se
-              règlent dans Profil → Notifications.
+              Les messages, demandes d’ami et rencontres proches apparaîtront ici. Choisissez ce que
+              vous recevez dans Réglages → Notifications.
             </span>
           </div>
         ) : (

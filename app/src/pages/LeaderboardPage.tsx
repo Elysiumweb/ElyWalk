@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { getLeaderboard, getProfiles, listDailySteps, watchFriendships, type LeaderboardMetric } from '../lib/db';
 import Avatar from '../components/Avatar';
 import { ErrorState, friendlyError, Skeleton } from '../components/AsyncState';
+import NotificationBell from '../components/NotificationBell';
 import { fmtCoins, fmtNumber } from '../lib/coins';
 import { isPresidentUid, PRESIDENT_UID, getWalkerLevel } from '../lib/constants';
 import type { UserProfile } from '../lib/types';
@@ -110,6 +111,7 @@ export default function LeaderboardPage() {
               : 'Top 100 des marcheurs Elysium'}
           </div>
         </div>
+        <div className="header-actions"><NotificationBell /></div>
       </div>
 
       <div className="chip-row"><button className={`chip ${mode==='coins'?'chip-active':''}`} onClick={()=>setMode('coins')}>Solde EC</button><button className={`chip ${mode==='today'?'chip-active':''}`} onClick={()=>setMode('today')}>Pas du jour</button><button className={`chip ${mode==='steps'?'chip-active':''}`} onClick={()=>setMode('steps')}>Pas cumulés</button><button className={`chip ${mode==='week'?'chip-active':''}`} onClick={()=>setMode('week')}>7 jours</button><button className={`chip ${mode==='month'?'chip-active':''}`} onClick={()=>setMode('month')}>30 jours</button><button className={`chip ${mode==='friends'?'chip-active':''}`} onClick={()=>setMode('friends')}>Mes amis</button><button className="chip" onClick={() => void load()}>Actualiser</button></div>

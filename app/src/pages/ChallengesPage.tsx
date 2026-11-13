@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import Sheet from '../components/Sheet';
 import ConfirmSheet from '../components/ConfirmSheet';
+import NotificationBell from '../components/NotificationBell';
 import Avatar from '../components/Avatar';
 import { getChallengeDefinitions } from '../lib/constants';
 import { claimChallengeReward, listMyChallenges, loadChallengeCatalog, createFriendChallenge, watchFriendChallenges, getFriendChallengeProgress, deleteFriendChallenge, watchFriendships, getProfiles } from '../lib/db';
@@ -102,7 +103,7 @@ export default function ChallengesPage() {
   };
 
   return <div className="screen" data-testid="challenges-screen">
-    <div className="screen-header"><div><h1 className="screen-title">Défis</h1><div className="screen-sub">Des objectifs datés, collectifs et saisonniers</div></div><button className="btn btn-ghost btn-sm" onClick={() => navigate(-1)}>Retour</button></div>
+    <div className="screen-header"><div><h1 className="screen-title">Défis</h1><div className="screen-sub">Des objectifs datés, collectifs et saisonniers</div></div><div className="header-actions"><NotificationBell /><button className="btn btn-ghost btn-sm" onClick={() => navigate(-1)}>Retour</button></div></div>
     <div className="chip-row" style={{marginBottom:12}}>
       <button className={`chip ${tab==='global'?'chip-active':''}`} onClick={()=>setTab('global')}>Globaux</button>
       <button className={`chip ${tab==='friends'?'chip-active':''}`} onClick={()=>setTab('friends')}>Entre amis {friendChallenges.length>0 && `· ${friendChallenges.length}`}</button>

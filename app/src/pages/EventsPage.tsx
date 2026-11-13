@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import { useI18n } from '../context/LocaleContext';
@@ -41,6 +41,7 @@ export default function EventsPage() {
   const { toast } = useToast();
   const { formatDate } = useI18n();
   const nav = useNavigate();
+  const location = useLocation();
   const [events, setEvents] = useState<CommunityEvent[]>([]);
   const [establishments, setEstablishments] = useState<Establishment[]>([]);
   const [open, setOpen] = useState(false);
@@ -66,6 +67,27 @@ export default function EventsPage() {
 
   useEffect(() => watchCommunityEvents(items => { setEvents(items); void rescheduleEventReminders(items); }), []);
   useEffect(() => { setVisibleCount(10); }, [view]);
+  /**
+   * Ouverture ciblée depuis une notification (« Votre rencontre commence
+   * bientôt », « Rencontre près de vous », rappel local) : l'écran bascule sur
+   * « Mes inscriptions » puis « À venir » et met la carte concernée en avant,
+   * au lieu de laisser l'utilisateur chercher la sortie dans la liste.
+   */
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const targetEventId = (location.state as { eventId?: string } | null)?.eventId;
+  useEffect(() => {
+    if (!targetEventId) return;
+    setHighlightId(targetEventId);
+    // « Mes inscriptions » ne suffit pas : un rappel peut venir d'une sortie
+    // qu'on organise sans y être inscrit. « À venir » couvre les deux cas.
+    setView('upcoming');
+    const timer = window.setTimeout(() => {
+      document
+        .querySelector(`[data-event-id="${targetEventId}"]`)
+        ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [targetEventId, events.length]);
   useEffect(() => { listEstablishments().then(setEstablishments).catch(() => undefined); }, []);
 
   const reset = () => { setTitle(''); setDesc(''); setAddress(''); setAddressPoint(null); setCapacity(''); setEstId(''); setEditing(null); setDate(todayLocalInput()); };
@@ -209,7 +231,12 @@ export default function EventsPage() {
     </div>
     {filteredEvents.length === 0 ? <div className="card empty-state" data-testid="events-empty"><div className="display">{view === 'past' ? 'Aucune sortie passée' : view === 'mine' ? 'Aucune inscription' : 'Aucun événement à venir'}</div>{view === 'mine' ? 'Rejoignez une sortie depuis l’onglet « À venir ».' : 'Soyez le premier à proposer une marche ensemble !'}</div> : filteredEvents.slice(0, visibleCount).map(ev => {
       const mine = profile?.uid === ev.creatorUid; const joined = !!profile && ev.participants.includes(profile.uid); const waiting = !!profile && (ev.waitlist || []).includes(profile.uid); const full = !!ev.maxParticipants && ev.participants.length >= ev.maxParticipants;
-      return <div key={ev.id} className={`card ${ev.status === 'cancelled' ? 'event-cancelled' : ''}`} data-testid="event-card">
+      return <div
+        key={ev.id}
+        className={`card ${ev.status === 'cancelled' ? 'event-cancelled' : ''} ${highlightId === ev.id ? 'event-highlight' : ''}`.trim()}
+        data-testid="event-card"
+        data-event-id={ev.id}
+      >
         <div className="row-between"><div><div className="title-sm">{ev.title}</div><div className="row-sub">📅 {formatDate(eventDate(ev), { dateStyle: 'full', timeStyle: 'short' })}</div><div className="row-sub">📍 {ev.location || ev.establishmentName || 'Lieu à préciser'}</div></div><button className="badge" onClick={() => void showParticipants(ev)}>{ev.participants.length}{ev.maxParticipants ? ` / ${ev.maxParticipants}` : ''} inscrits</button></div>
         {ev.status === 'cancelled' && <span className="badge badge-danger">Annulé</span>}{full && ev.status !== 'cancelled' && <span className="badge">Complet · {(ev.waitlist || []).length} en attente</span>}
         <p className="muted-text">{ev.description}</p>{ev.lastChange && <p className="event-change">{ev.lastChange.type === 'cancelled' ? '⛔' : '🔔'} {ev.lastChange.message}</p>}

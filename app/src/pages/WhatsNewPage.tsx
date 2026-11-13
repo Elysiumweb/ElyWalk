@@ -14,6 +14,19 @@ export default function WhatsNewPage() {
       </div>
 
       <div className="card">
+        <div className="card-title">Novembre 2026 — 2.2.3</div>
+        <ul className="whats-new">
+          <li>🧭 <strong>Itinéraires qui marchent vraiment</strong> : à pied, à vélo, en voiture et en transports, le tracé s’affiche sur la carte ElyWalk — plus d’écran « indisponible dans ce mode », et plus de renvoi vers une application externe</li>
+          <li>📍 <strong>Votre position bouge en direct</strong> : la carte vous suit pendant la marche au lieu de rester figée sur l’endroit où vous avez ouvert l’application</li>
+          <li>🔔 <strong>Notifications utiles</strong> : message reçu, demande d’ami, rencontre proposée près de chez vous (rayon de 10 km par défaut, réglable) et rappel des sorties où vous êtes inscrit</li>
+          <li>⚙️ <strong>Profil réorganisé</strong> : « Progression » (paliers, statistiques, badges) et « Réglages » (notifications, apparence, langue, compte, paiement) ont chacun leur écran, sans perdre aucun réglage</li>
+          <li>✍️ <strong>Confirmations claires</strong> : les actions sensibles (déconnexion, suppression d’un compte, d’une sortie ou d’un parcours, blocage) expliquent leurs conséquences avant d’agir, et conservent ce que vous avez saisi en cas d’erreur</li>
+          <li>🎨 Lisibilité et accessibilité : contraste renforcé, cibles tactiles plus grandes, zoom réactivé</li>
+          <li>📢 Une publicité s’affiche au départ et à l’arrivée d’une sortie GPS, y compris depuis « Rencontres »</li>
+        </ul>
+      </div>
+
+      <div className="card">
         <div className="card-title">Novembre 2026 — 2.2.2</div>
         <ul className="whats-new">
           <li>👥 <strong>Vos amis s’affichent enfin</strong> : la liste ne reste plus bloquée sur « Chargement… », même avec beaucoup d’amis — une règle de sécurité trop coûteuse faisait refuser la lecture</li>

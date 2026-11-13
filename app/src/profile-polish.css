@@ -690,3 +690,19 @@
 .profile-destination-main { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
 .profile-destination-title { font-weight: 700; font-size: var(--text-sm, 15px); }
 .profile-destination-hint { font-size: var(--text-xs, 12px); color: var(--muted); }
+
+/* Rencontre ouverte depuis une notification : la carte concernée est cerclée
+   d'or et brièvement mise en avant, pour que l'utilisateur retrouve la sortie
+   sans la chercher dans la liste. */
+.event-highlight {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 2px rgba(216, 202, 130, 0.35);
+  animation: event-highlight-pulse 1.6s ease-in-out 2;
+}
+@keyframes event-highlight-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(216, 202, 130, 0.35); }
+  50% { box-shadow: 0 0 0 5px rgba(216, 202, 130, 0.18); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .event-highlight { animation: none; }
+}
