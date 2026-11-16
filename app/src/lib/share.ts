@@ -10,6 +10,7 @@ import {
   weatherLabel,
   type MapStyle,
 } from './activity';
+import { withCartoKey } from './carto';
 
 export type ShareResult = 'shared' | 'downloaded';
 
@@ -178,9 +179,13 @@ const TILE_SERVERS = ['a', 'b', 'c', 'd'];
  */
 function tileUrl(style: MapStyle, z: number, x: number, y: number): string {
   const s = TILE_SERVERS[Math.abs(x + y) % TILE_SERVERS.length];
-  if (style === 'dark') return `https://${s}.basemaps.cartocdn.com/dark_all/${z}/${x}/${y}.png`;
+  // `withCartoKey` : sans clé, CARTO renvoie 403 et l'image partagée sortait
+  // avec un fond uni (bug « carte vide » des cartes de sortie).
+  if (style === 'dark') {
+    return withCartoKey(`https://${s}.basemaps.cartocdn.com/dark_all/${z}/${x}/${y}.png`);
+  }
   if (style === 'satellite') return `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}.png`;
-  return `https://${s}.basemaps.cartocdn.com/rastertiles/voyager/${z}/${x}/${y}.png`;
+  return withCartoKey(`https://${s}.basemaps.cartocdn.com/rastertiles/voyager/${z}/${x}/${y}.png`);
 }
 
 /** Repli si le style choisi ne répond pas (réseau, quotas). */

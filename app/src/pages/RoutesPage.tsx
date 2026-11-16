@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { addBaseMap } from '../lib/mapTiles';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import { useI18n } from '../context/LocaleContext';
@@ -149,7 +150,7 @@ function RoutePreview({ route }: { route: SavedRoute }) {
     if (!ref.current || route.points.length < 2) return;
     const map = L.map(ref.current, { zoomControl: false, dragging: false, scrollWheelZoom: false, doubleClickZoom: false, touchZoom: false, boxZoom: false, keyboard: false, attributionControl: false });
     L.control.attribution({ prefix: false }).addAttribution('&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>').addTo(map);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+    addBaseMap(map);
     const line = L.polyline(route.points.map(p => [p.lat, p.lng] as [number, number]), { color: '#D8CA82', weight: 4 }).addTo(map);
     map.fitBounds(line.getBounds(), { padding: [15, 15] });
     return () => { map.remove(); };

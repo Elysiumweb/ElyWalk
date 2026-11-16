@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { addBaseMap } from '../lib/mapTiles';
+import SharedActivityCard from '../components/SharedActivityCard';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import Sheet from '../components/Sheet';
@@ -134,7 +136,7 @@ export default function ActivityDetailPage() {
   useEffect(() => {
     if (!session?.id || !containerRef.current || mapRef.current) return;
     const map = L.map(containerRef.current, { zoomControl: false });
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>', maxZoom: 19 }).addTo(map);
+    addBaseMap(map);
     L.control.zoom({ position: 'bottomright' }).addTo(map);
     mapRef.current = map;
     drawnRef.current = false;
@@ -308,7 +310,8 @@ export default function ActivityDetailPage() {
 
   const copyShareLink = async () => {
     if (!shareLink) return;
-    const url = shareUrlForPath(`/activity/${shareLink.sessionId}?t=${shareLink.token}`);
+    // A7 — URL publique : la page s'ouvre sans compte et affiche le résumé.
+    const url = shareUrlForPath(`/s/${shareLink.sessionId}?t=${shareLink.token}`);
     try {
       await navigator.clipboard.writeText(url);
       toast('Lien copié. Il peut être révoqué à tout moment.', 'success');
@@ -488,6 +491,25 @@ export default function ActivityDetailPage() {
                 </button>
               </div>
               {revokedLinkId && <p className="muted-xs">Lien révoqué · les destinataires n’ont plus accès.</p>}
+              <div style={{ marginTop: 10 }}>
+                <small className="field-help" style={{ display: 'block', marginBottom: 6 }}>
+                  Aperçu — ce que voit la personne qui ouvre le lien (sans compte) :
+                </small>
+                <SharedActivityCard
+                  compact
+                  activity={{
+                    title: session.title || session.routeName || 'Sortie ElyWalk',
+                    ownerName: profile?.displayName,
+                    type: session.type,
+                    startedAt: session.startedAt,
+                    durationSec: session.durationSec,
+                    distanceM: session.distanceM,
+                    calories: session.calories,
+                    steps: session.steps,
+                    caption: session.caption,
+                  }}
+                />
+              </div>
             </div>
           )}
           {!isOwner && <small style={{ color: 'var(--gold)', display: 'block', marginTop: 6 }}>Sortie de {session.uid === profile?.uid ? 'vous' : 'un ami'} · visibilité : {visibility}</small>}

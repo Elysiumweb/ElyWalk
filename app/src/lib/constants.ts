@@ -36,6 +36,16 @@ export const LEVELPLAY_REWARD_AMOUNT = 1;
 // `https://<domaine>/app-ads.txt` (voir app/public/app-ads.txt).
 export const APP_ADS_TXT_URL = 'https://elywalk-2f7ba.web.app/app-ads.txt';
 
+/**
+ * Fiche Play Store de l'application — utilisée par la page publique d'une
+ * sortie partagée (« Installer ElyWalk ») et par l'écran de mise à jour.
+ */
+export const PLAY_STORE_URL =
+  'https://play.google.com/store/apps/details?id=com.elysium.elywalk';
+
+/** Nom du paquet Android (deep links, fiche Play Store, attestation). */
+export const ANDROID_PACKAGE_NAME = 'com.elysium.elywalk';
+
 // --- Documents légaux en ligne (exigence Play Store : URL publique) ---
 // Page statique servie par Firebase Hosting (app/public/privacy.html).
 // Doit rester accessible sans authentification et sans restriction géographique.

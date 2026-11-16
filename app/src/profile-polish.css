@@ -179,6 +179,18 @@
 }
 .directions-overlay .map-card-close { flex: 0 0 auto; width: 44px; height: 44px; }
 
+/* Saisie du point d'arrivée quand l'adresse n'a pas pu être localisée. */
+.directions-dest-picker {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--gold-border);
+}
+.directions-dest-picker .muted-xs { margin: 0; }
+
 /* Modes : quatre cibles de 44 px minimum, sur une seule ligne défilable. */
 .directions-modes {
   flex: 0 0 auto;
@@ -785,3 +797,15 @@
 .update-actions { display: flex; flex-direction: column; gap: var(--space-2); }
 .update-actions .btn { min-height: 48px; width: 100%; }
 .update-hint { margin: var(--space-3) 0 0; font-size: var(--text-xs); color: var(--muted); line-height: 1.4; }
+
+/* A12.2 — import d'une trace GPX depuis l'écran d'activité. */
+.gpx-import {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--gold-border);
+}
+.gpx-import .muted-xs { margin: 0; line-height: 1.4; }

@@ -3,6 +3,9 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useToast } from './Toast';
 import { getCurrentPosition, haversineM, watchPosition, type Coords } from '../lib/geo';
+import { addBaseMap } from '../lib/mapTiles';
+import { showEndOfActivityAd } from '../lib/ads';
+import { hapticSuccess } from '../lib/haptics';
 import {
   formatDuration,
   formatRouteDistance,
@@ -120,10 +123,7 @@ export default function NavigationView({
       center: [destination?.lat ?? 46.6, destination?.lng ?? 2.4],
       zoom: 16,
     });
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-    }).addTo(map);
+    addBaseMap(map, { style: 'voyager' });
     routeLayerRef.current = L.layerGroup().addTo(map);
     mapRef.current = map;
     // Un déplacement manuel suspend le suivi : l'utilisateur garde la main.
@@ -314,6 +314,20 @@ export default function NavigationView({
   if (!open) return null;
 
   const arrived = progress ? progress.remaining < 30 : false;
+
+  /**
+   * Arrivée : annonce interstitielle **de fin de trajet** (même placement que
+   * la fin d'une sortie GPS) et retour haptique. Une seule fois par trajet :
+   * sans ce garde-fou, chaque point GPS sous 30 m affichait une annonce.
+   */
+  const arrivalHandledRef = useRef(false);
+  useEffect(() => {
+    if (!open) { arrivalHandledRef.current = false; return; }
+    if (!arrived || arrivalHandledRef.current) return;
+    arrivalHandledRef.current = true;
+    void hapticSuccess();
+    void showEndOfActivityAd();
+  }, [open, arrived]);
   const nextInstruction = arrived
     ? 'Vous êtes arrivé à destination'
     : progress?.nextStep?.instruction || plan?.steps?.[0]?.instruction || `Suivez le tracé ${MODE_LABEL[mode]}`;

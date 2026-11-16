@@ -1,5 +1,55 @@
 # Changelog
 
+## 2.2.4 — 2026-11-16
+
+### Les quatre défauts signalés
+
+**1. Fond de carte GPS crédible.** Les tracés s'affichaient sur des tuiles OSM
+brutes, sans relief ni lisibilité en mode sombre. Toutes les cartes passent
+maintenant par `lib/carto.ts` : tuiles **CARTO Voyager** (attribution CARTO +
+OpenStreetMap, clé fournie) via un point d'entrée unique. Une carte sans clé
+valide échouait en 403 ; c'est désormais impossible de contourner l'helper.
+
+**2. Itinéraire d'une rencontre, tous les modes, dans ElyWalk.** Marche, vélo,
+voiture et transports s'ouvrent dans la carte de l'application avec le tracé
+dessiné — aucun renvoi vers Google Maps ou Apple Plans, y compris depuis un lien
+de rencontre partagé.
+
+**3. Validation des pas refusée (« Missing or insufficient permissions »).**
+Cause racine : la règle exigeait un e-mail vérifié et un `totalCalories`
+toujours présent, alors que le client pouvait l'omettre. La règle valide
+désormais la **borne** du crédit (pas, ElyCoins, calories, gelées de série
+0–3) au lieu de la vérification d'e-mail, et le client réessaie une fois après
+rafraîchissement du jeton en traduisant le refus en message actionnable.
+
+**4. Un vrai mode GPS dans la carte.** Saisie d'une destination (adresse ou
+coordonnées), choix du mode de déplacement, guidage pas à pas : l'écran se
+comporte comme une application de navigation. **Deux interstitiels** encadrent
+la sortie — un au lancement, un à l'arrivée.
+
+### Aussi dans cette version
+
+- **Souvenirs partageables** — page publique `/s/:sessionId?t=…` avec carte,
+  statistiques et aperçu enrichi (OpenGraph), sans connexion.
+- **Kudos et commentaires** sur le fil d'activité, avec badges de non-lus sur
+  l'onglet Amis.
+- **Objectif hebdomadaire** (7 000–210 000 pas) réglable dans les réglages,
+  anneau de progression sur l'accueil, récapitulatif du dimanche.
+- **Rencontres** — lien d'invitation, fichier `.ics`, QR code, galerie de trois
+  photos par rencontre.
+- **Recherche globale** (amis, rencontres, itinéraires, activités).
+- **Records personnels** — meilleur 1 km, meilleur 5 km, plus longue sortie,
+  meilleure semaine, affichés dans Progression.
+- **Import GPX** — une trace Strava, Garmin ou OSM devient une sortie ElyWalk
+  (distance, durée plafonnée aux décrochages GPS, pas et calories recalculés),
+  sans être annoncée dans le fil d'activité.
+- **Récapitulatif du dimanche envoyé application fermée** — nouveau cron du
+  worker (`*/10 * * * 0`) qui parcourt les comptes par tranches, respecte
+  `alerts.weeklyRecap` et n'envoie jamais deux fois le même message.
+- **Rappel de marche du soir** à 21 h 30, désactivable, jamais envoyé si la
+  journée est déjà validée.
+- **Retours haptiques**, page 404 réelle, préférences d'alertes complétées.
+
 ## 2.2.3 — 2026-11-13
 
 ### Six défauts signalés — corrigés

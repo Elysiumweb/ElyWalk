@@ -32,4 +32,5 @@ crons = [
   "*/5 * * * *",   # amis, retraits et changements/annulations d'événements
   "0 * * * *",     # file de retraits
   "15 */6 * * *",  # version publiée sur le Play Store → appRelease/current (écran de mise à jour)
+  "*/10 * * * 0",  # dimanche : récapitulatif hebdomadaire (A9), par tranches de 8 comptes
 ]

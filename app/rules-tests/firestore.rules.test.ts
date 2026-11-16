@@ -362,3 +362,208 @@ describe('alertes — préférences et position approximative', () => {
     await assertFails(updateDoc(doc(as(ALICE), 'users/bob'), { alerts: alerts() }));
   });
 });
+
+// ---------------------------------------------------------------------------
+// 2.2.4 — régressions signalées et nouveautés A8 / A9 / A10 / A12.1.
+// ---------------------------------------------------------------------------
+
+const profile = (uid: string) => ({
+  uid, displayName: uid, photoURL: null, role: 'user', createdAt: 1,
+  totalSteps: 0, totalCalories: 0, streak: 0, todaySteps: 0, todayDate: '2026-11-12',
+  elycoins: 0, referralCode: uid.toUpperCase(), dailyStepGoal: 10000,
+  unitSystem: 'metric', onboardingDone: true, lastValidatedDate: '2026-11-12',
+});
+
+describe('validation des pas — un compte non vérifié doit pouvoir valider', () => {
+  // Le défaut « Missing or insufficient permissions » venait d'un `verified()`
+  // dans la règle de crédit : un compte e-mail non confirmé était refusé alors
+  // que le client écrivait correctement. La règle contrôle désormais les bornes.
+  const unverified = (uid: string) =>
+    env.authenticatedContext(uid, { email_verified: false }).firestore();
+
+  const seed = async (withCaloriesOnProfile: boolean) => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const p: Record<string, unknown> = profile(ALICE);
+      if (!withCaloriesOnProfile) delete p.totalCalories;
+      await setDoc(doc(ctx.firestore(), 'users/alice'), p);
+      await setDoc(doc(ctx.firestore(), 'users/alice/dailySteps/2026-11-13'), {
+        steps: 8000, coins: 4, calories: 300, validatedAt: Date.now(),
+      });
+    });
+  };
+
+  it('crédite les pas, y compris quand `totalCalories` est absent du profil', async () => {
+    await seed(false);
+    await assertSucceeds(updateDoc(doc(unverified(ALICE), 'users/alice'), {
+      lastValidatedDate: '2026-11-13', totalSteps: 8000, totalCalories: 300,
+      elycoins: 4, todaySteps: 8000, streakFreezes: 2,
+    }));
+  });
+
+  it('accepte jusqu’à trois gels de série', async () => {
+    await seed(true);
+    await assertSucceeds(updateDoc(doc(unverified(ALICE), 'users/alice'), {
+      lastValidatedDate: '2026-11-13', totalSteps: 8000, totalCalories: 300,
+      elycoins: 4, todaySteps: 8000, streakFreezes: 3,
+    }));
+  });
+
+  it('refuse un crédit incohérent malgré la levée de `verified()`', async () => {
+    await seed(true);
+    await assertFails(updateDoc(doc(unverified(ALICE), 'users/alice'), {
+      // 40 EC pour 8000 pas : très au-delà du barème (4 EC).
+      lastValidatedDate: '2026-11-13', totalSteps: 8000, totalCalories: 300,
+      elycoins: 40, todaySteps: 8000, streakFreezes: 1,
+    }));
+    await assertFails(updateDoc(doc(unverified(ALICE), 'users/alice'), {
+      // Jour déjà validé : pas de double crédit.
+      lastValidatedDate: '2026-11-12', totalSteps: 8000, totalCalories: 300,
+      elycoins: 4, todaySteps: 8000, streakFreezes: 4,
+    }));
+  });
+
+  it('borne les pas du jour écrits par le propriétaire', async () => {
+    await seed(true);
+    await assertFails(setDoc(doc(unverified(ALICE), 'users/alice/dailySteps/2026-11-14'), {
+      steps: 90000, coins: 4, calories: 300, validatedAt: Date.now(),
+    }));
+    await assertFails(setDoc(doc(unverified(ALICE), 'users/alice/dailySteps/2026-11-14'), {
+      steps: 8000, coins: 500, calories: 300, validatedAt: Date.now(),
+    }));
+    await assertSucceeds(setDoc(doc(unverified(ALICE), 'users/alice/dailySteps/2026-11-14'), {
+      steps: 8000, coins: 4, calories: 300, validatedAt: Date.now(),
+    }));
+  });
+});
+
+describe('A8 — encouragements et commentaires du fil', () => {
+  it('n’accepte un encouragement que sur l’identifiant `<item>_<uid>`', async () => {
+    await assertSucceeds(setDoc(doc(as(BOB), 'feedReactions/item-1_bob'), {
+      uid: BOB, itemId: 'item-1', createdAt: Date.now(),
+    }));
+    await assertFails(setDoc(doc(as(BOB), 'feedReactions/bob_item-1'), {
+      uid: BOB, itemId: 'item-1', createdAt: Date.now(),
+    }));
+    await assertFails(setDoc(doc(as(BOB), 'feedReactions/item-1_alice'), {
+      uid: ALICE, itemId: 'item-1', createdAt: Date.now(),
+    }));
+  });
+
+  it('borne les commentaires à 200 caractères', async () => {
+    await assertSucceeds(setDoc(doc(as(BOB), 'feedComments/c1'), {
+      uid: BOB, itemId: 'item-1', text: 'x'.repeat(200), createdAt: Date.now(),
+    }));
+    await assertFails(setDoc(doc(as(BOB), 'feedComments/c2'), {
+      uid: BOB, itemId: 'item-1', text: 'x'.repeat(201), createdAt: Date.now(),
+    }));
+    await assertFails(setDoc(doc(as(BOB), 'feedComments/c3'), {
+      uid: ALICE, itemId: 'item-1', text: 'Bonjour', createdAt: Date.now(),
+    }));
+  });
+});
+
+describe('A10 — galerie photo d’une rencontre', () => {
+  const event = (creator: string, participants: string[]) => ({
+    creatorUid: creator, participants, title: 'Balade', description: '',
+    centerLat: 48.85, centerLng: 2.35, startsAt: Date.now(), status: 'scheduled',
+    createdAt: Date.now(),
+  });
+  const photo = (uid: string, slot: number) => ({
+    uid, eventId: 'e1', slot, dataUrl: 'data:image/jpeg;base64,AAAA', createdAt: Date.now(),
+  });
+
+  const seedEvent = async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'communityEvents/e1'), event(ALICE, [ALICE, BOB]));
+    });
+  };
+
+  it('autorise les trois emplacements aux participants', async () => {
+    await seedEvent();
+    await assertSucceeds(setDoc(doc(as(BOB), 'eventPhotos/e1_0'), photo(BOB, 0)));
+    await assertSucceeds(setDoc(doc(as(ALICE), 'eventPhotos/e1_2'), photo(ALICE, 2)));
+  });
+
+  it('refuse un quatrième emplacement, un tiers et une image trop lourde', async () => {
+    await seedEvent();
+    await assertFails(setDoc(doc(as(BOB), 'eventPhotos/e1_3'), photo(BOB, 3)));
+    await assertFails(setDoc(doc(as(BOB), 'eventPhotos/e1_0'), { ...photo(BOB, 0), uid: ALICE }));
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'communityEvents/e2'), event(ALICE, [ALICE]));
+    });
+    await assertFails(setDoc(doc(as(BOB), 'eventPhotos/e2_0'), { ...photo(BOB, 0), eventId: 'e2' }));
+    // 95 001 caractères : au-delà du plafond de 95 000 du champ `dataUrl`.
+    await assertFails(setDoc(doc(as(ALICE), 'eventPhotos/e1_1'), {
+      ...photo(ALICE, 1), dataUrl: 'x'.repeat(95001),
+    }));
+  });
+});
+
+describe('A7 — liens de partage publics', () => {
+  const link = (extra: Record<string, unknown> = {}) => ({
+    ownerUid: ALICE, sessionId: 's1', token: 'abcdefghijklmnop1234', scope: 'summary',
+    distanceM: 1200, createdAt: 1, updatedAt: 1, ...extra,
+  });
+
+  const seedSession = async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'activitySessions/s1'), session(ALICE, 'link'));
+    });
+  };
+
+  it('accepte l’identifiant `<sessionId>` et le format historique', async () => {
+    await seedSession();
+    await assertSucceeds(setDoc(doc(as(ALICE), 'shareLinks/s1'), link({ centerLat: 48.85, centerLng: 2.35, radiusM: 2000 })));
+    await assertSucceeds(setDoc(doc(as(ALICE), 'shareLinks/s1_alice'), link({ centerLng: 2.35 })));
+  });
+
+  it('refuse un identifiant arbitraire et la mise à jour par un tiers', async () => {
+    await seedSession();
+    await assertFails(setDoc(doc(as(ALICE), 'shareLinks/autre'), link()));
+    await setDoc(doc(as(ALICE), 'shareLinks/s1'), link());
+    await assertFails(updateDoc(doc(as(BOB), 'shareLinks/s1'), { caption: 'détourné', updatedAt: 2 }));
+    await assertSucceeds(updateDoc(doc(as(ALICE), 'shareLinks/s1'), { caption: 'Boucle au parc', updatedAt: 2 }));
+  });
+
+  it('refuse un rayon d’aperçu hors bornes', async () => {
+    await seedSession();
+    await assertFails(setDoc(doc(as(ALICE), 'shareLinks/s1'), link({ radiusM: 900000 })));
+  });
+});
+
+describe('A9 / A12.1 — objectifs et records du profil', () => {
+  const seedProfile = async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'users/alice'), profile(ALICE));
+    });
+  };
+
+  it('accepte un objectif quotidien et hebdomadaire dans les bornes', async () => {
+    await seedProfile();
+    await assertSucceeds(updateDoc(doc(as(ALICE), 'users/alice'), { dailyStepGoal: 8000 }));
+    await assertSucceeds(updateDoc(doc(as(ALICE), 'users/alice'), { weeklyStepGoal: 50000 }));
+  });
+
+  it('refuse un objectif absurde', async () => {
+    await seedProfile();
+    await assertFails(updateDoc(doc(as(ALICE), 'users/alice'), { weeklyStepGoal: 1000 }));
+    await assertFails(updateDoc(doc(as(ALICE), 'users/alice'), { weeklyStepGoal: 400000 }));
+    await assertFails(updateDoc(doc(as(ALICE), 'users/alice'), { dailyStepGoal: 200 }));
+  });
+
+  it('accepte des records cohérents et refuse les valeurs gonflées', async () => {
+    await seedProfile();
+    await assertSucceeds(updateDoc(doc(as(ALICE), 'users/alice'), {
+      records: {
+        best1kmSec: 330, best5kmSec: 1500, longestDistanceM: 12500,
+        bestWeekSteps: 62000, bestWeekStart: '2026-11-09', updatedAt: 1,
+      },
+    }));
+    await assertFails(updateDoc(doc(as(ALICE), 'users/alice'), {
+      records: { best1kmSec: 5, longestDistanceM: 1, bestWeekSteps: 1, bestWeekStart: null, updatedAt: 2, best5kmSec: null },
+    }));
+    await assertFails(updateDoc(doc(as(ALICE), 'users/alice'), {
+      records: { best1kmSec: 330, longestDistanceM: 12500, bestWeekSteps: 62000, bestWeekStart: null, updatedAt: 3, best5kmSec: null, elycoins: 99999 },
+    }));
+  });
+});

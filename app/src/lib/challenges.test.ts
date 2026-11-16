@@ -45,9 +45,13 @@ describe('catalogue des défis (F02)', () => {
       ['week-steps-2026-11-12', { active: true, reward: 30, target: 250000, startsAt: '2026-11-09', endsAt: '2026-11-15', updatedAt: 1 }],
       ['season-2026-11', { active: false, reward: 40, target: 100000, startsAt: '2026-11-01', endsAt: '2026-11-30', updatedAt: 1 }],
     ]);
-    const states = lib.describeCatalogState(definitions, catalog);
+    // Date de référence fixée : sinon le test devenait faux le lendemain de la
+    // semaine de démonstration (endsAt 2026-11-15 comparé à la vraie date).
+    const states = lib.describeCatalogState(definitions, catalog, '2026-11-12');
     expect(states.map((s) => s.state)).toEqual(['paid', 'closed']);
     expect(states[0].reward).toBe(30);
+    const expired = lib.describeCatalogState(definitions, catalog, '2026-11-16');
+    expect(expired.map((s) => s.state)).toEqual(['closed', 'closed']);
     const missing = lib.describeCatalogState(definitions, new Map());
     expect(missing.every((s) => s.state === 'missing')).toBe(true);
   });

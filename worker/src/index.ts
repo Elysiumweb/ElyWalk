@@ -15,6 +15,7 @@
  *   POST /fcm/send                    — envoi d'un push FCM (protégé par API_SECRET)
  *   GET  /cron/process-notifications  — consomme friendRequests/withdrawals → FCM (F11)
  *   GET  /cron/process-payouts        — traite la file de retraits (F06)
+ *   GET  /cron/weekly-recap           — récapitulatif hebdomadaire par tranches (A9)
  *   GET  /                            — état de santé
  */
 export interface Env {
@@ -736,6 +737,144 @@ async function processNotifications(sa: ServiceAccount): Promise<{ processed: nu
 }
 
 // ---------------------------------------------------------------------------
+// A9 — Récapitulatif hebdomadaire (dimanche soir)
+// ---------------------------------------------------------------------------
+//
+// Contrainte de conception : un Worker n'a qu'un budget de sous-requêtes par
+// invocation (50 sur le plan gratuit). Relire la base entière est donc
+// impossible ; le balayage est découpé en pages et sa position est conservée
+// dans `cronState/weeklyRecap`. Le cron du dimanche s'exécute toutes les
+// 10 minutes : la base est parcourue par tranches, puis le curseur est remis à
+// zéro au lundi suivant (`weekKey` différent).
+//
+// Le message est celui de `lib/weeklyGoal.ts` côté application : même objectif
+// par défaut (50 000 pas), même calcul de temps de marche (75 cm par pas,
+// 4,8 km/h), pour que le push et l'écran d'accueil racontent la même chose.
+const WEEKLY_RECAP_BATCH = 8;
+const DEFAULT_WEEKLY_STEP_GOAL = 50_000;
+
+/** Lundi (00:00 UTC) de la semaine contenant `date`, en AAAA-MM-JJ. */
+function mondayKey(date: Date): string {
+  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const day = d.getUTCDay(); // 0 = dimanche
+  const delta = day === 0 ? 6 : day - 1;
+  d.setUTCDate(d.getUTCDate() - delta);
+  return d.toISOString().slice(0, 10);
+}
+
+const frNumber = new Intl.NumberFormat('fr-FR');
+
+/** Corps du push : même formulation que l'écran d'accueil. */
+function weeklyRecapBody(total: number, target: number): string {
+  if (total >= target) {
+    return `Objectif de la semaine atteint : ${frNumber.format(total)} pas sur ${frNumber.format(target)}. Bravo !`;
+  }
+  const remaining = target - total;
+  const minutes = Math.max(1, Math.round((remaining * 0.75) / (4800 / 60)));
+  return `Il te reste ${frNumber.format(remaining)} pas cette semaine, soit ${minutes} min de marche, pour atteindre ton objectif de ${frNumber.format(target)} pas.`;
+}
+
+async function readDoc(sa: ServiceAccount, relPath: string): Promise<Record<string, unknown> | null> {
+  const token = await getAccessToken(sa, FIRESTORE_SCOPE);
+  const res = await fetch(`https://firestore.googleapis.com/v1/${docName(sa, relPath)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) return null;
+  const data = (await res.json()) as { fields?: Record<string, unknown> };
+  return data.fields || {};
+}
+
+/** Pas validés depuis lundi pour un utilisateur (documents `dailySteps`). */
+async function weeklySteps(sa: ServiceAccount, uid: string, weekStartMs: number): Promise<number> {
+  const rows = await runQuery(sa, {
+    from: [{ collectionId: 'dailySteps' }],
+    parent: docName(sa, `users/${uid}`),
+    where: {
+      fieldFilter: {
+        field: { fieldPath: 'validatedAt' },
+        op: 'GREATER_THAN_OR_EQUAL',
+        value: fInt(weekStartMs),
+      },
+    },
+    limit: 7,
+  });
+  let total = 0;
+  for (const row of rows) {
+    const raw = row.fields.steps as { integerValue?: string; doubleValue?: number } | undefined;
+    total += Number(raw?.integerValue ?? raw?.doubleValue ?? 0) || 0;
+  }
+  return total;
+}
+
+async function processWeeklyRecap(sa: ServiceAccount, now = new Date()): Promise<{ processed: number; sent: number; weekKey: string }> {
+  const weekKey = mondayKey(now);
+  const weekStartMs = Date.parse(`${weekKey}T00:00:00Z`);
+  const state = (await readDoc(sa, 'cronState/weeklyRecap')) || {};
+  const sameWeek = (state.weekKey as { stringValue?: string })?.stringValue === weekKey;
+  // Nouvelle semaine (ou premier passage) → on repart du début de la base. Le
+  // balayage s'arrête dès que la dernière tranche a été lue ; les passages
+  // suivants du même dimanche ne renvoient donc rien.
+  const offset = sameWeek ? Number((state.nextOffset as { integerValue?: string })?.integerValue ?? 0) || 0 : 0;
+  const exhausted = sameWeek && (state.done as { booleanValue?: boolean })?.booleanValue === true;
+  if (exhausted) return { processed: 0, sent: 0, weekKey };
+
+  const users = await runQuery(sa, {
+    from: [{ collectionId: 'users' }],
+    orderBy: [{ field: { fieldPath: '__name__' }, direction: 'ASCENDING' }],
+    offset,
+    limit: WEEKLY_RECAP_BATCH,
+  });
+
+  let processed = 0;
+  let sent = 0;
+  for (const user of users) {
+    const uid = user.name.slice(user.name.lastIndexOf('/') + 1);
+    const fields = user.fields;
+    // Préférence d'alerte : `alerts.weeklyRecap` n'est désactivée que si elle
+    // vaut explicitement `false` (même règle que `normalizeAlertPreferences`).
+    const alerts = fields.alerts as { mapValue?: { fields?: Record<string, unknown> } } | undefined;
+    const pref = alerts?.mapValue?.fields?.weeklyRecap as { booleanValue?: boolean } | undefined;
+    if (pref?.booleanValue === false) {
+      processed++;
+      continue;
+    }
+    // Déjà récapitulé pour cette semaine (curseur perdu ou rejoué).
+    const already = (fields.lastWeeklyRecapWeek as { stringValue?: string })?.stringValue === weekKey;
+    if (already) {
+      processed++;
+      continue;
+    }
+    const goalField = fields.weeklyStepGoal as { integerValue?: string } | undefined;
+    const target = Number(goalField?.integerValue ?? 0) || DEFAULT_WEEKLY_STEP_GOAL;
+    try {
+      const total = await weeklySteps(sa, uid, weekStartMs);
+      const result = await sendToUser(sa, uid, 'Ton récap de la semaine', weeklyRecapBody(total, target), {
+        type: 'weekly_recap',
+        steps: String(total),
+        goal: String(target),
+      });
+      sent += result.sent;
+      await patchFields(sa, user.name, {
+        lastWeeklyRecapWeek: fString(weekKey),
+        lastWeeklyRecapSteps: fInt(total),
+      });
+    } catch (e) {
+      console.error('[cron] weekly recap', uid, e);
+    }
+    processed++;
+  }
+
+  const nextOffset = offset + users.length;
+  await patchFields(sa, docName(sa, 'cronState/weeklyRecap'), {
+    weekKey: fString(weekKey),
+    nextOffset: fInt(nextOffset),
+    done: fBool(users.length < WEEKLY_RECAP_BATCH),
+    updatedAt: fInt(Date.now()),
+  });
+  return { processed, sent, weekKey };
+}
+
+// ---------------------------------------------------------------------------
 // F06 — File de retraits (cron)
 // ---------------------------------------------------------------------------
 async function processPayouts(sa: ServiceAccount): Promise<{ processed: number }> {
@@ -889,6 +1028,12 @@ export default {
         return json({ ok: true, ...res });
       }
 
+      // A9 — Récapitulatif hebdomadaire (dimanche soir, par tranches).
+      // Exposé en GET pour pouvoir le rejouer manuellement après un déploiement.
+      if (request.method === 'GET' && path === '/cron/weekly-recap') {
+        const result = await processWeeklyRecap(sa);
+        return json({ ok: true, ...result });
+      }
       // F06 — File de retraits (cron)
       if (request.method === 'GET' && path === '/cron/process-payouts') {
         const res = await processPayouts(sa);
@@ -910,7 +1055,12 @@ export default {
         ? processPayouts(sa)
         : event.cron === '15 */6 * * *'
           ? syncPublishedRelease(sa, env).then(() => undefined)
-          : processNotifications(sa);
+          // Dimanche, toutes les 10 minutes : le récapitulatif hebdomadaire
+          // avance d'une tranche de 8 comptes à chaque passage (budget de
+          // sous-requêtes), jusqu'à épuisement de la base.
+          : event.cron === '*/10 * * * 0'
+            ? processWeeklyRecap(sa).then(() => undefined)
+            : processNotifications(sa);
     ctx.waitUntil(job.catch(error => console.error('[cron]', event.cron, error)));
   },
 };

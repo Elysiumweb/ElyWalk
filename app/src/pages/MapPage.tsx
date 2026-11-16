@@ -5,8 +5,11 @@ import 'leaflet/dist/leaflet.css';
 import { useToast } from '../components/Toast';
 import { watchEstablishments, type Establishment } from '../lib/establishments';
 import { getCurrentPosition, watchPosition } from '../lib/geo';
-import DirectionsPanel from '../components/DirectionsPanel';
+import DirectionsPanel, { type DirectionsDestination } from '../components/DirectionsPanel';
+import AddressAutocomplete from '../components/AddressAutocomplete';
+import { geocodeAddress, TRAVEL_MODES, type AddressSuggestion, type TravelMode } from '../lib/directions';
 import NotificationBell from '../components/NotificationBell';
+import { addBaseMap } from '../lib/mapTiles';
 
 const DEFAULT_CENTER: [number, number] = [46.6, 2.4]; // France
 const DEFAULT_ZOOM = 6;
@@ -29,6 +32,49 @@ export default function MapPage() {
   const [userPos, setUserPos] = useState<{ lat: number; lng: number } | null>(null);
   const [accuracy, setAccuracy] = useState<number | null>(null);
   const [directionsFor, setDirectionsFor] = useState<Establishment | null>(null);
+  /**
+   * GPS libre (nouveauté) : n'importe quelle adresse, pas seulement un
+   * partenaire. L'utilisateur saisit sa destination, choisit son mode de
+   * déplacement, puis « Démarrer le GPS » ouvre le guidage — annonce
+   * interstitielle au départ, puis à l'arrivée (NavigationView).
+   */
+  const [gpsDestination, setGpsDestination] = useState<DirectionsDestination | null>(null);
+  const [gpsQuery, setGpsQuery] = useState('');
+  const [gpsMode, setGpsMode] = useState<TravelMode>('walk');
+  const [gpsBusy, setGpsBusy] = useState(false);
+  const [gpsSuggestion, setGpsSuggestion] = useState<AddressSuggestion | null>(null);
+
+  /** Suggestion réellement retenue : ses coordonnées sont fiables. */
+  const gpsPoint = gpsSuggestion && gpsSuggestion.label === gpsQuery.trim()
+    ? { lat: gpsSuggestion.lat, lng: gpsSuggestion.lng }
+    : null;
+  const gpsLabel = gpsSuggestion?.label || '';
+
+  const startGps = async () => {
+    if (gpsBusy) return;
+    setGpsBusy(true);
+    try {
+      // Suggestion choisie : coordonnées déjà connues. Sinon, on géocode le
+      // texte saisi (même comportement que la barre d'adresse de Google Maps).
+      const hit = gpsPoint;
+      if (!hit) {
+        const resolved = await geocodeAddress(gpsQuery);
+        if (!resolved) {
+          toast('Adresse introuvable. Précisez la rue ou la ville.', 'error');
+          return;
+        }
+        setGpsDestination({ name: resolved.label, address: resolved.label, lat: resolved.lat, lng: resolved.lng });
+      } else {
+        setGpsDestination({ name: gpsLabel || gpsQuery, address: gpsLabel || gpsQuery, lat: hit.lat, lng: hit.lng });
+      }
+      // Le guidage s'ouvre immédiatement ; l'itinéraire se calcule dans la
+      // feuille (position demandée à l'ouverture).
+      followRef.current = true;
+      void locate(true);
+    } finally {
+      setGpsBusy(false);
+    }
+  };
 
   // Initialisation de la carte
   useEffect(() => {
@@ -39,10 +85,8 @@ export default function MapPage() {
       zoomControl: false,
       attributionControl: true,
     });
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-    }).addTo(map);
+    // Fonds CARTO clés (repli OSM automatique) — voir lib/mapTiles.
+    addBaseMap(map);
     L.control.zoom({ position: 'bottomright' }).addTo(map);
     map.on('click', () => setSelected(null));
     // Déplacer la carte à la main suspend le suivi automatique (l'utilisateur
@@ -213,6 +257,48 @@ export default function MapPage() {
             ▶ Sortie
           </button>
         </div>
+        {/*
+          GPS libre : destination au choix, mode de déplacement, puis guidage
+          intégré. Annonce interstitielle au lancement et à l'arrivée.
+        */}
+        <div className="map-gps" data-testid="map-gps">
+          <AddressAutocomplete
+            value={gpsQuery}
+            onChange={(value) => { setGpsQuery(value); if (gpsSuggestion && value !== gpsSuggestion.label) setGpsSuggestion(null); }}
+            onSelect={(suggestion) => { setGpsSuggestion(suggestion); setGpsQuery(suggestion.label); }}
+            label="Où allez-vous ?"
+            placeholder="Adresse, lieu, gare…"
+            ariaLabel="Adresse de destination du GPS"
+            helpText="Choisissez une suggestion : le guidage part de votre position actuelle."
+            near={userPos}
+            testId="gps-destination"
+          />
+          <div className="chip-row" role="tablist" aria-label="Mode de déplacement du GPS" data-testid="gps-modes">
+            {TRAVEL_MODES.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                role="tab"
+                aria-selected={gpsMode === m.id}
+                className={`chip ${gpsMode === m.id ? 'chip-active' : ''}`}
+                onClick={() => setGpsMode(m.id)}
+                data-testid={`gps-mode-${m.id}`}
+              >
+                <span aria-hidden="true">{m.icon}</span> {m.short}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            className="btn btn-gold"
+            onClick={() => void startGps()}
+            disabled={gpsBusy || gpsQuery.trim().length < 3}
+            data-testid="gps-start"
+          >
+            {gpsBusy ? 'Préparation…' : `🧭 Démarrer le GPS · ${TRAVEL_MODES.find((m) => m.id === gpsMode)?.short.toLowerCase()}`}
+          </button>
+        </div>
+
         <div className="map-search">
           <input
             className="input"
@@ -317,17 +403,20 @@ export default function MapPage() {
         adresse réelle + itinéraire à pied, vélo, voiture ou transports.
       */}
       <DirectionsPanel
-        open={!!directionsFor}
-        onClose={() => setDirectionsFor(null)}
+        open={!!directionsFor || !!gpsDestination}
+        onClose={() => { setDirectionsFor(null); setGpsDestination(null); }}
+        initialMode={gpsMode}
         destination={
-          directionsFor
-            ? {
-                name: directionsFor.name,
-                address: directionsFor.address,
-                lat: directionsFor.lat,
-                lng: directionsFor.lng,
-              }
-            : null
+          gpsDestination
+            ? gpsDestination
+            : directionsFor
+              ? {
+                  name: directionsFor.name,
+                  address: directionsFor.address,
+                  lat: directionsFor.lat,
+                  lng: directionsFor.lng,
+                }
+              : null
         }
         origin={userPos}
         onLocate={() => locate(false)}

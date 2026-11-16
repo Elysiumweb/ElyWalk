@@ -6,6 +6,7 @@ import AddressAutocomplete from './AddressAutocomplete';
 import NavigationView from './NavigationView';
 import { haversineM, type Coords } from '../lib/geo';
 import { showInterstitial } from '../lib/ads';
+import { addBaseMap } from '../lib/mapTiles';
 import {
   externalMapsUrl,
   formatDuration,
@@ -39,6 +40,31 @@ interface DirectionsPanelProps {
   onLocate: () => void | Promise<void>;
   onOriginResolved?: (point: Coords) => void;
   onMapReady?: (map: L.Map) => void;
+  /**
+   * Mode présélectionné à l'ouverture (GPS de la carte : l'utilisateur choisit
+   * « à pied / vélo / voiture / transports » avant de lancer le guidage).
+   */
+  initialMode?: TravelMode;
+}
+
+/**
+ * Variantes d'une adresse, de la plus précise à la plus tolérante.
+ *
+ * « Entrée principale du parc, 69006 Lyon » → l'adresse entière, puis le
+ * complément retiré, puis la ville seule. Chaque essai supplémentaire coûte une
+ * requête : elles ne sont faites qu'en cas d'échec du précédent.
+ */
+export function destinationVariants(address: string): string[] {
+  const raw = String(address || '').trim();
+  if (!raw) return [];
+  const out: string[] = [raw];
+  const parts = raw.split(',').map((p) => p.trim()).filter(Boolean);
+  if (parts.length > 1) {
+    out.push(parts.slice(1).join(', '));
+    out.push(parts.slice(-2).join(', '));
+  }
+  out.push(`${raw}, France`);
+  return [...new Set(out.filter((value) => value.length >= 3))].slice(0, 4);
 }
 
 const MODE_COLORS: Record<TravelMode, string> = {
@@ -65,6 +91,7 @@ export default function DirectionsPanel({
   onLocate,
   onOriginResolved,
   onMapReady,
+  initialMode,
 }: DirectionsPanelProps) {
   const { toast } = useToast();
   const overlayRef = useRef<HTMLDivElement | null>(null);
@@ -75,7 +102,7 @@ export default function DirectionsPanel({
   const mapRef = useRef<L.Map | null>(null);
   const layersRef = useRef<L.LayerGroup | null>(null);
 
-  const [mode, setMode] = useState<TravelMode>('walk');
+  const [mode, setMode] = useState<TravelMode>(initialMode || 'walk');
   const [plan, setPlan] = useState<RoutePlan | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -90,29 +117,65 @@ export default function DirectionsPanel({
   // (NavigationView) ; la liste n'est qu'une aide consultable.
   const [showSteps, setShowSteps] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
+  /**
+   * Destination introuvable : l'adresse fournie par une rencontre n'a pas pu
+   * être géocodée (lieu libre, adresse incomplète). L'utilisateur peut alors
+   * désigner lui-même l'arrivée au lieu de rester bloqué sur « Adresse en cours
+   * de chargement… » — c'était la cause du « l'itinéraire d'une rencontre ne
+   * fonctionne pas ».
+   */
+  const [destUnresolved, setDestUnresolved] = useState(false);
+  const [destQuery, setDestQuery] = useState('');
+  const [destBusy, setDestBusy] = useState(false);
 
-  // Point d'arrivée : coordonnées de l'établissement si connues, sinon
-  // géocodage de son adresse postale.
+  // Mode imposé par l'appelant (raccourci « GPS » de la carte).
+  useEffect(() => {
+    if (initialMode) setMode(initialMode);
+  }, [initialMode]);
+
+  /**
+   * Point d'arrivée : coordonnées de l'établissement / de la rencontre si
+   * connues, sinon **géocodage progressif** de l'adresse postale.
+   *
+   * Un lieu libre (« Entrée principale du parc ») ne se géocode pas seul :
+   * chaque variante est essayée (adresse complète, sans complément, avec la
+   * ville ajoutée), puis l'écran propose de choisir l'arrivée à la main au lieu
+   * d'attendre indéfiniment une adresse qui n'arrivera jamais.
+   */
   useEffect(() => {
     if (!open || !destination) return;
     let cancelled = false;
     setDestAddress(destination.address || null);
-    setDestPoint(
-      destination.lat != null && destination.lng != null
-        ? { lat: destination.lat, lng: destination.lng }
-        : null
-    );
-    if (destination.lat == null || destination.lng == null) {
-      if (destination.address) {
-        void geocodeAddress(destination.address)
-          .then((hit) => {
-            if (cancelled || !hit) return;
-            setDestPoint({ lat: hit.lat, lng: hit.lng });
-            setDestAddress(tidyAddress(hit.label));
-          })
-          .catch(() => undefined);
-      }
+    setDestQuery(destination.address || '');
+    setDestUnresolved(false);
+    if (destination.lat != null && destination.lng != null) {
+      setDestPoint({ lat: destination.lat, lng: destination.lng });
+      return;
     }
+    setDestPoint(null);
+    if (!destination.address) {
+      setDestUnresolved(true);
+      return;
+    }
+    setDestBusy(true);
+    const variants = destinationVariants(destination.address);
+    void (async () => {
+      for (const candidate of variants) {
+        const hit = await geocodeAddress(candidate).catch(() => null);
+        if (cancelled) return;
+        if (hit) {
+          setDestPoint({ lat: hit.lat, lng: hit.lng });
+          setDestAddress(tidyAddress(hit.label));
+          setDestQuery(tidyAddress(hit.label));
+          setDestUnresolved(false);
+          setDestBusy(false);
+          return;
+        }
+      }
+      if (cancelled) return;
+      setDestUnresolved(true);
+      setDestBusy(false);
+    })();
     return () => {
       cancelled = true;
     };
@@ -182,10 +245,7 @@ export default function DirectionsPanel({
       center: [46.6, 2.4],
       zoom: 6,
     });
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-    }).addTo(map);
+    addBaseMap(map);
     L.control.zoom({ position: 'bottomright' }).addTo(map);
     layersRef.current = L.layerGroup().addTo(map);
     mapRef.current = map;
@@ -370,6 +430,14 @@ export default function DirectionsPanel({
     await onLocate();
   };
 
+  /** Destination choisie à la main quand l'adresse de départ n'a pas suffi. */
+  const applyDestination = (suggestion: AddressSuggestion) => {
+    setDestPoint({ lat: suggestion.lat, lng: suggestion.lng });
+    setDestAddress(suggestion.label);
+    setDestQuery(suggestion.label);
+    setDestUnresolved(false);
+  };
+
   /** Adresse choisie dans la liste de suggestions (coordonnées déjà résolues). */
   const applySuggestion = (suggestion: AddressSuggestion) => {
     setStartPoint({ lat: suggestion.lat, lng: suggestion.lng });
@@ -396,13 +464,36 @@ export default function DirectionsPanel({
             {destination?.name || 'Destination'}
           </div>
           <div className="directions-address" data-testid="directions-address">
-            📍 {destAddress || (destPoint ? pointLabel(destPoint) : 'Adresse en cours de chargement…')}
+            📍{' '}
+            {destAddress
+              || (destPoint ? pointLabel(destPoint) : destBusy ? 'Recherche de l’adresse…' : 'Adresse à préciser')}
           </div>
         </div>
         <button className="map-card-close" onClick={onClose} aria-label="Fermer l’itinéraire" data-testid="directions-close">
           ✕
         </button>
       </div>
+
+      {(!destPoint || destUnresolved) && (
+        <div className="directions-dest-picker" data-testid="directions-dest-picker">
+          <p className="muted-xs" role="status">
+            {destUnresolved
+              ? 'Cette adresse n’a pas pu être retrouvée. Indiquez le point d’arrivée :'
+              : 'Indiquez le point d’arrivée :'}
+          </p>
+          <AddressAutocomplete
+            value={destQuery}
+            onChange={setDestQuery}
+            onSelect={applyDestination}
+            label="Adresse de destination"
+            placeholder="Ex. 1 place de la République, Paris"
+            ariaLabel="Adresse de destination"
+            helpText="Tapez au moins trois lettres : choisissez une suggestion pour placer l’arrivée sur la carte."
+            near={startPoint}
+            testId="directions-destination-search"
+          />
+        </div>
+      )}
 
       <div className="directions-modes" role="tablist" aria-label="Mode de déplacement">
         {TRAVEL_MODES.map((m) => (

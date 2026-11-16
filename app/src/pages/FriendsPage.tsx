@@ -20,7 +20,9 @@ import {
   watchRecentMessages,
   listRecentMessages,
   watchDirectMessages,
+  markConversationRead,
 } from '../lib/db';
+import { unreadByFriend, totalUnread, conversationSummaries, previewText } from '../lib/messaging';
 import { isUnshareableOrigin, shareUrlForReferral } from '../lib/share';
 import Avatar from '../components/Avatar';
 import { EmptyState, ErrorState, Skeleton } from '../components/AsyncState';
@@ -40,7 +42,7 @@ export default function FriendsPage() {
   const [requestProfiles, setRequestProfiles] = useState<Record<string, UserProfile>>({});
   const [outgoing, setOutgoing] = useState<FriendRequest[]>([]);
   const [searchResults, setSearchResults] = useState<UserProfile[]>([]);
-  const [reactions,setReactions]=useState<{id:string;fromName:string;emoji:string;message:string}[]>([]);
+  const [reactions,setReactions]=useState<{id:string;from:string;fromName:string;emoji:string;message:string}[]>([]);
   const [addOpen, setAddOpen] = useState(false);
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
@@ -199,12 +201,23 @@ export default function FriendsPage() {
     setChatMessages([]);
     setMsgOpen({uid,name});
     chatUnsubRef.current = watchDirectMessages(profile.uid, uid, setChatMessages);
+    // Accusé de lecture : l'expéditeur voit que la conversation a été ouverte.
+    void markConversationRead(profile.uid, uid).catch(() => undefined);
   };
   // Fermeture de la feuille ou démontage : aucun abonnement ne doit survivre.
   useEffect(() => () => {
     chatUnsubRef.current?.();
     chatUnsubRef.current = null;
   }, []);
+  /**
+   * A8 — non-lus **par conversation**. Le badge de l'onglet comptait
+   * `messages.length` (messages chargés), pas les messages à lire ; deux
+   * conversations suffisaient à afficher un badge permanent.
+   */
+  const unread = unreadByFriend(messages, profile?.uid || '');
+  const unreadTotal = totalUnread(messages, profile?.uid || '');
+  const conversations = conversationSummaries(messages, profile?.uid || '');
+
   const sendMsg = async()=>{
     if(!profile||!msgOpen||!msgText.trim()) return;
     setMsgBusy(true);
@@ -231,7 +244,9 @@ export default function FriendsPage() {
       <div className="chip-row" style={{marginBottom:8}}>
         <button className={`chip ${tab==='friends'?'chip-active':''}`} onClick={()=>setTab('friends')}>Amis</button>
         <button className={`chip ${tab==='feed'?'chip-active':''}`} onClick={()=>setTab('feed')}>Fil d’activité</button>
-        <button className={`chip ${tab==='messages'?'chip-active':''}`} onClick={()=>setTab('messages')}>Messages {messages.length>0 && `· ${messages.length}`}</button>
+        <button className={`chip ${tab==='messages'?'chip-active':''}`} onClick={()=>setTab('messages')} data-testid="messages-tab-button">
+          Messages{unreadTotal > 0 ? ` · ${unreadTotal} non lu${unreadTotal > 1 ? 's' : ''}` : ''}
+        </button>
       </div>
 
       <div className="card">
@@ -268,7 +283,7 @@ export default function FriendsPage() {
         </div>
       )}
 
-      {reactions.length>0&&<div className="card"><div className="card-title">Encouragements reçus</div>{reactions.map(r=><div className="list-row" key={r.id}><span style={{fontSize:24}}>{r.emoji}</span><div className="row-main"><div className="row-title">{r.fromName}</div><div className="row-sub">{r.message||'vous encourage !'}</div></div></div>)}</div>}
+      {reactions.length>0&&<div className="card" data-testid="received-reactions"><div className="card-title">Encouragements reçus</div>{reactions.map(r=><div className="list-row" key={r.id}><span style={{fontSize:24}}>{r.emoji}</span><div className="row-main"><div className="row-title">{r.fromName}</div><div className="row-sub">{r.message||'vous encourage !'}</div></div><button className="btn btn-outline btn-sm" onClick={()=>setPendingCheer({uid:r.from,name:r.fromName})} aria-label={`Répondre à ${r.fromName}`}>Répondre</button></div>)}</div>}
       {outgoing.length>0&&<div className="card"><div className="card-title">Demandes envoyées</div>{outgoing.map(r=><div className="list-row" key={r.id}><div className="row-main"><div className="row-title">{r.toName}</div><div className="row-sub">En attente</div></div></div>)}</div>}
 
       <div className="card">
@@ -299,7 +314,9 @@ export default function FriendsPage() {
                   aujourd’hui · {fmtNumber(f.totalCalories)} kcal au total
                 </div>
               </div>
-              <button className="icon-danger" title="Message" onClick={()=>openChat(f.uid,f.displayName)} aria-label="Message">💬</button>
+              <button className="icon-danger" title="Message" onClick={()=>openChat(f.uid,f.displayName)} aria-label={`Message${unread[f.uid] ? ` (${unread[f.uid]} non lu)` : ''}`} data-testid="friend-message-button">
+                💬{unread[f.uid] ? <b className="tab-badge" data-testid="friend-unread-badge">{unread[f.uid]}</b> : null}
+              </button>
               <button className="icon-danger" onClick={()=>setPendingCheer({ uid: f.uid, name: f.displayName })} aria-label={`Encourager ${f.displayName}`}>👏</button><button className="icon-danger" onClick={()=>setPendingRemove({ uid: f.uid, name: f.displayName })} aria-label={`Retirer ${f.displayName} de mes amis`}>✕</button>
             </div>
           ))
@@ -315,13 +332,21 @@ export default function FriendsPage() {
         <div className="card" data-testid="messages-tab">
           <div className="card-title">Messagerie légère</div>
           <p className="card-help">Messages courts entre amis (max 500 car.). Respect et bienveillance — tout abus peut être signalé.</p>
-          {friends.length===0 ? <div className="empty-state">Ajoutez des amis pour discuter.</div> : friends.map(f=>(
-            <div key={f.uid} className="list-row">
+          {friends.length===0 ? <div className="empty-state">Ajoutez des amis pour discuter.</div> : friends.map(f=>{
+            const conv = conversations.find(c=>c.friendUid===f.uid);
+            return (
+            <div key={f.uid} className="list-row" data-testid="conversation-row">
               <Avatar name={f.displayName} photoURL={f.photoURL} size={40} />
-              <div className="row-main"><div className="row-title">{f.displayName}</div><div className="row-sub">💬 Conversation privée</div></div>
+              <div className="row-main">
+                <div className="row-title">{f.displayName}</div>
+                <div className="row-sub">
+                  {conv ? `${conv.fromMe ? 'Vous : ' : ''}${previewText(conv.lastText)}` : '💬 Conversation privée'}
+                </div>
+              </div>
+              {unread[f.uid] ? <b className="badge badge-gold" data-testid="conversation-unread">{unread[f.uid]} non lu{unread[f.uid] > 1 ? 's' : ''}</b> : null}
               <button className="btn btn-gold btn-sm" onClick={()=>openChat(f.uid,f.displayName)}>Ouvrir</button>
             </div>
-          ))}
+          );})}
           {messages.length>0 && (
             <div style={{marginTop:12}}>
               <div className="card-title" style={{fontSize:12}}>Derniers messages</div>
