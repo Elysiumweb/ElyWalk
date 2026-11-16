@@ -440,6 +440,34 @@ La version Android n'est plus écrite en dur : `android/app/build.gradle` lit
 `app/package.json` avant `npm run build && npx cap sync android` — Play Console
 refuse un APK/AAB dont le `versionCode` n'a pas augmenté.
 
+### Prérequis de compilation (JDK et mémoire)
+
+AGP 8.13 et Capacitor 8 exigent un **JDK 21** : `java -version` doit l'annoncer
+et `JAVA_HOME` doit pointer dessus (pas sur un JRE embarqué par un autre outil).
+Le build recompile les plugins Capacitor **depuis `node_modules`** — dont
+`capacitor-local-notifications` — donc plusieurs modules Kotlin sont reconstruits
+à chaque `npx cap sync`.
+
+`android/gradle.properties` fixe deux réglages qui suppriment l'échec
+« The daemon has terminated unexpectedly on startup attempt #1 … Kotlin compile
+daemon is ready » :
+
+- `org.gradle.jvmargs=-Xmx3072m -XX:MaxMetaspaceSize=768m` — les 1536 Mo
+  d'origine ne suffisent plus pour AGP 8.13 + `compileSdk 36` + une dizaine de
+  modules ; sur une machine à 8 Go, ne pas dépasser 3072 Mo ;
+- `kotlin.compiler.execution.strategy=in-process` — la compilation Kotlin se fait
+  dans le daemon Gradle, sans second JVM à démarrer (celui qui sortait avec le
+  code 0 sous Windows + JDK 21).
+
+Si l'erreur réapparaît malgré tout, purger les daemons et le cache Kotlin :
+
+```bash
+cd app/android
+./gradlew --stop
+rm -rf .gradle ~/.gradle/kotlin   # PowerShell : Remove-Item -Recurse -Force .gradle, "$env:USERPROFILE\.gradle\kotlin"
+./gradlew :app:assembleDebug
+```
+
 ## Consentement publicitaire RGPD (F03)
 
 Depuis la 1.9.0, le consentement n'est plus fourni par Google UMP : il est
