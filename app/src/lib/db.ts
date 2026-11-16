@@ -38,6 +38,8 @@ import {
 } from './constants';
 import { coinsForSteps, caloriesForSteps, dateStr, yesterdayStr } from './coins';
 import { bestStreakFromDates as computeBestStreak } from './streak';
+import { bestWeekFromDays, mergeRecords, sessionSplits, type PersonalRecords } from './records';
+import type { ImportedActivity } from './gpx';
 import { getDeviceSignals } from './device';
 import type {
   UserProfile,
@@ -167,6 +169,24 @@ export async function getUserProfile(uid: string): Promise<UserProfile | null> {
   return publicProfile as UserProfile;
 }
 
+/**
+ * Objectif hebdomadaire (A9).
+ *
+ * Borné côté client **et** dans les règles Firestore (7 000 à 210 000 pas) :
+ * la valeur est lue par le cron du worker pour le récapitulatif du dimanche.
+ */
+export async function updateWeeklyStepGoal(uid: string, goal: number): Promise<number> {
+  const clean = Math.min(210_000, Math.max(7_000, Math.round(goal)));
+  await updateDoc(doc(db, 'users', uid), { weeklyStepGoal: clean });
+  return clean;
+}
+
+export async function updateDailyStepGoal(uid: string, goal: number): Promise<number> {
+  const clean = Math.min(60_000, Math.max(1_000, Math.round(goal)));
+  await updateDoc(doc(db, 'users', uid), { dailyStepGoal: clean });
+  return clean;
+}
+
 export async function updateUserFields(uid: string, fields: Partial<UserProfile>): Promise<void> {
   await updateDoc(doc(db, 'users', uid), fields as Record<string, unknown>);
 }
@@ -192,6 +212,8 @@ export async function syncAlertSettings(
     nearbyRadiusKm: number;
     eventReminders: boolean;
     eventReminderMinutes: number;
+    weeklyRecap?: boolean;
+    eveningReminder?: boolean;
   },
   position: { lat: number; lng: number } | null,
 ): Promise<void> {
@@ -203,6 +225,10 @@ export async function syncAlertSettings(
       nearbyRadiusKm: Math.min(100, Math.max(1, Math.round(alerts.nearbyRadiusKm))),
       eventReminders: !!alerts.eventReminders,
       eventReminderMinutes: Math.min(1440, Math.max(5, Math.round(alerts.eventReminderMinutes))),
+      // A9 / A12.6 — consommés par le cron du worker (récapitulatif du
+      // dimanche) et par le rappel de fin de journée.
+      weeklyRecap: alerts.weeklyRecap !== false,
+      eveningReminder: alerts.eveningReminder !== false,
       updatedAt: Date.now(),
     },
   };
@@ -385,6 +411,41 @@ function daysSince(date: string | null, today: string): number | null {
   return Math.round((to.getTime() - from.getTime()) / 86400000);
 }
 
+/** `true` pour un refus de règle Firestore (`permission-denied`). */
+function isPermissionDenied(error: unknown): boolean {
+  const code = (error as { code?: string })?.code || '';
+  const message = (error as Error)?.message || '';
+  return code === 'permission-denied' || /insufficient permissions|permission denied/i.test(message);
+}
+
+/**
+ * Message actionnable pour un échec de validation.
+ *
+ * L'utilisateur ne doit plus lire « Missing or insufficient permissions » : ce
+ * texte ne dit ni quoi faire ni si son compte est en cause.
+ */
+function friendlyStepError(error: unknown): Error {
+  if (isPermissionDenied(error)) {
+    return new Error(
+      'Validation refusée par le serveur. Vérifiez votre connexion et que votre e-mail est confirmé (Profil), puis réessayez dans un instant.',
+    );
+  }
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+/** Renouvelle le jeton d'authentification (best effort). */
+async function refreshAuthToken(): Promise<void> {
+  try {
+    const { auth } = await import('./firebase');
+    const user = auth.currentUser;
+    if (!user) return;
+    await user.reload();
+    await user.getIdToken(true);
+  } catch {
+    /* hors ligne : le second essai échouera proprement */
+  }
+}
+
 /** Crédite les ElyCoins du jour (une seule validation par jour). */
 export async function validateSteps(uid: string, steps: number): Promise<ValidationResult> {
   if (!Number.isInteger(steps) || steps < 0 || steps > 60000) {
@@ -393,7 +454,19 @@ export async function validateSteps(uid: string, steps: number): Promise<Validat
   const today = dateStr();
   const coins = coinsForSteps(steps);
 
-  const result = await runTransaction(db, async (tx) => {
+  /**
+   * `runTransaction` est idempotent côté règle : `lastValidatedDate` empêche un
+   * second crédit le même jour. On peut donc réessayer **une fois** après avoir
+   * rafraîchi le jeton d'authentification.
+   *
+   * C'est le correctif du « Missing or insufficient permissions » signalé à la
+   * validation : un jeton émis avant la vérification d'e-mail conserve la
+   * revendication `email_verified: false` jusqu'à son renouvellement (une
+   * heure). Les règles n'exigent plus cette revendication pour créditer des
+   * pas, mais un rafraîchissement corrige aussi les cas de jeton expiré, et
+   * l'erreur brute n'est plus affichée à l'utilisateur.
+   */
+  const attempt = () => runTransaction(db, async (tx) => {
     const userRef = doc(db, 'users', uid);
     const snap = await tx.get(userRef);
     if (!snap.exists()) throw new Error('Profil introuvable.');
@@ -411,7 +484,10 @@ export async function validateSteps(uid: string, steps: number): Promise<Validat
       totalSteps: increment(Math.floor(steps)),
       totalCalories: increment(calories),
       streak,
-      streakFreezes: availableFreezes - (freezeUsed ? 1 : 0),
+      // La règle Firestore borne les gels à 3 (0 inclus) : on borne ici pour
+      // qu'un profil qui en portait davantage ne fasse pas échouer la
+      // validation entière.
+      streakFreezes: Math.max(0, Math.min(3, availableFreezes - (freezeUsed ? 1 : 0))),
       lastValidatedDate: today,
       todaySteps: Math.floor(steps),
       todayDate: today,
@@ -431,6 +507,20 @@ export async function validateSteps(uid: string, steps: number): Promise<Validat
     } satisfies CoinTransaction);
     return { coins, streak, freezeUsed, prevTotalSteps: profile.totalSteps, newTotal: profile.totalSteps + Math.floor(steps), newStreak: streak };
   });
+
+  let result: Awaited<ReturnType<typeof attempt>>;
+  try {
+    result = await attempt();
+  } catch (error) {
+    if (!isPermissionDenied(error)) throw friendlyStepError(error);
+    // Jeton probablement obsolète : on le renouvelle puis on rejoue.
+    try {
+      await refreshAuthToken();
+      result = await attempt();
+    } catch (retryError) {
+      throw friendlyStepError(retryError);
+    }
+  }
   // Post-validation side-effects (badges, feed) — best effort, don't block
   try {
     const fresh = await getUserProfile(uid);
@@ -640,8 +730,29 @@ export async function appendActivityPoint(uid: string, id: string, point: Activi
 }
 
 /** Enregistre une sortie terminée : durée active (pauses exclues) + temps de pause. */
-export async function finishActivitySession(uid: string, id: string, data: Pick<ActivitySession, 'points' | 'distanceM' | 'durationSec' | 'calories' | 'steps'> & { pausedSec?: number }): Promise<void> {
-  await updateActivitySession(uid, id, {
+export async function finishActivitySession(
+  uid: string,
+  id: string,
+  data: Pick<ActivitySession, 'points' | 'distanceM' | 'durationSec' | 'calories' | 'steps'> & {
+    pausedSec?: number;
+    /** `false` pour un import : la sortie n'est pas annoncée dans le fil. */
+    announce?: boolean;
+  }
+): Promise<void> {
+  // A12.1 — records 1 km / 5 km calculés **ici**, une seule fois, puis stockés
+  // avec la sortie : les écrans n'ont pas à recharger tous les tracés GPS pour
+  // connaître une performance.
+  const splits = sessionSplits({
+    uid,
+    type: 'walk',
+    startedAt: 0,
+    durationSec: data.durationSec,
+    points: data.points,
+    distanceM: data.distanceM,
+    calories: data.calories,
+    status: 'completed',
+  } as ActivitySession);
+  const payload: Record<string, unknown> = {
     ...data,
     pausedSec: Math.max(0, Math.round(data.pausedSec || 0)),
     endedAt: Date.now(),
@@ -650,7 +761,12 @@ export async function finishActivitySession(uid: string, id: string, data: Pick<
     // audience (F01), et ce choix n'est jamais réinitialisé ensuite.
     visibility: 'private',
     syncedAt: Date.now(),
-  });
+  };
+  if (splits.best1kmSec != null) payload.best1kmSec = splits.best1kmSec;
+  if (splits.best5kmSec != null) payload.best5kmSec = splits.best5kmSec;
+  await updateActivitySession(uid, id, payload as Partial<ActivitySession>);
+  await refreshPersonalRecords(uid, { ...splits, distanceM: data.distanceM }).catch(() => undefined);
+  if (data.announce === false) return;
   try {
     const profile = await getUserProfile(uid);
     if (profile) {
@@ -658,6 +774,60 @@ export async function finishActivitySession(uid: string, id: string, data: Pick<
       await createFeedItem(profile, 'activity', `a terminé une sortie de ${(data.distanceM/1000).toFixed(2)} km en ${Math.floor(data.durationSec/60)} min ! 🏃`, { distanceM: data.distanceM, durationSec: data.durationSec, steps: data.steps }).catch(()=>undefined);
     }
   } catch {}
+}
+
+/**
+ * A12.2 — Enregistre une trace GPX importée comme une sortie ElyWalk.
+ *
+ * Deux écritures : les règles Firestore n'autorisent la création d'une sortie
+ * que dans l'état `active` (`communityEvents`-like invariant de F01), donc le
+ * document est créé puis clos. L'import ne publie rien dans le fil d'activité :
+ * importer un fichier vieux de trois ans ne doit pas apparaître comme une
+ * sortie du jour.
+ */
+export async function importGpxSession(
+  uid: string,
+  imported: ImportedActivity,
+  options: { title?: string } = {}
+): Promise<string> {
+  const id = await createActivitySession(uid, imported.type, undefined, { startedAt: imported.startedAt });
+  await updateActivitySession(uid, id, {
+    points: imported.points,
+    distanceM: imported.distanceM,
+    durationSec: imported.durationSec,
+    calories: imported.calories,
+    title: (options.title || imported.name).slice(0, 80),
+  });
+  await finishActivitySession(uid, id, {
+    points: imported.points,
+    distanceM: imported.distanceM,
+    durationSec: imported.durationSec,
+    calories: imported.calories,
+    steps: imported.steps,
+    announce: false,
+  });
+  return id;
+}
+
+/**
+ * Met à jour les records personnels du profil (A12.1).
+ *
+ * Fusion incrémentale : seules les meilleures valeurs sont conservées, ce qui
+ * évite de relire l'historique complet des tracés. La meilleure semaine est
+ * recalculée à partir des pas déjà validés (lecture légère, sans GPS).
+ */
+export async function refreshPersonalRecords(
+  uid: string,
+  update: { best1kmSec?: number | null; best5kmSec?: number | null; distanceM?: number },
+): Promise<PersonalRecords> {
+  const snap = await getDoc(doc(db, 'users', uid));
+  if (!snap.exists()) return mergeRecords(null, update);
+  const current = (snap.data() as UserProfile & { records?: Partial<PersonalRecords> }).records || null;
+  const days = await listMyDailySteps(uid, 370).catch(() => [] as DailySteps[]);
+  const bestWeek = bestWeekFromDays(days);
+  const merged = mergeRecords(current, { ...update, bestWeek });
+  await updateDoc(doc(db, 'users', uid), { records: merged } as unknown as Record<string, unknown>);
+  return merged;
 }
 
 export async function getActivitySession(id: string): Promise<ActivitySession | null> {
@@ -1264,14 +1434,28 @@ export async function sendFriendReaction(from: UserProfile, toUid: string, emoji
   await addDoc(collection(db, 'friendReactions'), { from: from.uid, fromName: from.displayName, to: toUid, emoji, message: message.slice(0, 160), createdAt: Date.now() });
 }
 
+export interface ReceivedReaction {
+  id: string;
+  /** Auteur de l'encouragement — pour pouvoir lui répondre (A8). */
+  from: string;
+  fromName: string;
+  emoji: string;
+  message: string;
+  createdAt?: number;
+}
+
 export function watchFriendReactions(
   uid: string,
-  cb: (items: { id: string; fromName: string; emoji: string; message: string }[]) => void,
+  cb: (items: ReceivedReaction[]) => void,
   onError?: (error: unknown) => void,
 ): Unsubscribe {
   return onSnapshot(
     query(collection(db, 'friendReactions'), where('to', '==', uid), limit(20)),
-    (s) => cb(s.docs.map((d) => ({ id: d.id, ...d.data() } as { id: string; fromName: string; emoji: string; message: string }))),
+    (s) => cb(
+      s.docs
+        .map((d) => ({ id: d.id, ...(d.data() as Omit<ReceivedReaction, 'id'>) }))
+        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)),
+    ),
     (error) => onError?.(error),
   );
 }
@@ -1626,6 +1810,37 @@ export function shareLinkDocId(sessionId: string, uid: string): string {
  * ouvrable sans compte. Le tracé reste couvert par l'audience déclarée de la
  * sortie, elle-même vérifiée côté serveur.
  */
+/**
+ * Identifiant de lien **adressable par la seule sortie**.
+ *
+ * Avant, le document s'appelait `<sessionId>_<uid>` : impossible de le lire à
+ * partir de l'URL publique `/s/<sessionId>?t=<token>`, puisque l'UID du
+ * propriétaire n'y figure pas. Le document porte maintenant l'identifiant de la
+ * sortie, ce qui rend la page publique possible **sans** exposer d'UID. Un
+ * second document au format historique reste écrit pour ne rien casser.
+ */
+export function publicShareLinkDocId(sessionId: string): string {
+  return sessionId;
+}
+
+/** Centre approximatif + rayon : aperçu de carte d'un lien public. */
+function previewArea(session: ActivitySession): { centerLat?: number; centerLng?: number; radiusM?: number } {
+  const points = (session.points || []).filter(
+    (p) => Number.isFinite(p.lat) && Number.isFinite(p.lng),
+  );
+  if (!points.length) return {};
+  const lat = points.reduce((sum, p) => sum + p.lat, 0) / points.length;
+  const lng = points.reduce((sum, p) => sum + p.lng, 0) / points.length;
+  const spread = points.reduce((max, p) => Math.max(max, Math.abs(p.lat - lat) + Math.abs(p.lng - lng)), 0);
+  // Précision volontairement grossière : le lien ne permet pas de reconstituer
+  // le tracé, seulement de situer la balade.
+  return {
+    centerLat: Math.round(lat * 1000) / 1000,
+    centerLng: Math.round(lng * 1000) / 1000,
+    radiusM: Math.max(300, Math.round(((spread * 111_000) + 0.5 * (session.distanceM || 0)) / 100) * 100),
+  };
+}
+
 export async function createActivityShareLink(
   uid: string,
   sessionId: string,
@@ -1637,25 +1852,33 @@ export async function createActivityShareLink(
   const session = sessionSnap.data() as ActivitySession;
   if (session.uid !== uid) throw new Error('Non autorisé.');
 
-  const linkRef = doc(db, 'shareLinks', shareLinkDocId(sessionId, uid));
-  const existing = await getDoc(linkRef).catch(() => null);
+  // Lien public (identifiant = sortie) : c'est lui que l'écran partage.
+  const publicRef = doc(db, 'shareLinks', publicShareLinkDocId(sessionId));
+  const legacyRef = doc(db, 'shareLinks', shareLinkDocId(sessionId, uid));
+  const existing = await getDoc(publicRef).catch(() => null);
+  const legacyExisting = await getDoc(legacyRef).catch(() => null);
+
   if (existing?.exists()) {
     const data = existing.data() as ShareLink;
     if (!data.expiresAt || data.expiresAt > Date.now()) {
-      return { ...data, id: linkRef.id, revoked: false };
+      return { ...data, id: publicRef.id, revoked: false };
     }
   }
 
   const link: Omit<ShareLink, 'id'> = {
     sessionId,
     ownerUid: uid,
-    token: randomToken(),
+    // Jeton réutilisé s'il existe (un lien déjà envoyé continue de fonctionner).
+    token: (existing?.data() as ShareLink | undefined)?.token
+      || (legacyExisting?.data() as ShareLink | undefined)?.token
+      || randomToken(),
     scope,
     revoked: false,
     createdAt: Date.now(),
     expiresAt: null,
   };
-  await setDoc(linkRef, {
+  const owner = await getUserProfile(uid).catch(() => null);
+  const summary: Record<string, unknown> = {
     sessionId,
     ownerUid: uid,
     token: link.token,
@@ -1663,7 +1886,7 @@ export async function createActivityShareLink(
     revoked: false,
     createdAt: link.createdAt,
     expiresAt: link.expiresAt,
-    // Résumé partageable — aucune coordonnée GPS ici.
+    // Résumé partageable — aucun tracé GPS, seulement un aperçu de zone.
     title: session.title || session.routeName || 'Sortie ElyWalk',
     caption: session.caption || '',
     type: session.type,
@@ -1671,10 +1894,15 @@ export async function createActivityShareLink(
     durationSec: session.durationSec,
     distanceM: session.distanceM,
     calories: session.calories,
-    ownerName: '',
-  });
+    steps: session.steps || 0,
+    ownerName: owner?.displayName || '',
+    ...previewArea(session),
+  };
+  await setDoc(publicRef, summary);
+  // Compatibilité : les liens émis avant la 2.2.4 pointent encore sur cet id.
+  await setDoc(legacyRef, summary).catch(() => undefined);
   await updateDoc(sessionRef, { visibility: 'link' });
-  return { id: linkRef.id, ...link };
+  return { id: publicRef.id, ...link };
 }
 
 /** Révoque un lien : il cesse immédiatement de fonctionner (règle serveur incluse). */
@@ -1682,15 +1910,63 @@ export async function revokeActivityShareLink(uid: string, sessionId: string): P
   const sessionSnap = await getDoc(doc(db, 'activitySessions', sessionId));
   if (!sessionSnap.exists()) return;
   if ((sessionSnap.data() as ActivitySession).uid !== uid) throw new Error('Non autorisé.');
-  await deleteDoc(doc(db, 'shareLinks', shareLinkDocId(sessionId, uid)));
+  // Suppression des deux représentations : le lien cesse immédiatement de
+  // fonctionner, y compris pour une page publique déjà ouverte.
+  await deleteDoc(doc(db, 'shareLinks', publicShareLinkDocId(sessionId))).catch(() => undefined);
+  await deleteDoc(doc(db, 'shareLinks', shareLinkDocId(sessionId, uid))).catch(() => undefined);
   await updateDoc(doc(db, 'activitySessions', sessionId), { visibility: 'private' });
 }
 
 /** Lien actif d'une sortie (ou `null`). */
 export async function listActivityShareLinks(uid: string, sessionId: string): Promise<ShareLink[]> {
-  const snap = await getDoc(doc(db, 'shareLinks', shareLinkDocId(sessionId, uid))).catch(() => null);
-  if (!snap?.exists()) return [];
-  return [{ ...(snap.data() as ShareLink), id: snap.id }];
+  const snap = await getDoc(doc(db, 'shareLinks', publicShareLinkDocId(sessionId))).catch(() => null);
+  if (snap?.exists()) return [{ ...(snap.data() as ShareLink), id: snap.id }];
+  const legacy = await getDoc(doc(db, 'shareLinks', shareLinkDocId(sessionId, uid))).catch(() => null);
+  if (!legacy?.exists()) return [];
+  return [{ ...(legacy.data() as ShareLink), id: legacy.id }];
+}
+
+/** Résumé public d'une sortie partagée (page `/s/:sessionId`, sans compte). */
+export interface SharedActivitySummary {
+  sessionId: string;
+  ownerUid: string;
+  ownerName: string;
+  token: string;
+  title: string;
+  caption?: string;
+  type: ActivitySession['type'];
+  startedAt: number;
+  durationSec: number;
+  distanceM: number;
+  calories?: number;
+  steps?: number;
+  centerLat?: number;
+  centerLng?: number;
+  radiusM?: number;
+  expiresAt?: number | null;
+  revoked?: boolean;
+}
+
+/**
+ * Lit un lien public **sans connaître le propriétaire** (A7).
+ *
+ * Aucune authentification n'est nécessaire : la règle Firestore autorise la
+ * lecture par identifiant de `shareLinks/{sessionId}`. Le jeton de l'URL est
+ * comparé ici : un identifiant de sortie seul ne suffit pas à ouvrir le
+ * résumé. Renvoie `null` pour un lien révoqué, expiré ou inconnu, afin que la
+ * page affiche « lien expiré » plutôt qu'une erreur de permission brute.
+ */
+export async function getSharedActivityBySession(
+  sessionId: string,
+  token?: string | null,
+): Promise<SharedActivitySummary | null> {
+  if (!sessionId) return null;
+  const snap = await getDoc(doc(db, 'shareLinks', publicShareLinkDocId(sessionId))).catch(() => null);
+  if (!snap?.exists()) return null;
+  const data = snap.data() as SharedActivitySummary & { expiresAt?: number | null };
+  if (data.expiresAt && data.expiresAt < Date.now()) return null;
+  if (token && data.token && token !== data.token) return null;
+  return { ...data, sessionId: data.sessionId || sessionId };
 }
 
 /**
@@ -1777,6 +2053,153 @@ export async function getReferralDashboard(uid: string): Promise<{ total: number
 
 // ============ QR / partage stylé ============
 // helper is in components, but db helper for code
+// ============ Réactions et commentaires du fil (A8) ============
+//
+// Constat : le fil d'activité affichait des lignes passives, sans aucune action
+// (0 occurrence de kudos / commentaire). Ces deux collections ajoutent
+// l'interaction minimale attendue dans un fil social :
+//   • `feedReactions/<itemId>_<uid>` — un 👏 par personne et par élément
+//     (identifiant déterministe : impossible de voter deux fois) ;
+//   • `feedComments/<auto>` — commentaires de 200 caractères maximum, modérés
+//     comme les messages (bouton « Signaler » déjà branché).
+
+export interface FeedReaction {
+  id?: string;
+  itemId: string;
+  uid: string;
+  name: string;
+  createdAt: number;
+}
+
+export interface FeedComment {
+  id?: string;
+  itemId: string;
+  uid: string;
+  name: string;
+  text: string;
+  createdAt: number;
+}
+
+/** Ajoute ou retire mon 👏 sur un élément du fil. Renvoie l'état final. */
+export async function toggleFeedKudos(itemId: string, me: UserProfile): Promise<boolean> {
+  if (!itemId) throw new Error('Élément inconnu.');
+  const ref = doc(db, 'feedReactions', `${itemId}_${me.uid}`);
+  const snap = await getDoc(ref).catch(() => null);
+  if (snap?.exists()) {
+    await deleteDoc(ref);
+    return false;
+  }
+  await setDoc(ref, {
+    itemId,
+    uid: me.uid,
+    name: me.displayName,
+    createdAt: Date.now(),
+  } satisfies FeedReaction);
+  return true;
+}
+
+/** Réactions des éléments affichés (groupées par identifiant d'élément). */
+export function watchFeedReactions(
+  itemIds: string[],
+  cb: (byItem: Record<string, FeedReaction[]>) => void,
+  onError?: (error: unknown) => void,
+): Unsubscribe {
+  const ids = [...new Set(itemIds.filter(Boolean))].slice(0, 10);
+  if (!ids.length) {
+    cb({});
+    return () => undefined;
+  }
+  return onSnapshot(
+    query(collection(db, 'feedReactions'), where('itemId', 'in', ids), limit(300)),
+    (snap) => {
+      const grouped: Record<string, FeedReaction[]> = {};
+      for (const d of snap.docs) {
+        const reaction = { id: d.id, ...(d.data() as FeedReaction) };
+        (grouped[reaction.itemId] = grouped[reaction.itemId] || []).push(reaction);
+      }
+      cb(grouped);
+    },
+    (error) => onError?.(error),
+  );
+}
+
+/** Commentaire court (≤ 200 caractères), borné côté client et côté règles. */
+export async function addFeedComment(
+  item: Pick<ActivityFeedItem, 'id' | 'uid' | 'displayName'>,
+  me: UserProfile,
+  text: string,
+): Promise<void> {
+  const clean = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+  if (!clean) throw new Error('Écrivez un commentaire.');
+  if (!item.id) throw new Error('Élément inconnu.');
+  await assertNotBlocked(me.uid, item.uid);
+  await addDoc(collection(db, 'feedComments'), {
+    itemId: item.id,
+    uid: me.uid,
+    name: me.displayName,
+    text: clean,
+    createdAt: Date.now(),
+  } satisfies FeedComment);
+}
+
+export async function deleteFeedComment(comment: FeedComment): Promise<void> {
+  if (!comment.id) return;
+  await deleteDoc(doc(db, 'feedComments', comment.id));
+}
+
+/** Commentaires des éléments affichés (groupés par élément). */
+export function watchFeedComments(
+  itemIds: string[],
+  cb: (byItem: Record<string, FeedComment[]>) => void,
+  onError?: (error: unknown) => void,
+): Unsubscribe {
+  const ids = [...new Set(itemIds.filter(Boolean))].slice(0, 10);
+  if (!ids.length) {
+    cb({});
+    return () => undefined;
+  }
+  return onSnapshot(
+    query(collection(db, 'feedComments'), where('itemId', 'in', ids), limit(300)),
+    (snap) => {
+      const grouped: Record<string, FeedComment[]> = {};
+      for (const d of snap.docs) {
+        const comment = { id: d.id, ...(d.data() as FeedComment) };
+        (grouped[comment.itemId] = grouped[comment.itemId] || []).push(comment);
+      }
+      for (const key of Object.keys(grouped)) grouped[key].sort((a, b) => a.createdAt - b.createdAt);
+      cb(grouped);
+    },
+    (error) => onError?.(error),
+  );
+}
+
+/**
+ * Accusé de lecture d'une conversation (A8) : seuls les messages **reçus** non
+ * lus passent à `read: true`, par lots de 400 (limite Firestore : 500
+ * écritures par batch).
+ */
+export async function markConversationRead(uid: string, friendUid: string): Promise<number> {
+  const snaps = await getDocs(
+    query(
+      collection(db, 'directMessages'),
+      where('from', '==', friendUid),
+      where('to', '==', uid),
+      orderBy('createdAt', 'desc'),
+      limit(200),
+    ),
+  );
+  const unread = snaps.docs.filter((d) => !(d.data() as DirectMessage).read);
+  if (!unread.length) return 0;
+  for (let index = 0; index < unread.length; index += 400) {
+    const batch = writeBatch(db);
+    for (const document of unread.slice(index, index + 400)) {
+      batch.update(document.ref, { read: true });
+    }
+    await batch.commit();
+  }
+  return unread.length;
+}
+
 export function getFriendCodeShareUrl(code: string): string {
   // Domaine public : dans la WebView Capacitor, `location.origin` vaut
   // `https://localhost`, lien inutilisable une fois partagé (F11).

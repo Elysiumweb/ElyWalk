@@ -57,12 +57,26 @@ describe('préférences d’alerte', () => {
       nearbyRadiusKm: 10,
       eventReminders: true,
       eventReminderMinutes: 60,
+      // A9 / A12.6 — récapitulatif du dimanche et rappel de marche du soir,
+      // actifs par défaut comme les autres alertes.
+      weeklyRecap: true,
+      eveningReminder: true,
     });
     const custom = normalizeAlertPreferences({ messages: false, nearbyRadiusKm: 3, eventReminderMinutes: 15 });
     expect(custom.messages).toBe(false);
     expect(custom.nearbyRadiusKm).toBe(3);
     expect(custom.eventReminderMinutes).toBe(15);
     expect(custom.friendRequests).toBe(true);
+    expect(custom.weeklyRecap).toBe(true);
+    expect(custom.eveningReminder).toBe(true);
+  });
+
+  it('respecte un refus explicite des alertes hebdomadaires et du soir', () => {
+    const optOut = normalizeAlertPreferences({ weeklyRecap: false, eveningReminder: false });
+    expect(optOut.weeklyRecap).toBe(false);
+    expect(optOut.eveningReminder).toBe(false);
+    // Une valeur non booléenne retombe sur l'activation par défaut.
+    expect(normalizeAlertPreferences({ weeklyRecap: 'non' as unknown as boolean }).weeklyRecap).toBe(true);
   });
 });
 

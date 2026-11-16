@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import { App as CapApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -33,6 +33,9 @@ import EventsPage from './pages/EventsPage';
 import RoutesPage from './pages/RoutesPage';
 import SettingsPage from './pages/SettingsPage';
 import ProgressionPage from './pages/ProgressionPage';
+import SharedActivityPage from './pages/SharedActivityPage';
+import SearchPage from './pages/SearchPage';
+import NotFoundPage from './pages/NotFoundPage';
 import ProductStatus from './components/ProductStatus';
 import SyncStatus from './components/SyncStatus';
 import { setupNotifications, syncPushRegistration, listenNotificationNavigation } from './lib/notifications';
@@ -181,6 +184,19 @@ function Shell() {
   }
 
   if (location.pathname.startsWith('/legal/')) return <Routes><Route path="/legal/:doc" element={<LegalPage />} /></Routes>;
+  /*
+    A7 — page publique d'une sortie partagée : rendue **avant** la garde
+    d'authentification, sans barre d'onglets ni bannière. Le lien reçu par
+    WhatsApp ou SMS doit s'ouvrir pour quelqu'un qui n'a pas de compte.
+  */
+  if (location.pathname.startsWith('/s/')) {
+    return (
+      <Routes>
+        <Route path="/s/:sessionId" element={<SharedActivityPage />} />
+        <Route path="*" element={<SharedActivityPage />} />
+      </Routes>
+    );
+  }
   if (!user) return <AuthPage />;
 
   return (
@@ -193,6 +209,7 @@ function Shell() {
         <Route path="/wallet" element={<WalletPage />} />
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/progression" element={<ProgressionPage />} />
+        <Route path="/search" element={<SearchPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/partners" element={<PartnersPage />} />
         <Route path="/admin" element={<AdminPage />} />
@@ -206,7 +223,8 @@ function Shell() {
         <Route path="/whats-new" element={<WhatsNewPage />} />
         <Route path="/diagnostics" element={<DiagnosticsPage />} />
         <Route path="/legal/:doc" element={<LegalPage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
+        {/* A12.4 — un écran 404 explicite remplace la redirection muette. */}
+        <Route path="*" element={<NotFoundPage />} />
       </Routes>
       <ProductStatus />
       <SyncStatus />

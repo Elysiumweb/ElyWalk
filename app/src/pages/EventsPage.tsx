@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/Toast';
 import { useI18n } from '../context/LocaleContext';
@@ -9,6 +9,10 @@ import AddressAutocomplete from '../components/AddressAutocomplete';
 import DirectionsPanel from '../components/DirectionsPanel';
 import ConfirmSheet from '../components/ConfirmSheet';
 import { getCurrentPosition } from '../lib/geo';
+import QRCode, { shareQrCard } from '../components/QRCode';
+import EventPhotos from '../components/EventPhotos';
+import { buildEventIcs, downloadIcs, icsFilename } from '../lib/ics';
+import { shareUrlForPath } from '../lib/share';
 import { createCommunityEvent, watchCommunityEvents, joinCommunityEvent, leaveCommunityEvent, updateCommunityEvent, getProfiles } from '../lib/db';
 import { listEstablishments, type Establishment } from '../lib/establishments';
 import { eventDate, getEventReminder, rescheduleEventReminders, setEventReminder } from '../lib/eventReminders';
@@ -74,7 +78,11 @@ export default function EventsPage() {
    * au lieu de laisser l'utilisateur chercher la sortie dans la liste.
    */
   const [highlightId, setHighlightId] = useState<string | null>(null);
-  const targetEventId = (location.state as { eventId?: string } | null)?.eventId;
+  const [searchParams] = useSearchParams();
+  // Lien d'invitation (`/events?e=<id>`) : la rencontre partagée est mise en
+  // évidence, exactement comme depuis une notification.
+  const targetEventId =
+    (location.state as { eventId?: string } | null)?.eventId || searchParams.get('e') || undefined;
   useEffect(() => {
     if (!targetEventId) return;
     setHighlightId(targetEventId);
@@ -163,7 +171,59 @@ export default function EventsPage() {
   const openDirections = (ev: CommunityEvent) => {
     setDirectionsEvent(ev);
     setDirectionsOrigin(null);
+    if (ev.lat == null && !ev.location && !ev.establishmentName) {
+      // Aucune adresse : l'utilisateur désigne l'arrivée dans la feuille
+      // (recherche de destination) au lieu d'attendre un géocodage impossible.
+      toast('Cette rencontre n’a pas d’adresse : indiquez la destination dans la feuille d’itinéraire.', 'info');
+    }
     void locateForDirections();
+  };
+
+  /** Rencontre dont la feuille d'invitation est ouverte (A10). */
+  const [inviteEvent, setInviteEvent] = useState<CommunityEvent | null>(null);
+  /**
+   * Export calendrier : le fichier `.ics` est généré localement, sans serveur.
+   * Il contient un rappel 1 h avant le départ, comme le rappel de l'app.
+   */
+  const addToCalendar = async (ev: CommunityEvent) => {
+    try {
+      const content = buildEventIcs(ev, { url: shareUrlForPath(`/events?e=${ev.id}`) });
+      const result = await downloadIcs(icsFilename(ev), content);
+      toast(result === 'shared' ? 'Fichier calendrier prêt à ouvrir.' : 'Fichier .ics enregistré dans vos téléchargements.', 'success');
+    } catch (e) {
+      toast((e as Error).message || 'Export calendrier impossible.', 'error');
+    }
+  };
+  /** Partage du lien d'invitation (WhatsApp, SMS, e-mail…). */
+  const shareInvite = async (ev: CommunityEvent) => {
+    const url = shareUrlForPath(`/events?e=${ev.id}`);
+    const text = `Rejoins-moi à « ${ev.title} » sur ElyWalk`;
+    try {
+      if (navigator.share) await navigator.share({ title: 'ElyWalk · Rencontre', text, url });
+      else {
+        await navigator.clipboard.writeText(`${text} ${url}`);
+        toast('Lien d’invitation copié.', 'success');
+      }
+    } catch (e) {
+      if ((e as Error).name !== 'AbortError') toast((e as Error).message || 'Partage impossible.', 'error');
+    }
+  };
+  const shareInviteQr = async (ev: CommunityEvent) => {
+    try {
+      const result = await shareQrCard({
+        value: shareUrlForPath(`/events?e=${ev.id}`),
+        heading: 'Rejoins-nous !',
+        subtitle: ev.title,
+        caption: ev.date + (ev.time ? ` · ${ev.time}` : ''),
+        captionLabel: 'Scanne pour ouvrir la rencontre dans ElyWalk',
+        filename: `elywalk-rencontre-${ev.id}.jpg`,
+        shareTitle: 'Invitation ElyWalk',
+        shareText: `Rejoins-moi à « ${ev.title} » sur ElyWalk`,
+      });
+      toast(result === 'shared' ? 'QR partagé !' : 'Image QR enregistrée.', 'success');
+    } catch (e) {
+      toast((e as Error).message, 'error');
+    }
   };
 
   /**
@@ -193,13 +253,27 @@ export default function EventsPage() {
       })
       .map(({ ev }) => ev);
   })();
-  /** Localisation demandée depuis la feuille d'itinéraire (Silent en cas de refus). */
+  /**
+   * Localisation demandée depuis la feuille d'itinéraire.
+   *
+   * Correctif « l'itinéraire d'une rencontre ne fonctionne pas » : la position
+   * est d'abord demandée **sans interrompre** l'utilisateur (`silent`), puis la
+   * permission n'est sollicitée qu'une fois. Un refus n'affiche plus un toast
+   * d'erreur bloquant : la feuille reste utilisable avec une adresse de départ
+   * saisie à la main, et l'itinéraire se calcule quand même.
+   */
   const locateForDirections = async () => {
     try {
+      const quick = await getCurrentPosition({ silent: true });
+      if (quick) {
+        setDirectionsOrigin({ lat: quick.lat, lng: quick.lng });
+        return;
+      }
       const pos = await getCurrentPosition({ silent: false });
       if (pos) setDirectionsOrigin({ lat: pos.lat, lng: pos.lng });
-    } catch (e) {
-      toast((e as Error).message, 'error');
+      else toast('Position indisponible : saisissez votre adresse de départ dans la feuille d’itinéraire.', 'info');
+    } catch {
+      toast('Position indisponible : saisissez votre adresse de départ dans la feuille d’itinéraire.', 'info');
     }
   };
 
@@ -241,7 +315,12 @@ export default function EventsPage() {
         {ev.status === 'cancelled' && <span className="badge badge-danger">Annulé</span>}{full && ev.status !== 'cancelled' && <span className="badge">Complet · {(ev.waitlist || []).length} en attente</span>}
         <p className="muted-text">{ev.description}</p>{ev.lastChange && <p className="event-change">{ev.lastChange.type === 'cancelled' ? '⛔' : '🔔'} {ev.lastChange.message}</p>}
         <div className="route-actions">{(joined || waiting) && ev.status !== 'cancelled' && <button className="btn btn-danger btn-sm" onClick={() => void toggleJoin(ev)}>Se désinscrire{waiting ? ' de l’attente' : ''}</button>}{!joined && !waiting && ev.status !== 'cancelled' && !mine && <button className="btn btn-gold btn-sm" onClick={() => void toggleJoin(ev)}>{full ? 'Rejoindre la liste d’attente' : 'Rejoindre'}</button>}
-        {mine && ev.status !== 'cancelled' && <span className="badge badge-muted">Vous organisez cette sortie</span>}{(joined || mine) && ev.status !== 'cancelled' && <button className="btn btn-outline btn-sm" onClick={() => void openReminder(ev)}>🔔 Rappel</button>}<button className="btn btn-outline btn-sm" onClick={() => openDirections(ev)} data-testid="event-directions">Itinéraire</button>{mine && ev.status !== 'cancelled' && <><button className="btn btn-ghost btn-sm" onClick={() => openEdit(ev)}>Modifier</button><button className="btn btn-danger btn-sm" onClick={() => setPendingCancel(ev)}>Annuler</button></>}</div>
+        {mine && ev.status !== 'cancelled' && <span className="badge badge-muted">Vous organisez cette sortie</span>}{(joined || mine) && ev.status !== 'cancelled' && <button className="btn btn-outline btn-sm" onClick={() => void openReminder(ev)}>🔔 Rappel</button>}<button className="btn btn-outline btn-sm" onClick={() => openDirections(ev)} data-testid="event-directions">Itinéraire</button>
+        <button className="btn btn-outline btn-sm" onClick={() => setInviteEvent(ev)} data-testid="event-invite">🔗 Inviter</button>
+        <button className="btn btn-outline btn-sm" onClick={() => void addToCalendar(ev)} data-testid="event-ics">📅 Agenda</button>{mine && ev.status !== 'cancelled' && <><button className="btn btn-ghost btn-sm" onClick={() => openEdit(ev)}>Modifier</button><button className="btn btn-danger btn-sm" onClick={() => setPendingCancel(ev)}>Annuler</button></>}</div>
+        {(joined || mine) && ev.status !== 'cancelled' && ev.id && (
+          <EventPhotos eventId={ev.id} canEdit={joined || mine} />
+        )}
         <small className="muted-xs" style={{ display: 'block', marginTop: 'var(--space-1)' }}>Créé par {ev.creatorName}</small>
       </div>;
     })}
@@ -294,6 +373,28 @@ export default function EventsPage() {
       onClose={() => setPendingCancel(null)}
       testId="event-cancel-sheet"
     />
+    <Sheet open={!!inviteEvent} onClose={() => setInviteEvent(null)} title="Inviter à cette rencontre">
+      {inviteEvent && (
+        <div style={{ textAlign: 'center' }}>
+          <p className="card-help" style={{ textAlign: 'left' }}>
+            Partagez ce QR code à proximité, ou envoyez le lien : la rencontre s’ouvre
+            directement dans ElyWalk, pour les inscrits comme pour les curieux.
+          </p>
+          <QRCode value={shareUrlForPath(`/events?e=${inviteEvent.id}`)} size={200} title={inviteEvent.title} />
+          <div className="route-actions" style={{ justifyContent: 'center', marginTop: 12 }}>
+            <button className="btn btn-gold btn-sm" onClick={() => void shareInvite(inviteEvent)} data-testid="event-share-link">
+              Partager le lien
+            </button>
+            <button className="btn btn-outline btn-sm" onClick={() => void shareInviteQr(inviteEvent)}>
+              Partager le QR
+            </button>
+            <button className="btn btn-outline btn-sm" onClick={() => void addToCalendar(inviteEvent)}>
+              Ajouter à mon agenda
+            </button>
+          </div>
+        </div>
+      )}
+    </Sheet>
     <DirectionsPanel
       open={!!directionsEvent}
       onClose={() => setDirectionsEvent(null)}
@@ -301,6 +402,8 @@ export default function EventsPage() {
         directionsEvent
           ? {
               name: directionsEvent.title,
+              // Adresse réelle si connue ; sinon la feuille propose de choisir
+              // l'arrivée (lieu libre, rencontre sans coordonnées).
               address: directionsEvent.location || directionsEvent.establishmentName || null,
               lat: directionsEvent.lat ?? null,
               lng: directionsEvent.lng ?? null,
@@ -309,6 +412,7 @@ export default function EventsPage() {
       }
       origin={directionsOrigin}
       onLocate={locateForDirections}
+      onOriginResolved={setDirectionsOrigin}
     />
     <Sheet open={!!reminderEvent} onClose={() => setReminderEvent(null)} title="Rappel avant le départ"><label className="check-row"><input type="checkbox" checked={reminderEnabled} onChange={e => setReminderEnabled(e.target.checked)} /> Recevoir une notification sur cet appareil</label><div className="field"><label>Délai avant le départ</label><select className="input" value={reminderMinutes} onChange={e => setReminderMinutes(Number(e.target.value))}><option value={15}>15 minutes</option><option value={30}>30 minutes</option><option value={60}>1 heure</option><option value={120}>2 heures</option><option value={1440}>La veille</option></select></div><button className="btn btn-gold" onClick={saveReminder}>Enregistrer le rappel</button></Sheet>
   </div>;

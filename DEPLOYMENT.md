@@ -339,7 +339,10 @@ donc un **Cloudflare Worker** gratuit (voir `worker/README.md`) qui fournit :
   mais inutilisé depuis le passage à Meta Audience Network (pas d'équivalent SSV) ;
 - l'envoi de **push FCM** (`/fcm/send`) ;
 - la consommation des jetons FCM via **cron** (`/cron/process-notifications`) ;
-- la file de retraits (`/cron/process-payouts`).
+- la file de retraits (`/cron/process-payouts`) ;
+- le récapitulatif hebdomadaire du dimanche (`/cron/weekly-recap`, déclenché par
+  `*/10 * * * 0` — une tranche de 8 comptes par passage, reprise via
+  `cronState/weeklyRecap`).
 
 ```bash
 cd worker

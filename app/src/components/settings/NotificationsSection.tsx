@@ -239,6 +239,36 @@ export default function NotificationsSection() {
             <option value={1440}>La veille</option>
           </select>
         </div>
+        {/*
+          A9 + A12.6 — deux alertes qui touchent à la motivation et à la série.
+          Le récapitulatif du dimanche est envoyé par le worker (préférence
+          synchronisée sur le profil) ; le rappel du soir est programmé
+          localement sur l'appareil.
+        */}
+        <label className="check-row">
+          <input
+            type="checkbox"
+            checked={alertPrefs.weeklyRecap}
+            onChange={(e) => void updateAlertPrefs({ weeklyRecap: e.target.checked })}
+            data-testid="alert-weekly-recap"
+          />
+          Récapitulatif de la semaine (dimanche soir)
+        </label>
+        <small className="field-help">
+          « 42 300 / 50 000 pas — il te reste 7 700 pas, soit 1 h 10 de marche. »
+        </small>
+        <label className="check-row">
+          <input
+            type="checkbox"
+            checked={alertPrefs.eveningReminder}
+            onChange={(e) => void updateAlertPrefs({ eveningReminder: e.target.checked })}
+            data-testid="alert-evening-reminder"
+          />
+          Rappel à 21 h 30 si mes pas ne sont pas validés
+        </label>
+        <small className="field-help">
+          Un rappel local avant minuit pour ne pas perdre votre série, sans attendre le lendemain.
+        </small>
       </div>
 
       <div className="card" data-testid="settings-push">

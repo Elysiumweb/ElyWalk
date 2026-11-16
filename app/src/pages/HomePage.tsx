@@ -7,12 +7,22 @@ import ProgressRing from '../components/ProgressRing';
 import Sheet from '../components/Sheet';
 import { pedometer } from '../lib/pedometer';
 import { adGate, openAdPrivacyOptions, showInterstitial, showRewardedAd } from '../lib/ads';
-import { validateSteps, creditAdReward, syncTodaySteps } from '../lib/db';
+import { validateSteps, creditAdReward, syncTodaySteps, listMyDailySteps } from '../lib/db';
 import { coinsForSteps, caloriesForSteps, fmtCoins, fmtNumber, dateStr, nextStepTier, formatDistance } from '../lib/coins';
 import { shareDailyStats } from '../lib/share';
 import { DAILY_STEP_GOAL, STEP_TIERS, AD_REWARD_COINS } from '../lib/constants';
 import LevelBadge from '../components/LevelBadge';
 import { Capacitor } from '@capacitor/core';
+import { hapticSuccess, hapticTap } from '../lib/haptics';
+import { syncEveningReminder } from '../lib/eveningReminder';
+import { useAlerts } from '../context/AlertsContext';
+import {
+  DEFAULT_WEEKLY_STEP_GOAL,
+  formatWalkMinutes,
+  weeklyGoalLabel,
+  weeklyProgress,
+} from '../lib/weeklyGoal';
+import type { DailySteps } from '../lib/types';
 
 type PermState = 'granted' | 'denied' | 'prompt' | 'unavailable';
 
@@ -27,6 +37,7 @@ function timestampMs(value: unknown): number | null {
 export default function HomePage() {
   const { profile } = useAuth();
   const { toast } = useToast();
+  const { preferences: alertPrefs } = useAlerts();
   const navigate = useNavigate();
   const [steps, setSteps] = useState(0);
   const [perm, setPerm] = useState<PermState>('unavailable');
@@ -38,6 +49,8 @@ export default function HomePage() {
   const [clock, setClock] = useState(Date.now());
   const previousSteps = useRef<number | null>(null);
   const celebratedToday = useRef(false);
+  const [weekDays, setWeekDays] = useState<DailySteps[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
 
   const isNative = Capacitor.isNativePlatform();
   const today = dateStr();
@@ -50,7 +63,8 @@ export default function HomePage() {
 
   const celebrate = (message: string) => {
     setCelebration(message);
-    if ('vibrate' in navigator) navigator.vibrate?.([40, 50, 80]);
+    // A12.3 — retour haptique natif (moteur Android) et repli web.
+    void hapticSuccess();
     window.setTimeout(() => setCelebration(null), 4200);
   };
 
@@ -128,6 +142,7 @@ export default function HomePage() {
       // Annonce interstitielle avant le crédit (placement « Interstitial #2 »).
       await showInterstitial();
       const result = await validateSteps(profile.uid, stepsToValidate);
+      void hapticTap();
       toast(`+${fmtCoins(result.coins)} ElyCoins · Série de ${result.streak} jour${result.streak > 1 ? 's' : ''} !${result.freezeUsed ? ' Gel utilisé pour rattraper la journée manquée.' : ''}`, 'success');
       if (result.streak === 7 || result.streak === 30) celebrate(`Palier de série atteint : ${result.streak} jours !`);
     } catch (e) {
@@ -174,6 +189,39 @@ export default function HomePage() {
       setBusyAd(false);
     }
   };
+
+  /**
+   * A9 — objectif de la semaine. Les 14 derniers jours sont chargés pour que le
+   * calcul reste juste même à cheval sur deux semaines ; seuls les jours de la
+   * semaine en cours comptent dans le total.
+   */
+  useEffect(() => {
+    if (!profile) return;
+    let cancelled = false;
+    void listMyDailySteps(profile.uid, 14)
+      .then((days) => { if (!cancelled) setWeekDays(days); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [profile?.uid, profile?.lastValidatedDate, profile?.totalSteps]);
+
+  const weekly = weeklyProgress(weekDays, profile?.weeklyStepGoal || DEFAULT_WEEKLY_STEP_GOAL, {
+    strideCm: profile?.strideLengthCm,
+  });
+
+  /**
+   * A12.6 — rappel de fin de journée. Reprogrammé à chaque changement notable
+   * (pas, validation, préférence) : il est annulé dès que la journée est
+   * validée ou que l'utilisateur le désactive dans les Réglages.
+   */
+  useEffect(() => {
+    if (!profile) return;
+    void syncEveningReminder({
+      alreadyValidated,
+      steps,
+      goal: dailyGoal,
+      enabled: alertPrefs.eveningReminder,
+    }).catch(() => undefined);
+  }, [profile?.uid, alreadyValidated, Math.floor(steps / 500), dailyGoal, alertPrefs.eveningReminder]);
 
   const potentialCoins = coinsForSteps(steps);
   const calories = caloriesForSteps(steps, profile?.health, profile?.strideLengthCm || 75);
@@ -231,6 +279,72 @@ export default function HomePage() {
             <div className="stat-label">distance aujourd’hui</div>
           </div>
         </div>
+      </div>
+
+      {/*
+        A11 — point d'entrée unique de la recherche : marcheurs, parcours,
+        rencontres et partenaires en une seule saisie.
+      */}
+      <form
+        className="home-search"
+        role="search"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const clean = searchTerm.trim();
+          navigate(clean ? `/search?q=${encodeURIComponent(clean)}` : '/search');
+        }}
+        data-testid="home-search-form"
+      >
+        <input
+          className="input"
+          type="search"
+          value={searchTerm}
+          onChange={(event) => setSearchTerm(event.target.value)}
+          placeholder="Rechercher un marcheur, un parcours, un lieu…"
+          aria-label="Recherche globale"
+          maxLength={80}
+          data-testid="home-search-input"
+        />
+        <button className="btn btn-outline btn-sm" type="submit">Rechercher</button>
+      </form>
+
+      {/*
+        A9 — anneau d'objectif hebdomadaire, distinct de l'objectif quotidien :
+        la semaine est l'échelle à laquelle la motivation tient.
+      */}
+      <div className="card weekly-goal-card" data-testid="weekly-goal-card">
+        <div className="row-between">
+          <div className="card-title">Objectif de la semaine</div>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => navigate('/settings')} data-testid="weekly-goal-edit">
+            Modifier
+          </button>
+        </div>
+        <div className="weekly-goal-row">
+          <ProgressRing progress={weekly.ratio} size={104} stroke={9}>
+            <div className="weekly-goal-percent" data-testid="weekly-goal-percent">
+              {weekly.percent}%
+            </div>
+          </ProgressRing>
+          <div className="weekly-goal-text">
+            <strong data-testid="weekly-goal-label">{weeklyGoalLabel(weekly)}</strong>
+            {weekly.achieved ? (
+              <span>Objectif atteint 🎉 Profitez du week-end.</span>
+            ) : (
+              <span>
+                Encore {fmtNumber(weekly.remaining)} pas, soit environ{' '}
+                {formatWalkMinutes(weekly.minutesRemaining)} de marche.{' '}
+                {weekly.daysLeftIncludingToday <= 2
+                  ? `Il reste ${weekly.daysLeftIncludingToday} jour${weekly.daysLeftIncludingToday > 1 ? 's' : ''}.`
+                  : `≈ ${fmtNumber(weekly.perDayRemaining)} pas par jour.`}
+              </span>
+            )}
+          </div>
+        </div>
+        <small className="muted-xs">
+          Semaine du {new Date(`${weekly.weekStart}T00:00:00`).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}
+          {' '}au {new Date(`${weekly.weekEnd}T00:00:00`).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}
+          {' '}· récapitulatif le dimanche soir (désactivable dans Réglages → Notifications).
+        </small>
       </div>
 
       {!isNative && (

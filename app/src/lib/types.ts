@@ -33,6 +33,11 @@ export interface UserProfile {
   role: Role;
   createdAt: number;
   dailyStepGoal?: number;
+  /**
+   * A9 — objectif hebdomadaire (pas), 7 000 à 210 000, affiché sur l'accueil et
+   * utilisé par le récapitulatif du dimanche (worker).
+   */
+  weeklyStepGoal?: number;
   strideLengthCm?: number;
   bio?: string;
   onboardingDone?: boolean;
@@ -44,6 +49,18 @@ export interface UserProfile {
   streakFreezes?: number;
   health?: HealthProfile;
   unitSystem?: UnitSystem;
+  /**
+   * A12.1 — records personnels (meilleur 1 km / 5 km, plus longue sortie,
+   * meilleure semaine). Tenus à jour à la fin d'une sortie.
+   */
+  records?: {
+    best1kmSec: number | null;
+    best5kmSec: number | null;
+    longestDistanceM: number;
+    bestWeekSteps: number;
+    bestWeekStart: string | null;
+    updatedAt: number;
+  };
   /** Préférences de vie privée pour le fil d'activité */
   activityPrivacy?: ActivityPrivacySettings;
   /**

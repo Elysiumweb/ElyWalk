@@ -121,6 +121,23 @@ export async function listRoutesPage(
 }
 
 /**
+ * Parcours indexés par la **recherche globale** (A11).
+ *
+ * Deux requêtes bornées seulement (les siens + les parcours publics), sans
+ * pagination complète : la recherche doit répondre en moins d'une seconde et
+ * n'a pas besoin de mille parcours pour proposer six résultats pertinents.
+ */
+export async function listRoutesForSearch(uid: string, perSource = 40): Promise<SavedRoute[]> {
+  const [own, shared] = await Promise.all([
+    getDocs(query(collection(db, 'savedRoutes'), where('uid', '==', uid), orderBy('updatedAt', 'desc'), limit(perSource))),
+    getDocs(query(collection(db, 'savedRoutes'), where('visibility', '==', 'public'), orderBy('updatedAt', 'desc'), limit(perSource))),
+  ]);
+  const unique = new Map<string, SavedRoute>();
+  for (const d of [...own.docs, ...shared.docs]) unique.set(d.id, { id: d.id, ...(d.data() as SavedRoute) });
+  return [...unique.values()];
+}
+
+/**
  * Tous les parcours accessibles (bibliothèque complète), page après page.
  * Utilisé par la recherche globale de l'écran Parcours.
  */

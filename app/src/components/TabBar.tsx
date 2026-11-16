@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { watchIncomingRequests } from '../lib/db';
+import { watchIncomingRequests, watchRecentMessages } from '../lib/db';
+import { totalUnread } from '../lib/messaging';
+import type { DirectMessage } from '../lib/types';
 import { useI18n, type TranslationKey } from '../context/LocaleContext';
 
 const tabs: Array<{to:string;label:TranslationKey;short:TranslationKey;testId:string;icon:()=>JSX.Element}> = [
@@ -14,8 +16,19 @@ const tabs: Array<{to:string;label:TranslationKey;short:TranslationKey;testId:st
 ];
 
 export default function TabBar() {
-  const { profile } = useAuth(); const [pending,setPending]=useState(0); const { t: translate }=useI18n();
+  const { profile } = useAuth(); const [pending,setPending]=useState(0); const [unread,setUnread]=useState(0); const { t: translate }=useI18n();
   useEffect(()=>profile?watchIncomingRequests(profile.uid,r=>setPending(r.length)):undefined,[profile?.uid]);
+  /**
+   * A8 — le badge de l'onglet Amis compte les **messages non lus** et les
+   * demandes d'ami, au lieu du nombre de messages chargés.
+   */
+  useEffect(() => {
+    if (!profile) { setUnread(0); return; }
+    const unsub = watchRecentMessages(profile.uid, (messages: DirectMessage[]) => {
+      setUnread(totalUnread(messages, profile.uid));
+    });
+    return unsub;
+  }, [profile?.uid]);
   return (
     <nav className="tabbar" data-testid="bottom-tab-bar">
       {tabs.map((t) => (
@@ -27,7 +40,12 @@ export default function TabBar() {
           className={({ isActive }) => `tab ${isActive ? 'tab-active' : ''}`}
           aria-label={translate(t.label)}
         >
-          <span className="tab-icon" aria-hidden="true"><t.icon />{t.to==='/friends'&&pending>0&&<b className="tab-badge">{pending}</b>}</span>
+          <span className="tab-icon" aria-hidden="true">
+            <t.icon />
+            {t.to === '/friends' && pending + unread > 0 && (
+              <b className="tab-badge" data-testid="friends-tab-badge">{pending + unread}</b>
+            )}
+          </span>
           {/* Libellé court visible sur téléphone ; le libellé complet reste
               porté par `aria-label` pour les lecteurs d'écran. */}
           <span className="tab-label">{translate(t.short)}</span>

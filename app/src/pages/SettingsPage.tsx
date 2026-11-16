@@ -10,6 +10,7 @@ import NotificationBell from '../components/NotificationBell';
 import AppearanceSection from '../components/settings/AppearanceSection';
 import LanguageSection from '../components/settings/LanguageSection';
 import NotificationsSection from '../components/settings/NotificationsSection';
+import GoalsSection from '../components/settings/GoalsSection';
 import PaymentSection from '../components/settings/PaymentSection';
 import ActivityPrivacySection from '../components/settings/ActivityPrivacySection';
 import {
@@ -189,6 +190,8 @@ export default function SettingsPage() {
       ) : null}
 
       <NotificationsSection />
+
+      <GoalsSection />
 
       <AppearanceSection />
 

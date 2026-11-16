@@ -38,6 +38,17 @@ export interface AlertPreferences {
   eventReminders: boolean;
   /** Délai du rappel avant le départ, en minutes. */
   eventReminderMinutes: number;
+  /**
+   * A9 — récapitulatif hebdomadaire du dimanche soir (objectif de la semaine,
+   * pas restants et temps de marche estimé). Désactivable ici, comme les
+   * autres alertes.
+   */
+  weeklyRecap: boolean;
+  /**
+   * A12.6 — rappel de fin de journée : si les pas ne sont pas validés et que
+   * la série est en jeu, une notification locale part avant minuit.
+   */
+  eveningReminder: boolean;
 }
 
 export const DEFAULT_ALERT_PREFERENCES: AlertPreferences = {
@@ -47,6 +58,8 @@ export const DEFAULT_ALERT_PREFERENCES: AlertPreferences = {
   nearbyRadiusKm: 10,
   eventReminders: true,
   eventReminderMinutes: 60,
+  weeklyRecap: true,
+  eveningReminder: true,
 };
 
 const PREFS_KEY = 'alerts.preferences.v1';
@@ -73,6 +86,8 @@ export function normalizeAlertPreferences(raw: unknown): AlertPreferences {
     nearbyRadiusKm: sanitizeRadius(value.nearbyRadiusKm),
     eventReminders: value.eventReminders !== false,
     eventReminderMinutes: sanitizeMinutes(value.eventReminderMinutes),
+    weeklyRecap: value.weeklyRecap !== false,
+    eveningReminder: value.eveningReminder !== false,
   };
 }
 

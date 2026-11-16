@@ -146,12 +146,16 @@ export async function closeChallengeCatalogEntry(uid: string, challengeId: strin
  */
 export function describeCatalogState(
   definitions: ChallengeDefinition[],
-  catalog: Map<string, ChallengeCatalogEntry>
+  catalog: Map<string, ChallengeCatalogEntry>,
+  /** Jour de référence (AAAA-MM-JJ) ; injectable pour des tests déterministes. */
+  today = new Date().toISOString().slice(0, 10)
 ): Array<{ challenge: ChallengeDefinition; state: 'paid' | 'closed' | 'missing'; reward: number }> {
   return definitions.map((challenge) => {
     const row = catalog.get(challenge.id);
     if (!row) return { challenge, state: 'missing' as const, reward: challenge.reward };
-    const expired = typeof row.endsAt === 'string' && row.endsAt < new Date().toISOString().slice(0, 10);
+    // Un défi est « payé » seulement si son catalogue est actif, non expiré à la
+    // date de référence, et qu'il promet une récompense strictement positive.
+    const expired = typeof row.endsAt === 'string' && row.endsAt < today;
     const paid = row.active === true && !expired && Number(row.reward) > 0;
     return { challenge, state: paid ? ('paid' as const) : ('closed' as const), reward: Number(row.reward) || challenge.reward };
   });

@@ -21,6 +21,7 @@ offertes, tâches planifiées incluses).
 | `GET` | `/cron/process-notifications` | Consomme `friendRequests` + `withdrawals` → push (F11) |
 | `GET` | `/cron/process-payouts` | File de retraits (F06) |
 | `GET` | `/cron/sync-release` | Version publiée sur le Play Store → `appRelease/current` (écran de mise à jour) |
+| `GET` | `/cron/weekly-recap` | Récapitulatif hebdomadaire (A9) — une tranche de 8 comptes par appel |
 
 Le Worker possède les droits d'un **compte de service Firebase** (contournement des
 règles Firestore) : c'est le seul composant de confiance qui peut créditer un solde
@@ -54,13 +55,19 @@ npx wrangler deploy
 ```
 
 Les tâches planifiées (`[triggers] crons` de `wrangler.toml`) sont actives après le
-premier déploiement. Trois déclencheurs, un rôle chacun :
+premier déploiement. Quatre déclencheurs, un rôle chacun :
 
 | Expression | Rôle |
 | --- | --- |
 | `*/5 * * * *` | notifications (amis, retraits, changements de rencontre) |
 | `0 * * * *` | file de retraits |
-| `15 */6 * * *` | version publiée sur le Play Store → `appRelease/current` | Les endpoints `/cron/*` sont aussi appelables manuellement
+| `15 */6 * * *` | version publiée sur le Play Store → `appRelease/current` |
+| `*/10 * * * 0` | dimanche : récapitulatif hebdomadaire, par tranches de 8 comptes |
+
+Le récapitulatif hebdomadaire respecte `users.alerts.weeklyRecap` et enregistre sa
+progression dans `cronState/weeklyRecap` (champ `weekKey` = lundi de la semaine) :
+il ne renvoie donc jamais deux fois le même message, et un redéploiement en cours
+de dimanche reprend là où il s'était arrêté. Les endpoints `/cron/*` sont aussi appelables manuellement
 pour tester (ex. `curl https://<votre-worker>.workers.dev/cron/process-notifications`).
 
 ## Prérequis côté Google

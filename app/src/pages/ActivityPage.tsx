@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { addBaseMap } from '../lib/mapTiles';
 import { Capacitor } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
 import { Geolocation } from '@capacitor/geolocation';
@@ -49,6 +50,8 @@ import { notifyActivityGoal } from '../lib/notifications';
 import { showEndOfActivityAd, showInterstitial } from '../lib/ads';
 import { enqueueSync, subscribeQueue, type SyncState } from '../lib/syncQueue';
 import { distanceToRoute, getRoute } from '../lib/routes';
+import { MAX_GPX_FILE_BYTES, buildImportedActivity, gpxImportError, parseGpx, type ImportedActivity } from '../lib/gpx';
+import { importGpxSession } from '../lib/db';
 import type { SavedRoute } from '../lib/types';
 
 const FALLBACK_CENTER: [number, number] = [46.6, 2.4];
@@ -137,6 +140,9 @@ export default function ActivityPage() {
   const [hasMore, setHasMore] = useState(false);
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
+  // A12.2 — import d'une trace GPX (Strava, Garmin, OSM…).
+  const gpxInputRef = useRef<HTMLInputElement | null>(null);
+  const [importingGpx, setImportingGpx] = useState(false);
   const cursorRef = useRef<ActivityQueryCursor | null>(null);
   // Recherche textuelle (titre / note / parcours) : filtrage local, aucun index
   // composite requis — la recherche globale ne se limite donc pas à la page
@@ -158,6 +164,51 @@ export default function ActivityPage() {
     : running
       ? gpsQuality(accuracy)
       : { level: 'unknown' as GpsQualityLevel, label: 'GPS en veille', hint: 'Le signal sera évalué au démarrage.' };
+
+  /**
+   * A12.2 — une trace GPX devient une sortie normale : distance, durée et pas
+   * sont recalculés depuis les points, puis enregistrés comme n'importe quelle
+   * sortie GPS (records personnels compris). La trace la plus longue du fichier
+   * est retenue quand il en contient plusieurs.
+   */
+  async function importGpx(file: File) {
+    if (!profile) return;
+    if (file.size > MAX_GPX_FILE_BYTES) {
+      toast('Fichier trop volumineux (5 Mo maximum).', 'error');
+      return;
+    }
+    setImportingGpx(true);
+    try {
+      const xml = await file.text();
+      const parseError = gpxImportError(xml);
+      if (parseError) {
+        toast(parseError, 'error');
+        return;
+      }
+      const activities = parseGpx(xml)
+        .map((track) =>
+          buildImportedActivity(track, {
+            strideCm: profile.strideLengthCm,
+            health: profile.health,
+            fallbackStart: Date.now(),
+          }),
+        )
+        .filter((a): a is ImportedActivity => a !== null)
+        .sort((a, b) => b.distanceM - a.distanceM);
+      if (activities.length === 0) {
+        toast('Aucun point exploitable dans ce fichier.', 'error');
+        return;
+      }
+      await importGpxSession(profile.uid, activities[0]);
+      toast(`Trace importée : ${formatDistance(activities[0].distanceM, unitSystem)}.`, 'success');
+      setReloadToken((t) => t + 1);
+    } catch {
+      toast('Import impossible. Vérifiez le fichier et réessayez.', 'error');
+    } finally {
+      setImportingGpx(false);
+      if (gpxInputRef.current) gpxInputRef.current.value = '';
+    }
+  }
 
   function updateFilters(patch: Partial<ActivityFilterState>) {
     setFilters((prev) => {
@@ -275,7 +326,7 @@ export default function ActivityPage() {
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
     const map = L.map(containerRef.current, { center: FALLBACK_CENTER, zoom: 6, zoomControl: false });
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>', maxZoom: 19 }).addTo(map);
+    addBaseMap(map);
     L.control.zoom({ position: 'bottomright' }).addTo(map);
     mapRef.current = map;
     return () => { map.remove(); mapRef.current = null; };
@@ -964,6 +1015,31 @@ export default function ActivityPage() {
               {searchResults.length} résultat{searchResults.length > 1 ? 's' : ''} pour « {search.trim()} ».
             </p>
           )}
+          <div className="gpx-import" data-testid="gpx-import">
+            <input
+              ref={gpxInputRef}
+              type="file"
+              accept=".gpx,application/gpx+xml,text/xml"
+              style={{ display: 'none' }}
+              data-testid="gpx-import-input"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) void importGpx(file);
+              }}
+            />
+            <button
+              type="button"
+              className="btn btn-outline"
+              disabled={importingGpx}
+              onClick={() => gpxInputRef.current?.click()}
+            >
+              {importingGpx ? 'Import en cours…' : 'Importer une trace GPX'}
+            </button>
+            <p className="muted-xs">
+              Une trace Strava, Garmin ou OSM devient une sortie ElyWalk : distance, durée et
+              pas recalculés depuis le tracé. Elle reste privée jusqu’à ce que vous la partagiez.
+            </p>
+          </div>
           <button className="text-button" style={{ marginTop: 6 }} onClick={() => navigate('/history')}>
             Voir l’historique quotidien
           </button>

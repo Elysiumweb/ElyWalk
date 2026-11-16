@@ -91,6 +91,38 @@ export default function QRCode({ value, size = 180, title }: Props) {
  * partagée via la feuille système (ou téléchargée sur le web).
  */
 export async function shareFriendCode(code: string, displayName: string): Promise<'shared' | 'downloaded'> {
+  return shareQrCard({
+    value: shareUrlForReferral(code),
+    heading: 'Ajoute-moi !',
+    subtitle: `${displayName} t’invite sur ElyWalk`,
+    caption: code,
+    captionLabel: 'Code ami · scanne le QR ou entre le code',
+    filename: `elywalk-qr-${code}.jpg`,
+    shareTitle: 'Mon code ElyWalk',
+    shareText: `Rejoins-moi sur ElyWalk avec le code ${code}`,
+  });
+}
+
+/**
+ * Carte QR générique (rencontre, parcours, profil…) : même rendu que le code
+ * ami, mais avec **n'importe quelle URL**. Utilisée par l'invitation d'une
+ * rencontre (A10), qui doit encoder le lien de la sortie — et non le lien de
+ * parrainage comme le faisait `shareFriendCode`.
+ */
+export interface QrCardInput {
+  /** Contenu encodé dans le QR (URL publique). */
+  value: string;
+  heading: string;
+  subtitle: string;
+  /** Texte affiché en gros sous le QR. */
+  caption: string;
+  captionLabel: string;
+  filename: string;
+  shareTitle: string;
+  shareText?: string;
+}
+
+export async function shareQrCard(input: QrCardInput): Promise<'shared' | 'downloaded'> {
   const canvas = document.createElement('canvas');
   canvas.width = 1080;
   canvas.height = 1350;
@@ -110,42 +142,42 @@ export async function shareFriendCode(code: string, displayName: string): Promis
   ctx.fillText('ELYWALK', 84, 120);
   ctx.fillStyle = '#fff';
   ctx.font = '700 48px Arial';
-  ctx.fillText('Ajoute-moi !', 84, 200);
+  ctx.fillText(input.heading.slice(0, 40), 84, 200);
   ctx.fillStyle = '#98948a';
   ctx.font = '30px Arial';
-  ctx.fillText(`${displayName} t’invite sur ElyWalk`, 84, 250);
+  ctx.fillText(input.subtitle.slice(0, 64), 84, 250);
 
   // QR hors ligne : encodé ici, dessiné sur le même canvas.
   try {
-    const qr = encodeQr(shareUrlForReferral(code), { level: 'M' });
+    const qr = encodeQr(input.value || ' ', { level: 'M' });
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(240, 320, 600, 600);
     drawQr(ctx, qr, { x: 240, y: 320, size: 600, dark: '#111111', light: '#ffffff', margin: 2 });
   } catch {
     ctx.fillStyle = '#fff';
-    ctx.font = '700 120px Arial';
+    ctx.font = '700 44px Arial';
     ctx.textAlign = 'center';
-    ctx.fillText(code, 540, 620);
+    ctx.fillText(input.caption.slice(0, 28), 540, 620);
     ctx.textAlign = 'left';
   }
 
   ctx.fillStyle = '#D8CA82';
-  ctx.font = '700 78px Arial';
+  ctx.font = '700 54px Arial';
   ctx.textAlign = 'center';
-  ctx.fillText(code, 540, 1020);
+  ctx.fillText(input.caption.slice(0, 32), 540, 1020);
   ctx.fillStyle = '#98948a';
   ctx.font = '26px Arial';
-  ctx.fillText('Code ami · scanne le QR ou entre le code', 540, 1070);
+  ctx.fillText(input.captionLabel, 540, 1070);
   ctx.fillStyle = '#d8d2c2';
   ctx.font = '30px Arial';
   ctx.fillText('Marchez. Progressez. Gagnez.', 540, 1190);
   ctx.textAlign = 'left';
 
   const blob: Blob = await new Promise((res, rej) => canvas.toBlob((b) => (b ? res(b) : rej(new Error('Génération de l’image impossible.'))), 'image/jpeg', 0.92));
-  const file = new File([blob], `elywalk-qr-${code}.jpg`, { type: 'image/jpeg' });
+  const file = new File([blob], input.filename, { type: 'image/jpeg' });
   if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] }))) {
     try {
-      await navigator.share({ title: 'Mon code ElyWalk', text: `Rejoins-moi sur ElyWalk avec le code ${code}`, files: [file] });
+      await navigator.share({ title: input.shareTitle, text: input.shareText || input.caption, files: [file] });
       return 'shared';
     } catch (e) {
       if (/cancel|abort/i.test((e as Error).message || '')) return 'shared';
@@ -154,7 +186,7 @@ export async function shareFriendCode(code: string, displayName: string): Promis
   const url2 = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url2;
-  a.download = `elywalk-qr-${code}.jpg`;
+  a.download = input.filename;
   document.body.appendChild(a);
   a.click();
   a.remove();

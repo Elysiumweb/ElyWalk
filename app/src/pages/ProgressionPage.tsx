@@ -7,6 +7,12 @@ import LevelBadge from '../components/LevelBadge';
 import Sheet from '../components/Sheet';
 import NotificationBell from '../components/NotificationBell';
 import { getBestStreak, watchUserBadges } from '../lib/db';
+import {
+  EMPTY_RECORDS,
+  formatPace,
+  formatRecordTime,
+  type PersonalRecords,
+} from '../lib/records';
 import { BADGE_DEFINITIONS } from '../lib/constants';
 import { fmtNumber, formatDistance } from '../lib/coins';
 import type { BadgeDefinition, UserBadge } from '../lib/types';
@@ -43,6 +49,7 @@ export default function ProgressionPage() {
 
   if (!profile) return null;
   const units = profile.unitSystem || 'metric';
+  const records: PersonalRecords = { ...EMPTY_RECORDS, ...(profile.records || {}) };
   const totalDistance = (profile.totalSteps * (profile.strideLengthCm || 75)) / 100;
 
   return (
@@ -89,6 +96,57 @@ export default function ProgressionPage() {
         <div className="row-sub" style={{ marginTop: 8 }}>
           Membre depuis {new Date(profile.createdAt).toLocaleDateString('fr-FR')}
         </div>
+      </div>
+
+      {/*
+        A12.1 — records personnels. Sans eux, l'écran ne montrait que des
+        totaux : impossible de savoir si l'on progresse.
+      */}
+      <div className="card" data-testid="personal-records">
+        <div className="card-title">Records personnels</div>
+        <div className="stat-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
+          <div className="stat">
+            <div className="stat-value" data-testid="record-1km">{formatRecordTime(records.best1kmSec)}</div>
+            <div className="stat-label">meilleur 1 km</div>
+            {records.best1kmSec != null && (
+              <div className="row-sub">{formatPace(records.best1kmSec, 1000)}</div>
+            )}
+          </div>
+          <div className="stat">
+            <div className="stat-value" data-testid="record-5km">{formatRecordTime(records.best5kmSec)}</div>
+            <div className="stat-label">meilleur 5 km</div>
+            {records.best5kmSec != null && (
+              <div className="row-sub">{formatPace(records.best5kmSec, 5000)}</div>
+            )}
+          </div>
+          <div className="stat">
+            <div className="stat-value" data-testid="record-longest">
+              {records.longestDistanceM > 0
+                ? formatDistance(records.longestDistanceM, units)
+                : '—'}
+            </div>
+            <div className="stat-label">plus longue sortie</div>
+          </div>
+          <div className="stat">
+            <div className="stat-value" data-testid="record-best-week">
+              {records.bestWeekSteps > 0 ? fmtNumber(records.bestWeekSteps) : '—'}
+            </div>
+            <div className="stat-label">meilleure semaine</div>
+            {records.bestWeekStart && (
+              <div className="row-sub">
+                semaine du{' '}
+                {new Date(`${records.bestWeekStart}T00:00:00`).toLocaleDateString('fr-FR', {
+                  day: '2-digit',
+                  month: 'short',
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+        <p className="muted-xs">
+          Les records 1 km et 5 km sont calculés sur le tracé GPS de vos sorties ; la meilleure
+          semaine sur vos pas validés. Aucune donnée ne quitte votre compte.
+        </p>
       </div>
 
       <div className="card" data-testid="badges-card">
