@@ -27,10 +27,16 @@ PACKAGE_NAME = "com.elysium.elywalk"
 #   wrangler secret put SSV_KEYS                         (clés publiques AdMob SSV)
 
 # Tâches planifiées (gratuites, sans Cloud Functions)
+#
+# ⚠️ Cloudflare numérote les jours de 1 (dimanche) à 7 (samedi) : un `0` en
+# cinquième champ est rejeté par l'API des schedules (« invalid cron string »,
+# code 10100) et fait échouer **tout** le déploiement des déclencheurs. On écrit
+# donc le jour en toutes lettres (SUN..SAT), accepté sans ambiguïté — et
+# `src/index.ts` doit comparer `event.cron` à la chaîne exacte ci-dessous.
 [triggers]
 crons = [
-  "*/5 * * * *",   # amis, retraits et changements/annulations d'événements
-  "0 * * * *",     # file de retraits
-  "15 */6 * * *",  # version publiée sur le Play Store → appRelease/current (écran de mise à jour)
-  "*/10 * * * 0",  # dimanche : récapitulatif hebdomadaire (A9), par tranches de 8 comptes
+  "*/5 * * * *",    # amis, retraits et changements/annulations d'événements
+  "0 * * * *",      # file de retraits
+  "15 */6 * * *",   # version publiée sur le Play Store → appRelease/current (écran de mise à jour)
+  "*/10 * * * SUN", # dimanche : récapitulatif hebdomadaire (A9), par tranches de 8 comptes
 ]
