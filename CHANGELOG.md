@@ -1,5 +1,63 @@
 # Changelog
 
+## 2.2.5 — 2026-11-17
+
+### Trois défauts signalés
+
+**1. « Le GPS ne fonctionne pas, sauf pour les transports. »**
+`lib/directions.ts` envoyait un en-tête `X-Client` sur chaque appel de routage.
+Cet en-tête rend la requête « non simple » au sens CORS : le navigateur émet un
+`OPTIONS` préalable, que les serveurs publics de routage (FOSSGIS Valhalla,
+`routing.openstreetmap.de`) refusent — d'où un `Failed to fetch` pour la marche,
+le vélo et la voiture, alors que Transitous (autre hébergeur) tolérait ce
+préflight. Correctifs :
+
+- suppression de tout en-tête personnalisé (requête simple, plus de préflight) ;
+- le **segment de profil** de l'OSRM communautaire suit le mode
+  (`/routed-foot/route/v1/foot/…`) au lieu de `driving` en dur, avec repli sur
+  `driving` pour les miroirs qui n'acceptent que ce jeton ;
+- chaîne de repli élargie : Valhalla → OSRM communautaire → OSRM démonstrateur
+  (voiture) → **Transitous en mode direct** (le fournisseur qui répond
+  toujours, déjà utilisé pour les transports) ;
+- si tous les moteurs échouent, `planRoute` renvoie une **estimation explicite**
+  (`degraded`) : cap, distance et durée moyennes, tracé direct, annoncé comme
+  tel dans la feuille d'itinéraire et dans le guidage. Plus d'écran d'impasse.
+
+**2. « Un compte sans e-mail vérifié ne peut pas valider ses pas ni accepter
+d'amis. »** Plus **aucune** règle Firestore n'exige `email_verified` : un compte
+non confirmé a **exactement les mêmes droits** qu'un compte confirmé — pas,
+défis (progression *et* récompense), amis, récompense publicitaire, bonus de
+parrainage, dépense du solde et retrait PayPal.
+
+- suppression du helper `verified()` et de ses six points d'application
+  (`validStepCredit`, `validAdCredit`, `validReferralCredit`,
+  `validChallengeCredit`, `validDebit`, `adClaims`, `withdrawals`) ;
+- les garde-fous restent **métier** : barème des pas, une récompense
+  publicitaire par heure, catalogue des défis, `referralClaims`, solde jamais
+  négatif, débit exact du montant demandé ;
+- message d'erreur de validation réécrit (il accusait à tort l'e-mail) ; la
+  bannière « E-mail non confirmé » n'annonce plus aucun blocage et la vidéo
+  récompensée n'est plus filtrée avant lecture ;
+- tests de règles : publicité, défi, parrainage, retrait et dépense réussissent
+  en contexte **non vérifié** ; le solde négatif et le crédit arbitraire restent
+  refusés.
+
+**3. « Valider ses pas une seule fois par jour » → validations illimitées.**
+`validateSteps` devient incrémental : `dailySteps/{date}` porte le **cumul** de
+la journée et le profil ne reçoit que le **delta** (pas, calories, ElyCoins)
+depuis la validation précédente. On peut valider à 14 h puis à 20 h, autant de
+fois que voulu, et chaque validation déclenche l'interstitiel comme avant. La
+série et les gels n'avancent qu'à la première validation du jour.
+
+- arithmétique extraite dans `lib/stepValidation.ts` (testé unitairement) ;
+- règle `validStepCredit` réécrite selon les mêmes règles : cumuls monotones,
+  deltas cohérents, **barème des ElyCoins vérifié côté serveur**
+  (`stepCoinsFor`), réécriture d'un jour déjà crédité refusée ;
+- l'accueil affiche « encore N pas à valider » et la récompense restante, au lieu
+  d'un bouton désactivé jusqu'au lendemain ;
+- tests de règles : validations multiples, refus du double crédit, refus d'un
+  montant hors barème, accès d'un compte non vérifié aux pas / amis / défis.
+
 ## 2.2.4 — 2026-11-16
 
 ### Les quatre défauts signalés

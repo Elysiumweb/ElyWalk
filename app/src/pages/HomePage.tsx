@@ -7,7 +7,8 @@ import ProgressRing from '../components/ProgressRing';
 import Sheet from '../components/Sheet';
 import { pedometer } from '../lib/pedometer';
 import { adGate, openAdPrivacyOptions, showInterstitial, showRewardedAd } from '../lib/ads';
-import { validateSteps, creditAdReward, syncTodaySteps, listMyDailySteps } from '../lib/db';
+import { validateSteps, getTodayValidatedSteps, creditAdReward, syncTodaySteps, listMyDailySteps } from '../lib/db';
+import { pendingCoins } from '../lib/stepValidation';
 import { coinsForSteps, caloriesForSteps, fmtCoins, fmtNumber, dateStr, nextStepTier, formatDistance } from '../lib/coins';
 import { shareDailyStats } from '../lib/share';
 import { DAILY_STEP_GOAL, STEP_TIERS, AD_REWARD_COINS } from '../lib/constants';
@@ -54,7 +55,19 @@ export default function HomePage() {
 
   const isNative = Capacitor.isNativePlatform();
   const today = dateStr();
-  const alreadyValidated = profile?.lastValidatedDate === today;
+  /**
+   * Validation **multiple** dans la journée (2.2.5) : on suit le cumul de pas
+   * déjà validé (`dailySteps/{today}`), et non plus un simple « jour validé ou
+   * pas ». `alreadyValidated` ne sert plus qu'à masquer le rappel du soir.
+   */
+  const [validatedDay, setValidatedDay] = useState<{ day: string; steps: number }>({ day: today, steps: 0 });
+  // Le cumul appartient à **une** date : à minuit, l'accueil repart de zéro au
+  // lieu d'afficher les pas d'hier comme « déjà validés ».
+  const validatedSteps = validatedDay.day === today ? validatedDay.steps : 0;
+  const alreadyValidated = validatedSteps > 0 || profile?.lastValidatedDate === today;
+  const newSteps = Math.max(0, Math.floor(steps) - validatedSteps);
+  const rewardPending = pendingCoins(steps, validatedSteps);
+  const canValidate = !!profile && !busyValidate && newSteps > 0;
   const dailyGoal = profile?.dailyStepGoal || DAILY_STEP_GOAL;
   const lastAdAt = timestampMs(profile?.lastAdRewardAt);
   const adRemaining = lastAdAt ? Math.max(0, lastAdAt + 3600000 - clock) : 0;
@@ -135,16 +148,31 @@ export default function HomePage() {
   };
 
   const onValidate = async () => {
-    if (!profile || alreadyValidated || busyValidate) return;
+    if (!profile || busyValidate) return;
+    const stepsToValidate = pedometer.getTodaySteps();
+    if (stepsToValidate <= validatedSteps) {
+      toast('Aucun nouveau pas depuis votre dernière validation. Marchez encore un peu !', 'info');
+      return;
+    }
     setBusyValidate(true);
     try {
-      const stepsToValidate = pedometer.getTodaySteps();
-      // Annonce interstitielle avant le crédit (placement « Interstitial #2 »).
+      // Annonce interstitielle **à chaque validation** (placement
+      // « Interstitial #2 ») : elle encadre le crédit, pas la journée.
       await showInterstitial();
       const result = await validateSteps(profile.uid, stepsToValidate);
+      setValidatedDay({ day: today, steps: result.daySteps });
       void hapticTap();
-      toast(`+${fmtCoins(result.coins)} ElyCoins · Série de ${result.streak} jour${result.streak > 1 ? 's' : ''} !${result.freezeUsed ? ' Gel utilisé pour rattraper la journée manquée.' : ''}`, 'success');
-      if (result.streak === 7 || result.streak === 30) celebrate(`Palier de série atteint : ${result.streak} jours !`);
+      const detail = result.firstOfDay
+        ? `Série de ${result.streak} jour${result.streak > 1 ? 's' : ''} !`
+        : `Journée à ${fmtNumber(result.daySteps)} pas (mise à jour).`;
+      if (result.coins > 0) {
+        toast(`+${fmtCoins(result.coins)} ElyCoins · ${detail}${result.freezeUsed ? ' Gel utilisé pour rattraper la journée manquée.' : ''}`, 'success');
+      } else {
+        toast(`+${fmtNumber(result.addedSteps)} pas crédités · ${detail}`, 'success');
+      }
+      if (result.firstOfDay && (result.streak === 7 || result.streak === 30)) {
+        celebrate(`Palier de série atteint : ${result.streak} jours !`);
+      }
     } catch (e) {
       toast((e as Error).message, 'error');
     } finally {
@@ -189,6 +217,22 @@ export default function HomePage() {
       setBusyAd(false);
     }
   };
+
+  /**
+   * Cumul de pas **déjà validé** aujourd'hui. Rechargé après chaque validation
+   * (via `profile.totalSteps`) et au changement de date : l'accueil peut ainsi
+   * afficher « encore 2 400 pas à valider » au lieu d'un bouton mort jusqu'au
+   * lendemain.
+   */
+  useEffect(() => {
+    if (!profile) return;
+    let cancelled = false;
+    void getTodayValidatedSteps(profile.uid, today)
+      .then((n) => { if (!cancelled) setValidatedDay({ day: today, steps: n }); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile?.uid, profile?.totalSteps, today]);
 
   /**
    * A9 — objectif de la semaine. Les 14 derniers jours sont chargés pour que le
@@ -368,17 +412,39 @@ export default function HomePage() {
         </div>
       )}
 
-      <section className={`daily-action ${alreadyValidated ? 'daily-action-done' : ''}`} aria-live="polite">
-        {alreadyValidated && <div className="validation-success"><span>✓</span><div><strong>Journée validée</strong><small>Revenez demain pour poursuivre votre série.</small></div></div>}
+      <section className={`daily-action ${canValidate ? '' : 'daily-action-done'}`} aria-live="polite">
+        {alreadyValidated && (
+          <div className="validation-success" data-testid="validation-status">
+            <span>✓</span>
+            <div>
+              <strong>{newSteps > 0 ? 'Encore des pas à valider' : 'Journée à jour'}</strong>
+              <small>
+                {newSteps > 0
+                  ? `${fmtNumber(newSteps)} nouveaux pas depuis votre dernière validation (${fmtNumber(validatedSteps)} déjà validés).`
+                  : `${fmtNumber(validatedSteps)} pas validés aujourd’hui — marchez encore pour revalider.`}
+              </small>
+            </div>
+          </div>
+        )}
         <button
           type="button"
           className="btn btn-gold"
           onClick={onValidate}
-          disabled={busyValidate || alreadyValidated || !profile}
+          disabled={!canValidate}
           data-testid="validate-steps-button"
         >
-          {alreadyValidated ? 'Pas validés aujourd’hui ✓' : busyValidate ? 'Validation...' : `Valider mes pas (+${potentialCoins} EC)`}
+          {busyValidate
+            ? 'Validation...'
+            : newSteps <= 0
+              ? 'Tous mes pas sont validés ✓'
+              : rewardPending > 0
+                ? `Valider mes pas (+${fmtCoins(rewardPending)} EC)`
+                : 'Valider mes pas'}
         </button>
+        <p className="muted-xs daily-action-hint">
+          Validation illimitée : vous pouvez créditer vos pas à tout moment de la
+          journée, autant de fois que vous le souhaitez.
+        </p>
         <div className="secondary-actions">
           {/* Action publicitaire volontairement discrète : elle complète la
               marche, elle ne la concurrence pas visuellement (audit § 2.2). */}

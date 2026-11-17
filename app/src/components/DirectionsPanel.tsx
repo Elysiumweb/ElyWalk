@@ -619,6 +619,36 @@ export default function DirectionsPanel({
               <span className="muted-xs">{plan.provider}</span>
             </div>
           )}
+          {/*
+            Aucun moteur de routage n'a répondu : `planRoute` renvoie une
+            estimation à vol d'oiseau plutôt qu'une impasse. On l'annonce, et
+            « Réessayer » relance la chaîne complète (Valhalla → OSRM →
+            Transitous → estimation) sans changer de mode ni de départ.
+          */}
+          {startPoint && !loading && !error && plan?.degraded && (
+            <div className="directions-degraded" role="status" data-testid="directions-degraded">
+              <span>⚠️ {plan.degradedReason}</span>
+              <div className="directions-alt">
+                <button
+                  type="button"
+                  className="btn btn-outline btn-sm"
+                  onClick={() => setAttempt((n) => n + 1)}
+                  data-testid="directions-degraded-retry"
+                >
+                  🔄 Réessayer le calcul
+                </button>
+                {destPoint && (
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => window.open(externalMapsUrl(destPoint, mode, startPoint), '_blank', 'noopener')}
+                  >
+                    Ouvrir dans une autre application de cartes
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {plan?.transitLegs && plan.transitLegs.length > 0 && !loading && (

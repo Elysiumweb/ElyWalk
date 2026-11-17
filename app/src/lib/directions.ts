@@ -16,8 +16,14 @@
  *   uniquement** : ce démonstrateur ne connaît qu'un profil automobile. Il
  *   n'est plus utilisé pour la marche ou le vélo — un tracé routier n'est pas
  *   un guidage piéton fiable, et le présenter comme tel trompait l'utilisateur.
- *   Quand aucun moteur multimodal ne répond, l'interface annonce clairement
- *   l'indisponibilité du mode et propose une alternative explicite.
+ * - **Transitous** (MOTIS), en mode **direct** (`directModes`) pour la marche,
+ *   le vélo et la voiture : c'est le fournisseur qui répond le plus
+ *   régulièrement depuis les WebViews de l'application — il assure déjà les
+ *   transports et sert donc de filet de sécurité aux modes actifs.
+ * - **Estimation ElyWalk** : si aucun moteur ne répond, `planRoute` renvoie un
+ *   tracé direct marqué `degraded` (cap, distance, durée moyenne) que
+ *   l'interface annonce clairement. L'utilisateur a toujours un chemin à
+ *   suivre, jamais un écran d'impasse.
  * - **OpenTripPlanner** (Île-de-France Mobilités) puis **Transitous** pour les
  *   transports en commun.
  * - **Photon** puis **Nominatim** (OpenStreetMap) pour la recherche d'adresse
@@ -29,7 +35,7 @@
  * du module gardent en mémoire les réponses pour la session.
  */
 
-import type { Coords } from './geo';
+import { haversineM, type Coords } from './geo';
 
 export type TravelMode = 'walk' | 'bike' | 'car' | 'transit';
 
@@ -82,6 +88,14 @@ export interface RoutePlan {
   provider: string;
   /** Adresse/poste d'arrivée résolu par le fournisseur. */
   resolvedDestination?: string;
+  /**
+   * Itinéraire **estimé** (tracé direct) : aucun moteur de routage n'a répondu.
+   * L'interface doit le dire explicitement — le tracé ne suit alors ni les rues
+   * ni les chemins, et la durée n'est qu'une moyenne par mode.
+   */
+  degraded?: boolean;
+  /** Raison lisible de l'estimation (affichée sous le tracé). */
+  degradedReason?: string;
 }
 
 export const TRAVEL_MODES: Array<{ id: TravelMode; label: string; short: string; icon: string }> = [
@@ -103,18 +117,36 @@ const VALHALLA_URL = 'https://valhalla1.openstreetmap.de';
 /** Replis OSRM : instance communautaire multimodale, puis démonstrateur. */
 const OSMDE_URL = 'https://routing.openstreetmap.de';
 const OSRM_URL = 'https://router.project-osrm.org';
+/**
+ * **Transitous** (MOTIS, données ouvertes). Utilisé pour les transports en
+ * commun — et, en mode direct, comme moteur de repli pour la marche, le vélo et
+ * la voiture : c'est le seul hébergeur public qui répond de façon constante
+ * depuis les WebViews de l'application, ce qui en fait le filet de sécurité des
+ * modes actifs.
+ */
+const MOTIS_URL = 'https://api.transitous.org/api/v1/plan';
 
+/**
+ * Appel JSON vers un service public de routage ou de géocodage.
+ *
+ * ⚠️ Aucun en-tête personnalisé n'est envoyé. Un `X-Client` (présent jusqu'à la
+ * 2.2.4) transformait chaque requête en « requête non simple » au sens CORS :
+ * le navigateur envoyait alors un `OPTIONS` préalable que plusieurs serveurs
+ * publics de routage refusent (`Access-Control-Allow-Headers` limité). Le
+ * résultat était un `TypeError: Failed to fetch` **uniquement** pour Valhalla et
+ * l'OSRM communautaire — donc « l'itinéraire ne fonctionne pas, sauf en
+ * transports » (Transitous, autre hébergeur, tolérait ce préflight). Sans
+ * en-tête non simple, la requête redevient une « simple request » : pas de
+ * préflight, et les quatre modes passent par le même chemin.
+ *
+ * Un `User-Agent` ne peut de toute façon pas être imposé par `fetch` dans une
+ * WebView : c'est l'origine HTTPS de l'application qui identifie le client.
+ */
 async function fetchJson(url: string, timeoutMs = 12_000): Promise<any> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    // Un `User-Agent` ne peut pas être imposé par `fetch` dans une WebView :
-    // on identifie l'application par l'en-tête `X-Client`, autorisé par CORS
-    // sur les services publics, et par l'origine HTTPS du site.
-    const res = await fetch(url, {
-      signal: controller.signal,
-      headers: { Accept: 'application/json', 'X-Client': 'ElyWalk/2.1.5' },
-    });
+    const res = await fetch(url, { signal: controller.signal });
     if (!res.ok) throw new Error(`Service indisponible (${res.status}).`);
     return await res.json();
   } catch (e) {
@@ -512,16 +544,36 @@ async function routeWithOsrm(
     throw new Error('Ce service ne calcule pas ce mode de déplacement.');
   }
   const profile = OSRM_PROFILES[mode];
-  // Instance communautaire : le profil est porté par le préfixe d'URL
-  // (`/routed-foot`, `/routed-bike`, `/routed-car`) et le segment de route
-  // reste `driving`. Le démonstrateur public, lui, n'expose que `driving`.
   const base = host === 'osmde' ? `${OSMDE_URL}/routed-${profile}` : OSRM_URL;
-  const url =
-    `${base}/route/v1/driving/${from.lng},${from.lat};${to.lng},${to.lat}` +
+  const params =
     '?overview=full&geometries=polyline&steps=true&annotations=false';
-  const data = await fetchJson(url);
-  const route = data?.routes?.[0];
-  if (!route) throw new Error('Aucun itinéraire trouvé entre ces deux points.');
+
+  /**
+   * Instance communautaire : le profil est porté par le préfixe d'URL
+   * (`/routed-foot`, `/routed-bike`, `/routed-car`). Le **segment de service**
+   * (`/route/v1/<profil>/`) doit lui aussi correspondre côté OSM.de : il valait
+   * `driving` en dur, ce qui faisait répondre « profile not found » à pied et à
+   * vélo. On essaie donc le profil exact, puis `driving` (certains miroirs
+   * n'acceptent que ce jeton), pour ne dépendre d'aucune des deux conventions.
+   */
+  const services = host === 'demo' ? ['driving'] : [profile === 'car' ? 'driving' : profile, 'driving'];
+  let route: any = null;
+  let lastError: Error | null = null;
+  for (const service of [...new Set(services)]) {
+    try {
+      const data = await fetchJson(
+        `${base}/route/v1/${service}/${from.lng},${from.lat};${to.lng},${to.lat}${params}`
+      );
+      if (data?.routes?.[0]) {
+        route = data.routes[0];
+        break;
+      }
+      lastError = new Error('Aucun itinéraire trouvé entre ces deux points.');
+    } catch (e) {
+      lastError = e as Error;
+    }
+  }
+  if (!route) throw lastError || new Error('Aucun itinéraire trouvé entre ces deux points.');
 
   const geometry: LatLng[] = route.geometry ? decodePolyline(route.geometry) : [];
   const steps: RouteStep[] = [];
@@ -562,13 +614,170 @@ async function routeWithOsrm(
 }
 
 /**
+ * **Transitous / MOTIS en mode direct** — repli pour la marche, le vélo et la
+ * voiture.
+ *
+ * C'est le seul hébergeur public qui répond de façon constante depuis les
+ * WebViews de l'application (il assure déjà les transports en commun). MOTIS
+ * accepte `directModes` : on demande le mode exact, sans transport en commun,
+ * et on dessine les tronçons renvoyés. Le mode demandé n'est jamais remplacé
+ * par un autre (un itinéraire voiture n'est pas un guidage piéton).
+ */
+const MOTIS_DIRECT_MODE: Record<'walk' | 'bike' | 'car', string> = {
+  walk: 'WALK',
+  bike: 'BIKE',
+  car: 'CAR',
+};
+
+const DIRECT_STEP_VERB: Record<'walk' | 'bike' | 'car', string> = {
+  walk: 'Marchez',
+  bike: 'Roulez',
+  car: 'Conduisez',
+};
+
+async function routeWithMotisDirect(
+  from: LatLng,
+  to: LatLng,
+  mode: 'walk' | 'bike' | 'car'
+): Promise<RoutePlan> {
+  const params = new URLSearchParams({
+    fromPlace: `${from.lat},${from.lng}`,
+    toPlace: `${to.lat},${to.lng}`,
+    time: new Date().toISOString(),
+    numItineraries: '2',
+    // Mode direct uniquement (aucun transport en commun) ; les itinéraires
+    // contenant un tronçon `TRANSIT` sont écartés ci-dessous.
+    directModes: MOTIS_DIRECT_MODE[mode],
+  });
+  const data = await fetchJson(`${MOTIS_URL}?${params.toString()}`, 15_000);
+  const itineraries: any[] = Array.isArray(data?.itineraries) ? data.itineraries : [];
+  const itinerary = itineraries.find(
+    (it) => Array.isArray(it?.legs) && it.legs.length > 0 && it.legs.every((leg: any) => leg?.mode !== 'TRANSIT')
+  );
+  if (!itinerary) throw new Error('Aucun itinéraire direct trouvé.');
+
+  const geometry: LatLng[] = [];
+  const steps: RouteStep[] = [];
+  let distanceM = 0;
+  let durationS = 0;
+
+  for (const leg of itinerary.legs as TransitLegInput[]) {
+    const points = leg.legGeometry?.points || leg.geometry;
+    if (points) {
+      geometry.push(...decodePolyline(String(points), leg.legGeometry?.precision === 7 ? 1e7 : 1e5));
+    }
+    const legDistance = Math.round(Number(leg.distance) || 0);
+    const legDuration =
+      typeof leg.duration === 'number' && Number.isFinite(leg.duration)
+        ? Math.round(leg.duration)
+        : secondsBetween(leg.startTime, leg.endTime);
+    distanceM += legDistance;
+    durationS += legDuration;
+    steps.push({
+      instruction: `${DIRECT_STEP_VERB[mode]}${leg.to?.name ? ` jusqu’à ${leg.to.name}` : ' jusqu’à votre destination'}`,
+      distanceM: legDistance,
+      durationS: legDuration,
+      mode,
+      from: leg.from?.name,
+      to: leg.to?.name,
+    });
+  }
+
+  if (!geometry.length) {
+    // Certaines réponses ne portent qu'une distance : on complète le tracé avec
+    // la ligne directe plutôt que de perdre un itinéraire valide.
+    geometry.push(from, to);
+  }
+  if (!distanceM) distanceM = Math.round(haversineM(from, to));
+  if (!durationS) durationS = Math.round((distanceM / 1000 / ESTIMATE_SPEED_KMH[mode]) * 3600);
+
+  return {
+    mode,
+    distanceM,
+    durationS: Math.round(Number(itinerary.duration) || durationS),
+    geometry: dedupe(geometry),
+    steps,
+    provider: 'OpenStreetMap · Transitous',
+  };
+}
+
+/** Vitesses moyennes prudentes par mode, utilisées par l'estimation. */
+const ESTIMATE_SPEED_KMH: Record<'walk' | 'bike' | 'car', number> = {
+  walk: 4.6,
+  bike: 14,
+  car: 38,
+};
+
+/**
+ * **Itinéraire estimé** : dernier recours quand aucun moteur de routage ne
+ * répond (réseau absent, services publics saturés ou bloqués par une WebView).
+ *
+ * L'utilisateur reçoit malgré tout un cap et une durée plausible, au lieu d'un
+ * simple message d'erreur — mais l'itinéraire est marqué `degraded` pour que
+ * l'interface dise clairement qu'il s'agit d'un tracé **direct**, qui ne suit ni
+ * les rues ni les chemins. Rien n'est présenté comme un guidage turn-by-turn.
+ */
+export function estimatePlan(
+  from: LatLng,
+  to: LatLng,
+  mode: 'walk' | 'bike' | 'car',
+  _reason?: string
+): RoutePlan {
+  const distanceM = Math.max(0, Math.round(haversineM(from, to)));
+  const durationS = Math.max(1, Math.round((distanceM / 1000 / ESTIMATE_SPEED_KMH[mode]) * 3600));
+  // Tracé direct : quelques points intermédiaires suffisent à Leaflet et au
+  // calcul de progression du guidage.
+  const steps = 24;
+  const geometry: LatLng[] = [];
+  for (let i = 0; i <= steps; i += 1) {
+    const ratio = i / steps;
+    geometry.push({
+      lat: from.lat + (to.lat - from.lat) * ratio,
+      lng: from.lng + (to.lng - from.lng) * ratio,
+    });
+  }
+  return {
+    mode,
+    distanceM,
+    durationS,
+    geometry,
+    steps: [
+      {
+        instruction: `${DIRECT_STEP_VERB[mode]} en direction de votre destination (estimation à vol d’oiseau).`,
+        distanceM,
+        durationS,
+        mode,
+        at: from,
+      },
+      {
+        instruction: 'Vous êtes arrivé à destination.',
+        distanceM: 0,
+        durationS: 0,
+        mode,
+        at: to,
+      },
+    ],
+    provider: 'Estimation ElyWalk · tracé direct',
+    degraded: true,
+    // Message **stable** : la raison technique (« Itinéraire à pied
+    // indisponible… ») n'apprend rien à l'utilisateur et masquait la nature du
+    // tracé. Elle reste disponible dans les journaux de l'appelant.
+    degradedReason:
+      'Le service d’itinéraire n’a pas répondu : le tracé affiché est une estimation à vol d’oiseau, il ne suit pas les rues.',
+  };
+}
+
+/**
  * Itinéraire marche / vélo / voiture.
  *
  * Ordre : Valhalla (multimodal), puis l'instance OSRM communautaire
  * (multimodale), puis — **pour la voiture uniquement** — le démonstrateur
- * public. Pour la marche et le vélo, si aucun moteur multimodal ne répond, on
- * ne substitue plus un tracé automobile : l'erreur est explicite, traduisible
- * et l'interface propose une alternative (`externalMapsUrl`), ou un autre mode.
+ * public, puis Transitous en mode direct, et enfin une estimation explicite
+ * (`estimatePlan`) proposée par `planRoute`.
+ *
+ * Pour la marche et le vélo, si aucun moteur multimodal ne répond, on ne
+ * substitue jamais un tracé automobile : l'erreur est explicite, traduisible et
+ * l'interface propose une alternative (`externalMapsUrl`), ou un autre mode.
  */
 export async function routeOnFootBikeOrCar(
   from: LatLng,
@@ -593,16 +802,22 @@ export async function routeOnFootBikeOrCar(
       failures.push((e as Error).message);
     }
   }
+  try {
+    return await routeWithMotisDirect(from, to, mode);
+  } catch (e) {
+    failures.push((e as Error).message);
+  }
   const label = (TRAVEL_MODES.find((m) => m.id === mode)?.label || mode).toLowerCase();
   const error = new Error(
     mode === 'car'
       ? 'Itinéraire en voiture indisponible pour le moment. Réessayez dans un instant.'
       : `Itinéraire ${label} indisponible pour le moment. Réessayez dans un instant, ou affichez l’itinéraire dans une autre application.`
-  ) as Error & { modeUnavailable?: TravelMode; retryable?: boolean };
+  ) as Error & { modeUnavailable?: TravelMode; retryable?: boolean; attempts?: string[] };
   // L'interface distingue une panne temporaire d'un mode non couvert : elle
   // peut ainsi proposer « Réessayer » et une alternative explicite.
   error.modeUnavailable = mode;
   error.retryable = true;
+  error.attempts = failures;
   throw error;
 }
 
@@ -618,7 +833,6 @@ export async function routeOnFootBikeOrCar(
  *    hors Île-de-France. Crédité dans l'interface, conformément à ses conditions.
  */
 const IDFM_OTP_URL = 'https://data.iledefrance-mobilites.fr/api/routers/default/plan';
-const MOTIS_URL = 'https://api.transitous.org/api/v1/plan';
 
 /** Emprise approximative de l'Île-de-France (départements 75, 77, 78, 91, 92, 93, 94, 95). */
 export function inIleDeFrance(a: LatLng, b: LatLng): boolean {
@@ -854,8 +1068,13 @@ export async function routeWithTransit(from: LatLng, to: LatLng, date = new Date
   try {
     return await motisTransit(from, to, date);
   } catch (e) {
+    const message = (e as Error).message || '';
+    // Un « Failed to fetch » brut ne dit rien à l'utilisateur : on ne conserve
+    // que les messages métier (« Aucun itinéraire… »), sinon on explique l'état.
     throw new Error(
-      (e as Error).message || 'Transports indisponibles. Essayez un autre mode de déplacement.'
+      /aucun itinéraire/i.test(message)
+        ? message
+        : 'Transports indisponibles pour le moment. Réessayez, ou choisissez un autre mode de déplacement.'
     );
   }
 }
@@ -886,10 +1105,28 @@ export function formatRouteDistance(meters: number): string {
   return `${(meters / 1000).toFixed(1).replace('.', ',')} km`;
 }
 
-/** Itinéraire pour le mode demandé. */
-export async function planRoute(from: LatLng, to: LatLng, mode: TravelMode): Promise<RoutePlan> {
+/**
+ * Itinéraire pour le mode demandé — **toujours exploitable**.
+ *
+ * Les transports en commun échouent en erreur explicite (une ligne directe
+ * n'aurait aucun sens pour un trajet en métro). Pour la marche, le vélo et la
+ * voiture, l'échec de tous les moteurs produit une **estimation** marquée
+ * `degraded` : l'utilisateur a un cap, une distance et une durée, et
+ * l'interface annonce sans ambiguïté qu'il s'agit d'un tracé direct.
+ */
+export async function planRoute(
+  from: LatLng,
+  to: LatLng,
+  mode: TravelMode,
+  options: { allowEstimate?: boolean } = {}
+): Promise<RoutePlan> {
   if (mode === 'transit') return routeWithTransit(from, to);
-  return routeOnFootBikeOrCar(from, to, mode);
+  try {
+    return await routeOnFootBikeOrCar(from, to, mode);
+  } catch (error) {
+    if (options.allowEstimate === false) throw error;
+    return estimatePlan(from, to, mode, (error as Error).message);
+  }
 }
 
 /** Lien de repli (uniquement sur action explicite de l'utilisateur). */
