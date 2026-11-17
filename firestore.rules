@@ -416,7 +416,6 @@ service cloud.firestore {
         && request.resource.data.history.size() <= 100;
       allow delete: if false;
     }
-
     match /users/{uid} {
       // F01 — la lecture d'un profil tiers reste possible (classement, amis,
       // recherche par code) mais **bornée** : une requête de collection est
@@ -529,10 +528,10 @@ service cloud.firestore {
           && request.resource.data.coins is number
           && numberBetween(request.resource.data.coins, -10000000, 50)
           && request.resource.data.createdAt is number
-          // Le crédit d'un défi passe par le worker / l'administration, et un
-          // crédit publicitaire ou de parrainage exige un compte vérifié (voir
-          // `validAdCredit` / `validReferralCredit`). La ligne de pas reste
-          // bornée par le barème (≤ 50 EC).
+          // Le crédit d'un défi passe par le worker / l'administration. Les
+          // crédits de pas, publicitaire et de parrainage sont bornés par leur
+          // propre règle (`validStepCredit`, `validAdCredit`,
+          // `validReferralCredit`) ; aucune condition d'e-mail (2.2.5).
           && !(request.resource.data.type == 'challenge' && request.resource.data.coins > 0));
         allow delete: if self(uid); // suppression RGPD uniquement, aucune incidence sur le solde
         allow update: if false;
@@ -546,7 +545,7 @@ service cloud.firestore {
     // uniquement les champs attendus, bornés. Aucune donnée personnelle ici.
     //
     // Les versions ne sont pas validées par une expression régulière : le
-    // langage des règles n'accepte pas d'échappement `\.` fiable dans une chaîne,
+    // langage des règles n'accepte pas d'échappement `\\.` fiable dans une chaîne,
     // et une regex invalide empêchait tout le fichier de compiler. La borne de
     // longueur suffit — le document est écrit par le président uniquement, et le
     // client (`decideUpdate`) ne propose jamais de mise à jour vers une valeur
@@ -598,8 +597,8 @@ service cloud.firestore {
       //    liens déjà envoyés continuent de fonctionner.
       allow create: if self(request.resource.data.ownerUid)
         && request.resource.data.ownerUid == get(/databases/$(database)/documents/activitySessions/$(request.resource.data.sessionId)).data.uid
-        && (id == request.resource.data.sessionId
-          || id == request.resource.data.sessionId + '_' + request.resource.data.ownerUid)
+        && (linkId == request.resource.data.sessionId
+          || linkId == request.resource.data.sessionId + '_' + request.resource.data.ownerUid)
         && request.resource.data.token.size() >= 16
         && request.resource.data.scope in ['summary','track']
         && (!('caption' in request.resource.data) || request.resource.data.caption.size() <= 500)
@@ -928,6 +927,6 @@ service cloud.firestore {
     }
     match /partnerOffers/{id} { allow read: if auth(); allow write: if president(); }
     match /establishments/{id} { allow read: if auth(); allow write: if president(); }
-    match /{document=**} { allow read, write: if false; }
+    match /{document=**} { allow read: if false; }
   }
 }
