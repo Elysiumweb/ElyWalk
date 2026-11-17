@@ -1050,17 +1050,33 @@ export default {
     const sa = parseServiceAccount(env);
     // Chaque déclencheur a un rôle unique et identifiable par son expression,
     // sinon la version publiée ne serait jamais relue.
-    const job =
-      event.cron === '0 * * * *'
-        ? processPayouts(sa)
-        : event.cron === '15 */6 * * *'
-          ? syncPublishedRelease(sa, env).then(() => undefined)
-          // Dimanche, toutes les 10 minutes : le récapitulatif hebdomadaire
-          // avance d'une tranche de 8 comptes à chaque passage (budget de
-          // sous-requêtes), jusqu'à épuisement de la base.
-          : event.cron === '*/10 * * * 0'
-            ? processWeeklyRecap(sa).then(() => undefined)
-            : processNotifications(sa);
+    //
+    // ⚠️ Ces chaînes doivent correspondre **mot pour mot** à celles de
+    // `wrangler.toml` : `event.cron` reflète l'expression enregistrée. Un
+    // dimanche (jour 0 en cron POSIX, rejeté par Cloudflare) s'écrit `SUN`.
+    let job: Promise<unknown>;
+    switch (event.cron) {
+      case '*/5 * * * *':
+        job = processNotifications(sa);
+        break;
+      case '0 * * * *':
+        job = processPayouts(sa);
+        break;
+      case '15 */6 * * *':
+        job = syncPublishedRelease(sa, env).then(() => undefined);
+        break;
+      // Dimanche, toutes les 10 minutes : le récapitulatif hebdomadaire avance
+      // d'une tranche de 8 comptes à chaque passage (budget de sous-requêtes),
+      // jusqu'à épuisement de la base ; `cronState/weeklyRecap` rend le
+      // traitement reprenable et sans doublon.
+      case '*/10 * * * SUN':
+        job = processWeeklyRecap(sa).then(() => undefined);
+        break;
+      default:
+        // Avant : `else` → notifications. Un déclencheur renommé envoyait donc
+        // des push en boucle toutes les 10 minutes. On ignore et on trace.
+        console.warn('[cron] déclencheur inconnu, ignoré :', event.cron);
+        return;
+    }
     ctx.waitUntil(job.catch(error => console.error('[cron]', event.cron, error)));
   },
-};
