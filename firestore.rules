@@ -312,23 +312,21 @@ service cloud.firestore {
     }
     function validStepCredit(uid) {
       let day = request.resource.data.lastValidatedDate;
-      let hadDay = exists(stepPath(uid, day));
+      // État **avant** l'écriture : `null` à la première validation du jour.
+      let before = get(stepPath(uid, day));
       let daily = getAfter(stepPath(uid, day)).data;
-      // Cumul déjà crédité pour ce jour (0 à la première validation).
-      let stepsBefore = hadDay ? get(stepPath(uid, day)).data.steps : 0;
-      let coinsBefore = hadDay ? get(stepPath(uid, day)).data.coins : 0;
-      let caloriesBefore = hadDay ? get(stepPath(uid, day)).data.calories : 0;
-      let addedSteps = daily.steps - stepsBefore;
-      let addedCoins = daily.coins - coinsBefore;
-      let addedCalories = daily.calories - caloriesBefore;
+      // Deltas depuis le cumul déjà crédité (0 si le jour n'a jamais été crédité).
+      let addedSteps = daily.steps - (before == null ? 0 : before.data.steps);
+      let addedCoins = daily.coins - (before == null ? 0 : before.data.coins);
+      let addedCalories = daily.calories - (before == null ? 0 : before.data.calories);
       let previousCalories = resource.data.keys().hasAny(['totalCalories']) ? resource.data.totalCalories : 0;
       // Profils antérieurs à 2.1.0 : `lastValidatedDate` peut manquer.
       let lastDay = resource.data.keys().hasAny(['lastValidatedDate']) ? resource.data.lastValidatedDate : null;
-      let freezes = request.resource.data.streakFreezes;
+
       return auth()
         // Même jour (revalidation) ou jour encore jamais crédité : une date déjà
         // écrite ne peut pas être rejouée.
-        && (day == lastDay || !hadDay)
+        && (day == lastDay || before == null)
         && daily.steps is int && numberBetween(daily.steps, 0, 60000)
         && daily.coins is number && numberBetween(daily.coins, 0, 50)
         // Le barème est respecté : impossible de créditer 50 EC pour 10 pas.
@@ -342,7 +340,8 @@ service cloud.firestore {
         && request.resource.data.todaySteps == daily.steps
         // 0 à 3 gels : les profils antérieurs pouvaient en porter deux, ce qui
         // suffisait à faire échouer la règle précédente (`<= 1`).
-        && freezes is int && freezes >= 0 && freezes <= 3;
+        && request.resource.data.streakFreezes is int
+        && numberBetween(request.resource.data.streakFreezes, 0, 3);
     }
     function validAdCredit(uid) {
       let slot = request.resource.data.lastAdSlot;
