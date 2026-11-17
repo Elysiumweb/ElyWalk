@@ -1053,7 +1053,8 @@ export default {
     //
     // ⚠️ Ces chaînes doivent correspondre **mot pour mot** à celles de
     // `wrangler.toml` : `event.cron` reflète l'expression enregistrée. Un
-    // dimanche (jour 0 en cron POSIX, rejeté par Cloudflare) s'écrit `SUN`.
+    // dimanche s'écrit `SUN` : Cloudflare numérote les jours de 1 à 7 et
+    // rejette `0` (« invalid cron string », code 10100).
     let job: Promise<unknown>;
     switch (event.cron) {
       case '*/5 * * * *':
@@ -1080,3 +1081,4 @@ export default {
     }
     ctx.waitUntil(job.catch(error => console.error('[cron]', event.cron, error)));
   },
+};
