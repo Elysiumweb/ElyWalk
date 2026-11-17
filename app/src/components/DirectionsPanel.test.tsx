@@ -105,16 +105,19 @@ describe('DirectionsPanel — carte et modes', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it('annonce l’indisponibilité du mode et propose une alternative, sans tracé automobile', async () => {
-    // Aucun fournisseur ne répond : planRoute échoue pour la marche.
+  it('annonce une estimation à vol d’oiseau quand aucun fournisseur ne répond, jamais un tracé automobile', async () => {
+    // Aucun fournisseur ne répond : `planRoute` renvoie l'estimation marquée
+    // `degraded` (2.2.5) — l'utilisateur a un cap, et l'écran **dit** que le
+    // tracé ne suit pas les rues. Aucun tracé automobile n'est présenté comme
+    // piéton.
     vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline'); }));
     renderPanel();
-    const error = await screen.findByTestId('directions-error', undefined, { timeout: 5000 });
-    expect(error.textContent).toMatch(/indisponible|n’a pas pu être calculé/i);
-    expect(screen.getByTestId('directions-retry')).toBeTruthy();
-    // Une alternative explicite est proposée pour la marche / le vélo.
-    expect(screen.getByTestId('directions-alternative-mode')).toBeTruthy();
-    // Aucune mention « tracé routier » présentée comme piéton.
+    const notice = await screen.findByTestId('directions-degraded', undefined, { timeout: 5000 });
+    expect(notice.textContent).toMatch(/vol d’oiseau|n’a pas répondu/i);
+    expect(screen.getByTestId('directions-degraded-retry')).toBeTruthy();
+    expect(screen.getByTestId('directions-duration').textContent).toBeTruthy();
+    // Le fournisseur annoncé est l'estimation, pas un moteur automobile.
+    expect(screen.getByTestId('directions-summary').textContent).toMatch(/Estimation ElyWalk/);
     expect(document.body.textContent).not.toMatch(/tracé routier/i);
   }, 15000);
 });

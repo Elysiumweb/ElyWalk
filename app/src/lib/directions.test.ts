@@ -5,6 +5,8 @@ import {
   externalMapsUrl,
   pointLabel,
   tidyAddress,
+  estimatePlan,
+  planRoute,
   routeOnFootBikeOrCar,
   searchAddresses,
   type TravelMode,
@@ -337,6 +339,34 @@ describe('routeOnFootBikeOrCar', () => {
     }
   });
 
+  it('essaie le segment de profil exact puis `driving` sur l’OSRM communautaire', async () => {
+    // `routing.openstreetmap.de` attend `/routed-foot/route/v1/foot/…` ; le code
+    // envoyait `driving` en dur dans le segment de service, ce qui faisait
+    // échouer la marche et le vélo. On vérifie l'ordre des tentatives.
+    const calls: string[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (input: any) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.includes('valhalla')) return { ok: true, json: async () => ({}) } as any;
+      if (url.includes('/route/v1/foot/')) throw new Error('profile not found');
+      return {
+        ok: true,
+        json: async () => ({
+          routes: [{ distance: 4200, duration: 3000, geometry: '_p~iF~ps|U_ulLnnqC_mqNvxq`@', legs: [{ steps: [] }] }],
+        }),
+      } as any;
+    }) as any;
+    try {
+      const plan = await routeOnFootBikeOrCar(from, to, 'walk');
+      expect(calls[1]).toContain('/routed-foot/route/v1/foot/');
+      expect(calls[2]).toContain('/routed-foot/route/v1/driving/');
+      expect(plan.mode).toBe('walk');
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
   it('ne présente jamais un tracé automobile comme un itinéraire à pied', async () => {
     // Le démonstrateur `router.project-osrm.org` ne connaît qu'un profil
     // automobile : l'utiliser pour la marche revenait à annoncer un guidage
@@ -393,7 +423,53 @@ describe('routeOnFootBikeOrCar', () => {
     }
   });
 
-  it('signale l’indisponibilité quand les trois moteurs échouent', async () => {
+  it('bascule sur Transitous en mode direct quand Valhalla et OSRM échouent', async () => {
+    // Les hébergeurs publics de routage refusent parfois les requêtes des
+    // WebViews. Transitous (déjà utilisé pour les transports) accepte
+    // `directModes` : c'est le repli qui garantit un tracé réel à pied, à vélo
+    // et en voiture plutôt qu'un message d'erreur.
+    const calls: string[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (input: any) => {
+      const url = decodeURIComponent(String(input));
+      calls.push(url);
+      if (!url.includes('transitous')) throw new Error('502');
+      return {
+        ok: true,
+        json: async () => ({
+          itineraries: [
+            {
+              duration: 870,
+              legs: [
+                {
+                  mode: 'CAR',
+                  distance: 4800,
+                  duration: 870,
+                  from: { name: 'Départ' },
+                  to: { name: 'Arrivée' },
+                  legGeometry: { points: POLY_1E7, precision: 7 },
+                },
+              ],
+            },
+          ],
+        }),
+      } as any;
+    }) as any;
+    try {
+      const plan = await routeOnFootBikeOrCar(from, to, 'car');
+      expect(calls.some((url) => url.includes('directModes=CAR'))).toBe(true);
+      expect(plan.mode).toBe('car');
+      expect(plan.provider).toContain('Transitous');
+      expect(plan.distanceM).toBe(4800);
+      expect(plan.durationS).toBe(870);
+      expect(plan.geometry.length).toBeGreaterThan(1);
+      expect(plan.degraded).toBeUndefined();
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('signale l’indisponibilité quand tous les moteurs échouent', async () => {
     const original = globalThis.fetch;
     globalThis.fetch = (async () => {
       throw new Error('offline');
@@ -403,6 +479,64 @@ describe('routeOnFootBikeOrCar', () => {
     } finally {
       globalThis.fetch = original;
     }
+  });
+});
+
+describe('planRoute — jamais d’impasse pour la marche, le vélo et la voiture', () => {
+  const from = { lat: 48.85, lng: 2.35 };
+  const to = { lat: 48.87, lng: 2.29 };
+
+  it('renvoie une estimation explicite quand aucun moteur ne répond', async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      throw new Error('offline');
+    }) as any;
+    try {
+      const plan = await planRoute(from, to, 'walk');
+      expect(plan.degraded).toBe(true);
+      expect(plan.mode).toBe('walk');
+      expect(plan.distanceM).toBeGreaterThan(1500);
+      expect(plan.geometry.length).toBeGreaterThan(2);
+      // Aucune consigne « rue » n'est inventée : le texte annonce l'estimation.
+      expect(plan.steps[0].instruction).toMatch(/vol d’oiseau/);
+      expect(plan.provider).toMatch(/Estimation/);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('laisse les transports en commun échouer explicitement', async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      throw new Error('offline');
+    }) as any;
+    try {
+      await expect(planRoute(from, to, 'transit')).rejects.toThrow(/Transports/i);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('respecte allowEstimate: false pour les tests et les appels stricts', async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () => {
+      throw new Error('offline');
+    }) as any;
+    try {
+      await expect(planRoute(from, to, 'bike', { allowEstimate: false })).rejects.toThrow(/indisponible/i);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('estime une durée plausible par mode', () => {
+    const walk = estimatePlan(from, to, 'walk');
+    const bike = estimatePlan(from, to, 'bike');
+    const car = estimatePlan(from, to, 'car');
+    expect(walk.distanceM).toBe(bike.distanceM);
+    expect(walk.durationS).toBeGreaterThan(bike.durationS);
+    expect(bike.durationS).toBeGreaterThan(car.durationS);
+    expect(walk.degradedReason).toBeTruthy();
   });
 });
 

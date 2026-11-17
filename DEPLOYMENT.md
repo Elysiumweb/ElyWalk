@@ -1,5 +1,36 @@
 # Déploiement ElyWalk
 
+## 2.2.5 — déployer les règles **et** l'application
+
+Cette version corrige trois défauts dont deux dépendent des règles Firestore :
+les **validations de pas multiples** (`validStepCredit` réécrite) et la
+suppression de **toutes** les conditions `email_verified` (désormais aucune
+fonction n'est réservée aux comptes confirmés : pas, défis, amis, publicité,
+parrainage, dépenses, retraits). Une application 2.2.5 avec des règles
+antérieures serait refusée à la deuxième validation du jour et bloquerait encore
+les récompenses des comptes non confirmés ; des règles 2.2.5 avec une
+application antérieure fonctionnent (l'ancien client ne valide qu'une fois).
+
+```bash
+firebase deploy --only firestore:rules     # indispensable
+cd app && npm run build && npx cap sync android
+```
+
+Vérifier ensuite, avec un compte **dont l'e-mail n'est pas confirmé** : valider
+ses pas deux fois dans la même journée (deux crédits distincts), envoyer et
+accepter une demande d'ami, ouvrir et encaisser un défi, regarder une vidéo
+récompensée, demander un retrait. Tout doit fonctionner sans confirmation.
+
+⚠️ Vérifier aussi la console Firebase : *Authentication → Méthodes de connexion
+→ E-mail/Mot de passe* ne doit pas activer l'option « Exiger une vérification
+par e-mail avant connexion », qui bloquerait l'accès **avant** même l'arrivée
+dans l'application (ce réglage n'est pas versionné dans ce dépôt).
+
+Côté itinéraires (`lib/directions.ts`), aucun déploiement serveur n'est
+nécessaire : la chaîne Valhalla → OSRM → Transitous s'exécute depuis
+l'application. Si les quatre moteurs publics sont injoignables, l'écran affiche
+une estimation à vol d'oiseau explicitement annoncée plutôt qu'une erreur.
+
 ## Identifiant d'application (⚠️ à faire AVANT publication)
 
 L'`applicationId` / `appId` est désormais **`com.elysium.elywalk`** (fini

@@ -380,6 +380,14 @@ export default function NavigationView({
                 </span>
               )}
             </div>
+            {/* Estimation : aucun moteur de routage n'a répondu. Le guidage
+                reste utilisable (cap + distance), mais on ne fait pas croire à
+                un tracé qui suivrait les rues. */}
+            {plan?.degraded && (
+              <small className="nav-degraded" data-testid="navigation-degraded">
+                Tracé estimé à vol d’oiseau — le service d’itinéraire n’a pas répondu.
+              </small>
+            )}
           </>
         )}
       </div>

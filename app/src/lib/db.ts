@@ -36,8 +36,9 @@ import {
   COINS_PER_EURO,
   BADGE_DEFINITIONS,
 } from './constants';
-import { coinsForSteps, caloriesForSteps, dateStr, yesterdayStr } from './coins';
+import { dateStr, yesterdayStr } from './coins';
 import { bestStreakFromDates as computeBestStreak } from './streak';
+import { planStepValidation } from './stepValidation';
 import { bestWeekFromDays, mergeRecords, sessionSplits, type PersonalRecords } from './records';
 import type { ImportedActivity } from './gpx';
 import { getDeviceSignals } from './device';
@@ -399,16 +400,16 @@ export async function claimReferralBonuses(uid: string): Promise<number> {
 // ============ Validation des pas ============
 
 export interface ValidationResult {
+  /** ElyCoins crédités **par cette validation** (delta de la journée). */
   coins: number;
   streak: number;
   freezeUsed: boolean;
-}
-
-function daysSince(date: string | null, today: string): number | null {
-  if (!date) return null;
-  const from = new Date(`${date}T00:00:00`);
-  const to = new Date(`${today}T00:00:00`);
-  return Math.round((to.getTime() - from.getTime()) / 86400000);
+  /** Pas ajoutés au total par cette validation. */
+  addedSteps: number;
+  /** Cumul de pas validé pour la journée, après cette validation. */
+  daySteps: number;
+  /** `true` si c'était la première validation de la journée. */
+  firstOfDay: boolean;
 }
 
 /** `true` pour un refus de règle Firestore (`permission-denied`). */
@@ -426,8 +427,12 @@ function isPermissionDenied(error: unknown): boolean {
  */
 function friendlyStepError(error: unknown): Error {
   if (isPermissionDenied(error)) {
+    // ⚠️ Ne plus parler d'e-mail : la validation des pas n'exige **aucune**
+    // confirmation d'adresse (règle `validStepCredit`, sans `verified()`). Le
+    // message précédent envoyait les utilisateurs vérifier un e-mail qui
+    // n'était pas en cause.
     return new Error(
-      'Validation refusée par le serveur. Vérifiez votre connexion et que votre e-mail est confirmé (Profil), puis réessayez dans un instant.',
+      'Validation refusée par le serveur. Vérifiez votre connexion, puis réessayez dans un instant.',
     );
   }
   return error instanceof Error ? error : new Error(String(error));
@@ -446,66 +451,98 @@ async function refreshAuthToken(): Promise<void> {
   }
 }
 
-/** Crédite les ElyCoins du jour (une seule validation par jour). */
+/**
+ * Crédite les pas **du jour** — autant de fois que l'utilisateur le souhaite.
+ *
+ * Avant la 2.2.5, une seule validation par jour était possible : le bouton
+ * restait désactivé jusqu'au lendemain, et l'utilisateur qui marchait après
+ * avoir validé à 14 h ne pouvait plus rien créditer avant 20 h le lendemain.
+ * Désormais :
+ *
+ *  • `users/{uid}/dailySteps/{today}` porte le **cumul** de la journée (pas,
+ *    ElyCoins, calories) et n'est jamais remis à zéro dans la journée ;
+ *  • le profil ne reçoit que le **delta** (pas, calories, ElyCoins) depuis la
+ *    validation précédente, calculé par `planStepValidation` — la même
+ *    arithmétique que la règle `validStepCredit` ;
+ *  • la série (et l'éventuel gel) n'avance qu'à la première validation du jour.
+ *
+ * `runTransaction` relit le cumul dans la transaction : deux validations
+ * concurrentes ne peuvent pas créditer deux fois les mêmes pas (la seconde voit
+ * le cumul déjà écrit et ne crédite que son delta, ou échoue proprement).
+ * On réessaie **une fois** après rafraîchissement du jeton : un jeton expiré
+ * produisait un « Missing or insufficient permissions » brut à l'utilisateur.
+ */
 export async function validateSteps(uid: string, steps: number): Promise<ValidationResult> {
-  if (!Number.isInteger(steps) || steps < 0 || steps > 60000) {
-    throw new Error('Nombre de pas incohérent (maximum quotidien : 60 000).');
-  }
   const today = dateStr();
-  const coins = coinsForSteps(steps);
 
-  /**
-   * `runTransaction` est idempotent côté règle : `lastValidatedDate` empêche un
-   * second crédit le même jour. On peut donc réessayer **une fois** après avoir
-   * rafraîchi le jeton d'authentification.
-   *
-   * C'est le correctif du « Missing or insufficient permissions » signalé à la
-   * validation : un jeton émis avant la vérification d'e-mail conserve la
-   * revendication `email_verified: false` jusqu'à son renouvellement (une
-   * heure). Les règles n'exigent plus cette revendication pour créditer des
-   * pas, mais un rafraîchissement corrige aussi les cas de jeton expiré, et
-   * l'erreur brute n'est plus affichée à l'utilisateur.
-   */
   const attempt = () => runTransaction(db, async (tx) => {
     const userRef = doc(db, 'users', uid);
+    const dayRef = doc(db, 'users', uid, 'dailySteps', today);
     const snap = await tx.get(userRef);
     if (!snap.exists()) throw new Error('Profil introuvable.');
     const profile = snap.data() as UserProfile;
-    const calories = caloriesForSteps(steps, profile.health, profile.strideLengthCm || 75);
-    if (profile.lastValidatedDate === today) {
-      throw new Error('Pas déjà validés aujourd’hui. Revenez demain !');
-    }
-    const gap = daysSince(profile.lastValidatedDate, today);
-    const availableFreezes = Math.max(0, profile.streakFreezes ?? 1);
-    const freezeUsed = gap === 2 && availableFreezes > 0;
-    const streak = gap === 1 || freezeUsed ? profile.streak + 1 : 1;
+    const daySnap = await tx.get(dayRef);
+    const previous = daySnap.exists()
+      ? (() => {
+          const data = daySnap.data() as Partial<DailySteps>;
+          return { steps: Number(data.steps) || 0, coins: Number(data.coins) || 0, calories: Number(data.calories) || 0 };
+        })()
+      : null;
+
+    const plan = planStepValidation({
+      stepsToday: steps,
+      previous,
+      profile: {
+        lastValidatedDate: profile.lastValidatedDate,
+        streak: profile.streak ?? 0,
+        streakFreezes: profile.streakFreezes,
+      },
+      health: profile.health,
+      strideLengthCm: profile.strideLengthCm || 75,
+      today,
+    });
+
     tx.update(userRef, {
-      elycoins: increment(coins),
-      totalSteps: increment(Math.floor(steps)),
-      totalCalories: increment(calories),
-      streak,
-      // La règle Firestore borne les gels à 3 (0 inclus) : on borne ici pour
-      // qu'un profil qui en portait davantage ne fasse pas échouer la
-      // validation entière.
-      streakFreezes: Math.max(0, Math.min(3, availableFreezes - (freezeUsed ? 1 : 0))),
+      elycoins: increment(plan.addedCoins),
+      totalSteps: increment(plan.addedSteps),
+      totalCalories: increment(plan.addedCalories),
+      streak: plan.streak,
+      streakFreezes: plan.streakFreezes,
       lastValidatedDate: today,
-      todaySteps: Math.floor(steps),
+      todaySteps: plan.steps,
       todayDate: today,
     });
-    tx.set(doc(db, 'users', uid, 'dailySteps', today), {
-      steps: Math.floor(steps),
-      coins,
-      calories,
+    tx.set(dayRef, {
+      steps: plan.steps,
+      coins: plan.coins,
+      calories: plan.calories,
       validatedAt: Date.now(),
+      // Compteur de validations du jour : informatif (historique, support).
+      // Borné à 200, comme la règle : au-delà, la borne serait refusée.
+      validations: Math.min(
+        200,
+        (daySnap.exists() ? Number((daySnap.data() as { validations?: number }).validations) || 0 : 0) + 1,
+      ),
     });
-    const txRef = doc(collection(db, 'users', uid, 'transactions'));
-    tx.set(txRef, {
-      type: 'steps',
-      coins,
-      note: `${Math.floor(steps).toLocaleString('fr-FR')} pas validés`,
-      createdAt: Date.now(),
-    } satisfies CoinTransaction);
-    return { coins, streak, freezeUsed, prevTotalSteps: profile.totalSteps, newTotal: profile.totalSteps + Math.floor(steps), newStreak: streak };
+    // Une ligne de registre par crédit réel : revalider sans nouveau palier
+    // (delta d'ElyCoins nul) n'en crée pas.
+    if (plan.addedCoins > 0) {
+      const txRef = doc(collection(db, 'users', uid, 'transactions'));
+      tx.set(txRef, {
+        type: 'steps',
+        coins: plan.addedCoins,
+        note: plan.firstOfDay
+          ? `${plan.addedSteps.toLocaleString('fr-FR')} pas validés`
+          : `${plan.addedSteps.toLocaleString('fr-FR')} pas supplémentaires (journée à ${plan.steps.toLocaleString('fr-FR')} pas)`,
+        createdAt: Date.now(),
+      } satisfies CoinTransaction);
+    }
+    return {
+      ...plan,
+      previousDaySteps: previous?.steps ?? 0,
+      prevTotalSteps: profile.totalSteps,
+      newTotal: profile.totalSteps + plan.addedSteps,
+    };
   });
 
   let result: Awaited<ReturnType<typeof attempt>>;
@@ -525,17 +562,44 @@ export async function validateSteps(uid: string, steps: number): Promise<Validat
   try {
     const fresh = await getUserProfile(uid);
     if (fresh) {
-      await checkAndUnlockBadges({ ...fresh, streak: result.newStreak, totalSteps: result.newTotal } as UserProfile, { stepsToday: steps, totalSteps: result.newTotal }).catch(()=>undefined);
-      // Feed pour objectif atteint
-      if (steps >= (fresh.dailyStepGoal || 10000)) {
-        await createFeedItem(fresh, 'goal', `a atteint son objectif de ${steps.toLocaleString('fr-FR')} pas ! 🎯`, { steps }).catch(()=>undefined);
+      await checkAndUnlockBadges(
+        { ...fresh, streak: result.streak, totalSteps: result.newTotal } as UserProfile,
+        { stepsToday: result.steps, totalSteps: result.newTotal },
+      ).catch(() => undefined);
+      const goal = fresh.dailyStepGoal || 10000;
+      // Le fil ne reçoit l'objectif qu'une fois : à la validation qui le franchit.
+      if (result.steps >= goal && result.previousDaySteps < goal) {
+        await createFeedItem(fresh, 'goal', `a atteint son objectif de ${result.steps.toLocaleString('fr-FR')} pas ! 🎯`, { steps: result.steps }).catch(() => undefined);
       }
-      if (result.newStreak>=7) {
-        await createFeedItem(fresh, 'streak', `enchaîne ${result.newStreak} jours consécutifs ! 🔥`, { streak: result.newStreak }).catch(()=>undefined);
+      if (result.streak >= 7 && result.firstOfDay) {
+        await createFeedItem(fresh, 'streak', `enchaîne ${result.streak} jours consécutifs ! 🔥`, { streak: result.streak }).catch(() => undefined);
       }
     }
   } catch {}
-  return { coins: result.coins, streak: result.streak, freezeUsed: result.freezeUsed };
+  return {
+    coins: result.addedCoins,
+    streak: result.streak,
+    freezeUsed: result.freezeUsed,
+    addedSteps: result.addedSteps,
+    daySteps: result.steps,
+    firstOfDay: result.firstOfDay,
+  };
+}
+
+/**
+ * Pas **déjà validés** aujourd'hui (`dailySteps/{date}`), pour que l'accueil
+ * affiche la récompense encore disponible au lieu d'un bouton désactivé toute
+ * la journée. Renvoie 0 quand la journée n'a pas encore été validée.
+ */
+export async function getTodayValidatedSteps(uid: string, day = dateStr()): Promise<number> {
+  try {
+    const snap = await getDoc(doc(db, 'users', uid, 'dailySteps', day));
+    if (!snap.exists()) return 0;
+    const steps = Number((snap.data() as Partial<DailySteps>).steps) || 0;
+    return Math.max(0, Math.floor(steps));
+  } catch {
+    return 0;
+  }
 }
 
 // ============ Défis ============
@@ -1029,6 +1093,8 @@ export async function listActivitySessions(uid: string, count = 20): Promise<Act
 export async function creditAdReward(uid: string): Promise<void> {
   const now = new Date();
   const slot = `${uid}_${dateStr(now)}_${String(now.getHours()).padStart(2, '0')}`;
+  // Aucune condition de confirmation d'e-mail : la règle Firestore borne
+  // seulement le rythme (une récompense par heure et par compte).
   await runTransaction(db, async (tx) => {
     const claimRef = doc(db, 'adClaims', slot);
     if ((await tx.get(claimRef)).exists()) throw new Error('Une seule récompense publicitaire est autorisée par heure.');
@@ -1058,6 +1124,8 @@ export async function requestConversion(
   if (type === 'paypal' && isPresidentUid(profile.uid)) {
     throw new Error('Le Président et le Co-Président sont exclus de la conversion en argent.');
   }
+  // Retraits et dons : aucune condition de confirmation d'e-mail (2.2.5). La
+  // règle Firestore vérifie seulement que le solde est débité du montant exact.
   await runTransaction(db, async (tx) => {
     const userRef = doc(db, 'users', profile.uid);
     const snap = await tx.get(userRef);

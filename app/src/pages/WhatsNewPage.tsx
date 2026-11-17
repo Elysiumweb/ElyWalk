@@ -14,6 +14,15 @@ export default function WhatsNewPage() {
       </div>
 
       <div className="card">
+        <div className="card-title">Novembre 2026 — 2.2.5</div>
+        <ul className="whats-new">
+          <li>🧭 <strong>Le GPS fonctionne dans tous les modes</strong> : à pied, à vélo et en voiture, le tracé s’affiche enfin comme en transports. Les requêtes n’étaient plus acceptées par les serveurs d’itinéraire ; quatre moteurs sont désormais essayés à la suite, et si aucun ne répond, ElyWalk affiche une estimation à vol d’oiseau clairement annoncée au lieu d’un écran d’erreur</li>
+          <li>✅ <strong>Tous les comptes ont les mêmes droits</strong> : confirmer son e-mail n’est plus exigé pour quoi que ce soit — valider ses pas, envoyer ou accepter une demande d’ami, suivre et encaisser ses défis, recevoir les récompenses publicitaires, utiliser un bonus de parrainage, dépenser son solde ou demander un retrait. La confirmation reste une simple option de sécurité, pour retrouver votre compte</li>
+          <li>🔁 <strong>Validez vos pas autant de fois que vous voulez</strong> : à 14 h puis à 20 h, chaque validation crédite les nouveaux pas et les ElyCoins correspondants, avec une publicité à chaque validation comme avant — la série, elle, n’avance qu’une fois par jour</li>
+        </ul>
+      </div>
+
+      <div className="card">
         <div className="card-title">Novembre 2026 — 2.2.3</div>
         <ul className="whats-new">
           <li>🧭 <strong>Itinéraires qui marchent vraiment</strong> : à pied, à vélo, en voiture et en transports, le tracé s’affiche sur la carte ElyWalk — plus d’écran « indisponible dans ce mode », et plus de renvoi vers une application externe</li>

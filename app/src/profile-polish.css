@@ -339,6 +339,23 @@
 }
 .directions-alt .btn { min-height: 44px; }
 
+/* Aucun moteur de routage n'a répondu : `planRoute` renvoie une estimation à
+   vol d'oiseau. Encart d'avertissement, moins alarmant qu'une erreur (le trajet
+   reste utilisable) mais sans ambiguïté sur la nature du tracé. */
+.directions-degraded {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--gold-border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--gold) 12%, transparent);
+  color: var(--white);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+}
+.directions-degraded .directions-alt { border: none; padding: 0; margin-top: 4px; }
+
 @media (max-height: 620px) {
   /* Petit écran : la carte reste utile sans pousser les actions hors de vue. */
   .directions-map { min-height: 150px; }
@@ -395,6 +412,7 @@
 .nav-instruction-meta strong { color: var(--gold); }
 .nav-loading { display: flex; align-items: center; gap: 10px; color: var(--muted); }
 .nav-error { display: grid; gap: 4px; color: #ff9b9b; }
+.nav-degraded { display: block; margin-top: 6px; color: var(--gold); font-size: var(--text-xs, 12px); line-height: 1.35; }
 
 .nav-bottom {
   position: relative; z-index: 2; margin-top: auto;

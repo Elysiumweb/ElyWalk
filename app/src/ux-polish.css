@@ -57,6 +57,9 @@ button, .tab, .chip { user-select: none; }
 .web-counter-note p { color: var(--muted); font-size: 13px; }
 .daily-action { padding: 12px; margin-bottom: 10px; border: 1px solid var(--gold-border); border-radius: var(--radius); background: var(--surface); }
 .daily-action-done { border-color: rgba(134,201,138,.35); }
+/* Validation illimitée : la règle du jeu est écrite sous le bouton, sinon
+   l'utilisateur qui a déjà validé à 14 h croit devoir attendre demain. */
+.daily-action-hint { margin: 6px 0 0; line-height: 1.35; }
 .validation-success { display: flex; gap: 10px; align-items: center; color: var(--success); margin: 0 2px 12px; }
 .validation-success > span { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; background: rgba(134,201,138,.12); font-weight: 700; }
 .validation-success strong, .validation-success small { display: block; }

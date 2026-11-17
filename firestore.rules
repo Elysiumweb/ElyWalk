@@ -3,7 +3,14 @@ service cloud.firestore {
   match /databases/{database}/documents {
     function auth() { return request.auth != null; }
     function self(uid) { return auth() && request.auth.uid == uid; }
-    function verified() { return auth() && request.auth.token.email_verified == true; }
+    // ⚠️ Aucun contrôle `email_verified` dans ces règles. Un compte dont
+    // l'adresse n'est pas encore confirmée a **exactement les mêmes droits**
+    // qu'un compte confirmé : valider ses pas, ses défis, ses amis, encaisser
+    // les récompenses publicitaires et de parrainage, dépenser son solde et
+    // demander un retrait. Les garde-fous sont les bornes métier (barème des
+    // pas, une récompense publicitaire par heure, catalogue des défis,
+    // `referralClaims`, solde jamais négatif) — pas la confirmation d'adresse,
+    // qui n'est de toute façon pas une preuve d'identité.
     function president() { return auth() && request.auth.uid in ['BZ333LlhuJMoD4rXIquGE0zzjX43','7XLpqYMKEMX5kLrQtts6NG3zRB32']; }
     function numberBetween(value, low, high) { return value is number && value >= low && value <= high; }
     // Blocage pour les **écritures** (et les interactions serveur) : la table
@@ -239,14 +246,22 @@ service cloud.firestore {
      *  1. la règle exigeait `verified()` (e-mail vérifié). Un compte e-mail qui
      *     n'avait pas encore cliqué le lien de vérification — cas courant sur
      *     mobile — voyait **toute** validation refusée, avec le message brut de
-     *     Firestore. La vérification reste exigée pour les crédits monétaires
-     *     (publicité, parrainage, défis) ; les pas sont bornés par la règle
-     *     elle-même, donc un compte non vérifié ne peut pas s'auto-créditer
-     *     davantage qu'un autre ;
+     *     Firestore. Depuis la 2.2.5, **aucune** règle n'exige plus
+     *     `email_verified` (voir la note en tête du fichier) : les pas sont
+     *     bornés par la règle elle-même, donc un compte non confirmé ne peut pas
+     *     s'auto-créditer davantage qu'un autre ;
      *  2. `totalCalories` / `streakFreezes` étaient lus sans garde : un profil
      *     créé avant l'ajout de ces champs faisait échouer l'évaluation, ce qui
      *     se traduit aussi par un refus. Les valeurs absentes sont désormais
      *     traitées comme zéro.
+     *
+     * 2.2.5 — **validations multiples dans la journée** : la règle n'exige plus
+     * `day != lastValidatedDate` (qui limitait à un crédit par jour). Le client
+     * peut revalider à 14 h puis à 20 h ; `dailySteps/{day}` porte le **cumul**
+     * de la journée et le profil ne reçoit que le **delta** depuis l'état
+     * précédent du document (lu par `get`, dans la même transaction). Le barème
+     * (`stepCoinsFor`) borne les ElyCoins au palier du cumul : revalider ne peut
+     * donc pas dépasser la récompense d'une seule validation du même total.
      */
     /**
      * A12.1 — records personnels : objet borné.
@@ -273,18 +288,57 @@ service cloud.firestore {
           && (!('bestWeekSteps' in request.resource.data.records)
             || numberBetween(request.resource.data.records.bestWeekSteps, 0, 700000)));
     }
+    /** Chemin du cumul quotidien de pas. */
+    function stepPath(uid, day) {
+      return /databases/$(database)/documents/users/$(uid)/dailySteps/$(day);
+    }
+    /**
+     * Barème des ElyCoins (miroir exact de `STEP_TIERS`, `app/src/lib/constants.ts`).
+     * Toute modification du barème doit être répercutée ici **et** dans
+     * `lib/coins.ts`, sinon les validations sont refusées.
+     */
+    function stepCoinsFor(steps) {
+      return steps >= 50000 ? 50
+        : steps >= 40000 ? 40
+        : steps >= 30000 ? 30
+        : steps >= 20000 ? 20
+        : steps >= 15000 ? 15
+        : steps >= 12500 ? 12
+        : steps >= 10000 ? 10
+        : steps >= 7500 ? 7
+        : steps >= 5000 ? 5
+        : steps >= 2500 ? 2
+        : 1;
+    }
     function validStepCredit(uid) {
       let day = request.resource.data.lastValidatedDate;
-      let daily = getAfter(/databases/$(database)/documents/users/$(uid)/dailySteps/$(day)).data;
+      let hadDay = exists(stepPath(uid, day));
+      let daily = getAfter(stepPath(uid, day)).data;
+      // Cumul déjà crédité pour ce jour (0 à la première validation).
+      let stepsBefore = hadDay ? get(stepPath(uid, day)).data.steps : 0;
+      let coinsBefore = hadDay ? get(stepPath(uid, day)).data.coins : 0;
+      let caloriesBefore = hadDay ? get(stepPath(uid, day)).data.calories : 0;
+      let addedSteps = daily.steps - stepsBefore;
+      let addedCoins = daily.coins - coinsBefore;
+      let addedCalories = daily.calories - caloriesBefore;
       let previousCalories = resource.data.keys().hasAny(['totalCalories']) ? resource.data.totalCalories : 0;
+      // Profils antérieurs à 2.1.0 : `lastValidatedDate` peut manquer.
+      let lastDay = resource.data.keys().hasAny(['lastValidatedDate']) ? resource.data.lastValidatedDate : null;
       let freezes = request.resource.data.streakFreezes;
-      return auth() && day != resource.data.lastValidatedDate
+      return auth()
+        // Même jour (revalidation) ou jour encore jamais crédité : une date déjà
+        // écrite ne peut pas être rejouée.
+        && (day == lastDay || !hadDay)
         && daily.steps is int && numberBetween(daily.steps, 0, 60000)
-        && daily.coins is number && numberBetween(daily.coins, 1, 50)
+        && daily.coins is number && numberBetween(daily.coins, 0, 50)
+        // Le barème est respecté : impossible de créditer 50 EC pour 10 pas.
+        && daily.coins == stepCoinsFor(daily.steps)
         && daily.calories is number && numberBetween(daily.calories, 0, 20000)
-        && request.resource.data.totalSteps == resource.data.totalSteps + daily.steps
-        && request.resource.data.totalCalories == previousCalories + daily.calories
-        && request.resource.data.elycoins == resource.data.elycoins + daily.coins
+        // Cumuls monotones, deltas strictement positifs en pas.
+        && addedSteps > 0 && addedCoins >= 0 && addedCalories >= 0
+        && request.resource.data.totalSteps == resource.data.totalSteps + addedSteps
+        && request.resource.data.totalCalories == previousCalories + addedCalories
+        && request.resource.data.elycoins == resource.data.elycoins + addedCoins
         && request.resource.data.todaySteps == daily.steps
         // 0 à 3 gels : les profils antérieurs pouvaient en porter deux, ce qui
         // suffisait à faire échouer la règle précédente (`<= 1`).
@@ -293,7 +347,7 @@ service cloud.firestore {
     function validAdCredit(uid) {
       let slot = request.resource.data.lastAdSlot;
       let claim = getAfter(/databases/$(database)/documents/adClaims/$(slot)).data;
-      return verified() && (!('lastAdSlot' in resource.data) || slot != resource.data.lastAdSlot) && claim.uid == uid && claim.coins == 0.1
+      return (!('lastAdSlot' in resource.data) || slot != resource.data.lastAdSlot) && claim.uid == uid && claim.coins == 0.1
         && request.resource.data.lastAdRewardAt == request.time
         && (!('lastAdRewardAt' in resource.data) || request.time > resource.data.lastAdRewardAt + duration.value(1, 'h'))
         && request.resource.data.elycoins == resource.data.elycoins + 0.1
@@ -304,7 +358,7 @@ service cloud.firestore {
       let claimId = request.resource.data.lastReferralClaim;
       let before = get(/databases/$(database)/documents/referralClaims/$(claimId)).data;
       let after = getAfter(/databases/$(database)/documents/referralClaims/$(claimId)).data;
-      return verified() && (!('lastReferralClaim' in resource.data) || claimId != resource.data.lastReferralClaim) && before.claimed == false && after.claimed == true
+      return (!('lastReferralClaim' in resource.data) || claimId != resource.data.lastReferralClaim) && before.claimed == false && after.claimed == true
         && after.sponsorUid == uid && request.resource.data.elycoins == resource.data.elycoins + 10
         && request.resource.data.totalSteps == resource.data.totalSteps;
     }
@@ -318,7 +372,7 @@ service cloud.firestore {
       // autoritaire (`challengeCatalog`, écrit uniquement par l'administration) :
       // un défi inventé ou un montant arbitraire ne peuvent pas être crédités.
       let catalog = get(/databases/$(database)/documents/challengeCatalog/$(challengeId)).data;
-      return verified() && (!('lastChallengeClaim' in resource.data) || challengeId != resource.data.lastChallengeClaim)
+      return (!('lastChallengeClaim' in resource.data) || challengeId != resource.data.lastChallengeClaim)
         && after.claimed == true && after.uid == uid
         && before.claimed == false
         && catalog.active == true
@@ -331,7 +385,7 @@ service cloud.firestore {
         && request.resource.data.lastValidatedDate == resource.data.lastValidatedDate;
     }
     function validDebit() {
-      return verified() && request.resource.data.elycoins >= 0
+      return request.resource.data.elycoins >= 0
         && request.resource.data.elycoins < resource.data.elycoins
         && request.resource.data.totalSteps == resource.data.totalSteps
         && request.resource.data.totalCalories == resource.data.totalCalories;
@@ -406,16 +460,23 @@ service cloud.firestore {
           || auth();
         allow list: if self(uid) || president() || areFriends(request.auth.uid, uid)
           || (auth() && request.query.limit <= 31);
-        // Le propriétaire seul écrit ses pas du jour. `verified()` a été retiré :
-        // un compte e-mail non vérifié doit pouvoir valider ses pas (voir
-        // `validStepCredit`). Les bornes restent strictes, et le crédit du
-        // profil est lui-même contrôlé par `validStepCredit` (jour non déjà
-        // validé, montants cohérents).
+        // Le propriétaire seul écrit ses pas du jour, sans condition d'e-mail
+        // (voir la note en tête du fichier). Les bornes restent strictes, et le
+        // crédit du profil est lui-même contrôlé par `validStepCredit` (cumuls
+        // monotones, barème respecté, deltas cohérents).
+        //
+        // 2.2.5 — le document porte le **cumul** de la journée et il est réécrit
+        // à chaque revalidation : `validations` compte les passages (borné), il
+        // ne sert qu'à l'historique et au support.
         allow create, update: if self(uid)
           && request.resource.data.steps is int && numberBetween(request.resource.data.steps, 0, 60000)
           && request.resource.data.coins is number && numberBetween(request.resource.data.coins, 1, 50)
+          // Le cumul d'ElyCoins de la journée suit le barème du cumul de pas.
+          && request.resource.data.coins == stepCoinsFor(request.resource.data.steps)
           && request.resource.data.calories is number && numberBetween(request.resource.data.calories, 0, 20000)
-          && request.resource.data.validatedAt is number;
+          && request.resource.data.validatedAt is number
+          && (!('validations' in request.resource.data)
+            || numberBetween(request.resource.data.validations, 1, 200));
         allow delete: if false;
       }
       match /notificationTokens/{tokenId} {
@@ -439,13 +500,16 @@ service cloud.firestore {
         // unités (le plus grand objectif de campagne), `claimed` seul champ
         // modifiable après création. Le montant est aussi comparé au barème du
         // catalogue côté fonctions d'administration.
-        allow create: if self(uid) && verified()
+        // Aucune condition d'e-mail : progression **et** encaissement sont
+        // ouverts à tous. Le montant reste borné au catalogue autoritaire et la
+        // récompense reste contrôlée par `validChallengeCredit`.
+        allow create: if self(uid)
           && request.resource.data.uid == uid
           && request.resource.data.progress is number
           && numberBetween(request.resource.data.progress, 0, 400000)
           && request.resource.data.claimed is bool
           && (!('reward' in request.resource.data) || numberBetween(request.resource.data.reward, 0, 50));
-        allow update: if self(uid) && verified()
+        allow update: if self(uid)
           && request.resource.data.uid == uid
           && numberBetween(request.resource.data.progress, 0, 400000)
           && request.resource.data.diff(resource.data).affectedKeys().hasAny(['claimed','progress','updatedAt','claimedAt','reward'])
@@ -566,7 +630,9 @@ service cloud.firestore {
 
     match /adClaims/{slot} {
       allow read: if auth();
-      allow create: if verified() && request.resource.data.uid == request.auth.uid
+      // Une seule récompense par heure et par compte, quel que soit l'état de
+      // l'adresse e-mail (voir la note en tête des règles).
+      allow create: if request.resource.data.uid == request.auth.uid
         && request.resource.data.slot == slot && slot.matches('^' + request.auth.uid + '_[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}$')
         && request.resource.data.coins == 0.1;
       allow update, delete: if false;
@@ -626,7 +692,7 @@ service cloud.firestore {
     }
     match /withdrawals/{id} {
       allow read: if president() || (auth() && resource.data.uid == request.auth.uid);
-      allow create: if verified() && request.resource.data.uid == request.auth.uid
+      allow create: if request.resource.data.uid == request.auth.uid
         && request.resource.data.status == 'pending' && request.resource.data.coins is int
         && request.resource.data.coins > 0
         && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.elycoins

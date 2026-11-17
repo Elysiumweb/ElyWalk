@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { afterAll as after, beforeAll as before, beforeEach, describe, expect, it } from 'vitest';
 import { assertFails, assertSucceeds, initializeTestEnvironment, type RulesTestEnvironment } from '@firebase/rules-unit-testing';
-import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, writeBatch, serverTimestamp } from 'firebase/firestore';
 
 const PROJECT = 'elywalk-security-tests';
 const ALICE = 'alice'; const BOB = 'bob'; const ADMIN = 'BZ333LlhuJMoD4rXIquGE0zzjX43';
@@ -386,52 +386,79 @@ describe('validation des pas — un compte non vérifié doit pouvoir valider', 
       const p: Record<string, unknown> = profile(ALICE);
       if (!withCaloriesOnProfile) delete p.totalCalories;
       await setDoc(doc(ctx.firestore(), 'users/alice'), p);
-      await setDoc(doc(ctx.firestore(), 'users/alice/dailySteps/2026-11-13'), {
-        steps: 8000, coins: 4, calories: 300, validatedAt: Date.now(),
-      });
     });
+  };
+
+  /** Écriture atomique du profil **et** du cumul du jour, comme le client. */
+  const validate = (
+    db: ReturnType<typeof unverified>,
+    payload: {
+      steps: number; coins: number; calories: number;
+      totalSteps: number; totalCalories: number; elycoins: number; freezes: number;
+      day?: string;
+    }
+  ) => {
+    const day = payload.day || '2026-11-13';
+    const batch = writeBatch(db);
+    batch.set(doc(db, `users/alice/dailySteps/${day}`), {
+      // 8 000 pas = palier à 7 EC (barème `STEP_TIERS`).
+      steps: payload.steps, coins: payload.coins, calories: payload.calories, validatedAt: Date.now(),
+    });
+    batch.update(doc(db, 'users/alice'), {
+      lastValidatedDate: day,
+      totalSteps: payload.totalSteps,
+      totalCalories: payload.totalCalories,
+      elycoins: payload.elycoins,
+      todaySteps: payload.steps,
+      streakFreezes: payload.freezes,
+    });
+    return batch.commit();
   };
 
   it('crédite les pas, y compris quand `totalCalories` est absent du profil', async () => {
     await seed(false);
-    await assertSucceeds(updateDoc(doc(unverified(ALICE), 'users/alice'), {
-      lastValidatedDate: '2026-11-13', totalSteps: 8000, totalCalories: 300,
-      elycoins: 4, todaySteps: 8000, streakFreezes: 2,
+    await assertSucceeds(validate(unverified(ALICE), {
+      steps: 8000, coins: 7, calories: 300,
+      totalSteps: 8000, totalCalories: 300, elycoins: 7, freezes: 2,
     }));
   });
 
   it('accepte jusqu’à trois gels de série', async () => {
     await seed(true);
-    await assertSucceeds(updateDoc(doc(unverified(ALICE), 'users/alice'), {
-      lastValidatedDate: '2026-11-13', totalSteps: 8000, totalCalories: 300,
-      elycoins: 4, todaySteps: 8000, streakFreezes: 3,
+    await assertSucceeds(validate(unverified(ALICE), {
+      steps: 8000, coins: 7, calories: 300,
+      totalSteps: 8000, totalCalories: 300, elycoins: 7, freezes: 3,
     }));
   });
 
   it('refuse un crédit incohérent malgré la levée de `verified()`', async () => {
     await seed(true);
-    await assertFails(updateDoc(doc(unverified(ALICE), 'users/alice'), {
-      // 40 EC pour 8000 pas : très au-delà du barème (4 EC).
-      lastValidatedDate: '2026-11-13', totalSteps: 8000, totalCalories: 300,
-      elycoins: 40, todaySteps: 8000, streakFreezes: 1,
+    await assertFails(validate(unverified(ALICE), {
+      // 40 EC pour 8 000 pas : très au-delà du barème (7 EC).
+      steps: 8000, coins: 40, calories: 300,
+      totalSteps: 8000, totalCalories: 300, elycoins: 40, freezes: 1,
     }));
+    // Revenir sur une date déjà créditée, sans document `dailySteps` du jour.
     await assertFails(updateDoc(doc(unverified(ALICE), 'users/alice'), {
-      // Jour déjà validé : pas de double crédit.
       lastValidatedDate: '2026-11-12', totalSteps: 8000, totalCalories: 300,
-      elycoins: 4, todaySteps: 8000, streakFreezes: 4,
+      elycoins: 7, todaySteps: 8000, streakFreezes: 1,
     }));
   });
 
   it('borne les pas du jour écrits par le propriétaire', async () => {
     await seed(true);
     await assertFails(setDoc(doc(unverified(ALICE), 'users/alice/dailySteps/2026-11-14'), {
-      steps: 90000, coins: 4, calories: 300, validatedAt: Date.now(),
+      steps: 90000, coins: 7, calories: 300, validatedAt: Date.now(),
     }));
     await assertFails(setDoc(doc(unverified(ALICE), 'users/alice/dailySteps/2026-11-14'), {
       steps: 8000, coins: 500, calories: 300, validatedAt: Date.now(),
     }));
-    await assertSucceeds(setDoc(doc(unverified(ALICE), 'users/alice/dailySteps/2026-11-14'), {
+    // Barème non respecté : 8 000 pas valent 7 EC, pas 4.
+    await assertFails(setDoc(doc(unverified(ALICE), 'users/alice/dailySteps/2026-11-14'), {
       steps: 8000, coins: 4, calories: 300, validatedAt: Date.now(),
+    }));
+    await assertSucceeds(setDoc(doc(unverified(ALICE), 'users/alice/dailySteps/2026-11-14'), {
+      steps: 8000, coins: 7, calories: 300, validatedAt: Date.now(),
     }));
   });
 });
@@ -565,5 +592,210 @@ describe('A9 / A12.1 — objectifs et records du profil', () => {
     await assertFails(updateDoc(doc(as(ALICE), 'users/alice'), {
       records: { best1kmSec: 330, longestDistanceM: 12500, bestWeekSteps: 62000, bestWeekStart: null, updatedAt: 3, best5kmSec: null, elycoins: 99999 },
     }));
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// 2.2.5 — validations multiples dans la journée (défaut signalé : « je ne peux
+// valider mes pas qu'une fois par jour »), et levée des blocages dus à
+// l'e-mail non confirmé (pas, amis, défis).
+// ---------------------------------------------------------------------------
+describe('2.2.5 — validations de pas multiples dans la même journée', () => {
+  const unverified = (uid: string) => env.authenticatedContext(uid, { email_verified: false }).firestore();
+  const dayDoc = (steps: number, coins: number, calories: number) => ({
+    steps, coins, calories, validatedAt: Date.now(),
+  });
+
+  const seed = async (profileFields: Record<string, unknown>, day?: { steps: number; coins: number; calories: number }) => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'users/alice'), { ...profile(ALICE), ...profileFields });
+      if (day) await setDoc(doc(ctx.firestore(), 'users/alice/dailySteps/2026-11-13'), dayDoc(day.steps, day.coins, day.calories));
+    });
+  };
+
+  it('accepte une seconde validation le même jour et ne crédite que le delta', async () => {
+    await seed(
+      { lastValidatedDate: '2026-11-13', totalSteps: 8000, totalCalories: 320, elycoins: 7, todaySteps: 8000, streakFreezes: 1 },
+      { steps: 8000, coins: 7, calories: 320 }
+    );
+    const db = unverified(ALICE);
+    const batch = writeBatch(db);
+    batch.set(doc(db, 'users/alice/dailySteps/2026-11-13'), dayDoc(12000, 10, 480));
+    batch.update(doc(db, 'users/alice'), {
+      totalSteps: 12000, totalCalories: 480, elycoins: 10, todaySteps: 12000,
+      lastValidatedDate: '2026-11-13', streakFreezes: 1,
+    });
+    await assertSucceeds(batch.commit());
+  });
+
+  it('accepte trois validations successives dans la même journée', async () => {
+    await seed(
+      { lastValidatedDate: '2026-11-13', totalSteps: 1500, totalCalories: 60, elycoins: 1, todaySteps: 1500, streakFreezes: 1 },
+      { steps: 1500, coins: 1, calories: 60 }
+    );
+    const steps = [
+      { steps: 5600, coins: 5, calories: 224 },
+      { steps: 15200, coins: 15, calories: 608 },
+    ];
+    let total = 1500;
+    let coins = 1;
+    let calories = 60;
+    for (const next of steps) {
+      const db = unverified(ALICE);
+      const batch = writeBatch(db);
+      batch.set(doc(db, 'users/alice/dailySteps/2026-11-13'), dayDoc(next.steps, next.coins, next.calories));
+      batch.update(doc(db, 'users/alice'), {
+        totalSteps: next.steps,
+        totalCalories: calories + (next.calories - calories),
+        elycoins: coins + (next.coins - coins),
+        todaySteps: next.steps,
+        lastValidatedDate: '2026-11-13',
+        streakFreezes: 1,
+      });
+      await assertSucceeds(batch.commit());
+      total = next.steps;
+      coins = next.coins;
+      calories = next.calories;
+    }
+  });
+
+  it('refuse de créditer deux fois les mêmes pas', async () => {
+    await seed(
+      { lastValidatedDate: '2026-11-13', totalSteps: 8000, totalCalories: 320, elycoins: 7, todaySteps: 8000, streakFreezes: 1 },
+      { steps: 8000, coins: 7, calories: 320 }
+    );
+    const db = unverified(ALICE);
+    const batch = writeBatch(db);
+    // Même cumul réécrit, mais profil crédité une seconde fois.
+    batch.set(doc(db, 'users/alice/dailySteps/2026-11-13'), dayDoc(8000, 7, 320));
+    batch.update(doc(db, 'users/alice'), {
+      totalSteps: 16000, totalCalories: 640, elycoins: 14, todaySteps: 8000, streakFreezes: 1,
+    });
+    await assertFails(batch.commit());
+  });
+
+  it('refuse un crédit hors barème (ElyCoins non conformes au palier)', async () => {
+    await seed({ lastValidatedDate: '2026-11-12', totalSteps: 0, totalCalories: 0, elycoins: 0, todaySteps: 0, streakFreezes: 1 });
+    const db = unverified(ALICE);
+    const batch = writeBatch(db);
+    // 8 000 pas valent 7 EC, pas 40.
+    batch.set(doc(db, 'users/alice/dailySteps/2026-11-13'), dayDoc(8000, 40, 320));
+    batch.update(doc(db, 'users/alice'), {
+      totalSteps: 8000, totalCalories: 320, elycoins: 40, todaySteps: 8000,
+      lastValidatedDate: '2026-11-13', streakFreezes: 1,
+    });
+    await assertFails(batch.commit());
+  });
+
+  it('refuse de réécrire un jour déjà crédité en changeant la date', async () => {
+    await seed(
+      { lastValidatedDate: '2026-11-14', totalSteps: 8000, totalCalories: 320, elycoins: 7, todaySteps: 8000, streakFreezes: 1 },
+      { steps: 8000, coins: 7, calories: 320 }
+    );
+    const db = unverified(ALICE);
+    const batch = writeBatch(db);
+    batch.set(doc(db, 'users/alice/dailySteps/2026-11-13'), dayDoc(16000, 15, 640));
+    batch.update(doc(db, 'users/alice'), {
+      totalSteps: 16000, totalCalories: 640, elycoins: 15, todaySteps: 16000,
+      lastValidatedDate: '2026-11-13', streakFreezes: 1,
+    });
+    await assertFails(batch.commit());
+  });
+});
+
+describe('2.2.5 — un compte non vérifié a exactement les mêmes droits', () => {
+  // Décision produit : `email_verified` n'est **plus** une condition d'accès
+  // nulle part. Ces tests couvrent les anciennes barrières (pas, amis, défis,
+  // publicité, parrainage, dépenses, retraits) avec un contexte non vérifié.
+  const unverified = (uid: string) => env.authenticatedContext(uid, { email_verified: false }).firestore();
+
+  const seed = async (fields: Record<string, unknown> = {}) => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'users/alice'), { ...profile(ALICE), ...fields });
+      await setDoc(doc(ctx.firestore(), 'users/bob'), profile(BOB));
+    });
+  };
+
+  it('envoie puis accepte une demande d’ami', async () => {
+    await seed();
+    await assertSucceeds(setDoc(doc(unverified(BOB), 'friendRequests/bob_alice'), request(BOB, ALICE)));
+    await assertSucceeds(updateDoc(doc(unverified(ALICE), 'friendRequests/bob_alice'), { status: 'accepted' }));
+    await assertSucceeds(setDoc(doc(unverified(ALICE), 'friendships/alice_bob'), {
+      members: [ALICE, BOB], createdAt: Date.now(), hiddenFor: [],
+    }));
+  });
+
+  it('suit la progression d’un défi', async () => {
+    await seed();
+    await assertSucceeds(setDoc(doc(unverified(ALICE), 'users/alice/challenges/c1'), {
+      uid: ALICE, progress: 12000, claimed: false, reward: 5, updatedAt: Date.now(),
+    }));
+  });
+
+  it('encaisse une récompense publicitaire (une par heure)', async () => {
+    await seed({ elycoins: 0 });
+    const db = unverified(ALICE);
+    const slot = 'alice_2026-11-13_10';
+    const batch = writeBatch(db);
+    batch.set(doc(db, `adClaims/${slot}`), { uid: ALICE, slot, coins: 0.1, createdAt: Date.now() });
+    batch.update(doc(db, 'users/alice'), {
+      elycoins: 0.1, lastAdSlot: slot, lastAdRewardAt: serverTimestamp(),
+    });
+    await assertSucceeds(batch.commit());
+  });
+
+  it('réclame la récompense d’un défi du catalogue', async () => {
+    await seed({ lastValidatedDate: '2026-11-13', streak: 0 });
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'challengeCatalog/c1'), { active: true, reward: 5, goal: 10000 });
+      await setDoc(doc(ctx.firestore(), 'users/alice/challenges/c1'), {
+        uid: ALICE, progress: 12000, claimed: false, reward: 5, updatedAt: 1,
+      });
+    });
+    const db = unverified(ALICE);
+    const batch = writeBatch(db);
+    batch.update(doc(db, 'users/alice/challenges/c1'), { claimed: true, updatedAt: Date.now() });
+    batch.update(doc(db, 'users/alice'), { elycoins: 5, lastChallengeClaim: 'c1' });
+    await assertSucceeds(batch.commit());
+  });
+
+  it('réclame un bonus de parrainage', async () => {
+    await seed({ elycoins: 0 });
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'referralClaims/referee'), {
+        referredUid: 'referee', referredName: 'Filleul', sponsorUid: ALICE, claimed: false, createdAt: 1,
+      });
+    });
+    const db = unverified(ALICE);
+    const batch = writeBatch(db);
+    batch.update(doc(db, 'referralClaims/referee'), { claimed: true });
+    batch.update(doc(db, 'users/alice'), { elycoins: 10, lastReferralClaim: 'referee' });
+    await assertSucceeds(batch.commit());
+  });
+
+  it('demande un retrait PayPal (solde débité dans la même écriture)', async () => {
+    await seed({ elycoins: 100 });
+    const db = unverified(ALICE);
+    const batch = writeBatch(db);
+    batch.update(doc(db, 'users/alice'), { elycoins: 90 });
+    batch.set(doc(db, 'withdrawals/w1'), {
+      uid: ALICE, userName: ALICE, type: 'paypal', coins: 10, euros: 1, paypalEmail: 'alice@example.com',
+      status: 'pending', createdAt: Date.now(), notified: false,
+    });
+    await assertSucceeds(batch.commit());
+  });
+
+  it('dépense son solde sans confirmation d’e-mail', async () => {
+    await seed({ elycoins: 100 });
+    await assertSucceeds(updateDoc(doc(unverified(ALICE), 'users/alice'), { elycoins: 95 }));
+  });
+
+  it('reste borné : pas de solde négatif ni de crédit arbitraire', async () => {
+    await seed({ elycoins: 5 });
+    // Aucune écriture ne peut rendre le solde négatif…
+    await assertFails(updateDoc(doc(unverified(ALICE), 'users/alice'), { elycoins: -1 }));
+    // …ni l'augmenter sans justificatif (pas, pub, parrainage, défi).
+    await assertFails(updateDoc(doc(unverified(ALICE), 'users/alice'), { elycoins: 500 }));
   });
 });
