@@ -14,13 +14,9 @@ import {
 import { getAdConsent, subscribeAdConsent, type AdConsent } from './adConsent';
 
 // ============================================================================
-// Publicité — Unity LevelPlay (médiation) avec Meta Audience Network en bidding.
-//
-// Depuis 2.1.0, l'application ne parle plus directement au SDK Meta : elle
-// passe par **Unity LevelPlay**, la plateforme de médiation. Meta Audience
-// Network y est branché en in-app bidding (le SDK Meta est embarqué par
-// l'adaptateur `facebook-adapter`), ce qui permet d'ajouter d'autres réseaux
-// sans retoucher l'application.
+// Publicité — Unity LevelPlay (médiation).
+// Les SDK partenaires sont chargés par les adaptateurs Android de LevelPlay.
+// Le code WebView utilise uniquement les ad units LevelPlay.
 //
 // Le SDK LevelPlay est du code natif Android : la WebView ne peut pas l'appeler
 // directement. Un plugin Capacitor maison (`LevelPlayAdsPlugin.java`) expose :
@@ -96,79 +92,74 @@ const LOAD_TIMEOUT_MS = 10000;
 // ---------------------------------------------------------------------------
 
 let initialized = false;
-let initialization: Promise<void> | null = null;
-/** `true` uniquement quand l'utilisateur a exprimé un choix (personnalisé ou non). */
-let adsAllowed = false;
-let appliedConsent: AdConsent | null = null;
+let configuration: Promise<void> | null = null;
+let currentConsent: AdConsent | undefined;
+let appliedConsent: AdConsent = 'unknown';
 let consentSubscribed = false;
 let currentUserId: string | undefined;
-/** Dernier UID réellement transmis au SDK (utile pour les callbacks S2S). */
 let appliedUserId: string | undefined;
 
-/** Applique le consentement courant au SDK LevelPlay (RGPD : personnalisé ou non). */
-async function applyConsent(): Promise<void> {
-  const consent = await getAdConsent();
-  adsAllowed = consent !== 'unknown';
-  if (!initialized) return;
-  if (appliedConsent === consent) return;
-  try {
-    await LevelPlayAds.setConsent({ personalized: consent === 'granted' });
-    appliedConsent = consent;
-  } catch (e) {
-    console.warn('[LevelPlay] setConsent error', e);
-  }
-  if (!adsAllowed) await hideBottomAd();
-}
-
 /**
- * Initialise le SDK LevelPlay puis applique le consentement RGPD.
- *
- * `userId` (facultatif) est transmis à LevelPlay (`setDynamicUserId`) : il est
- * requis pour les callbacks server-to-server et pour le parcours utilisateur
- * d'Ad Quality.
+ * Initialise LevelPlay après un choix explicite et synchronise le réglage
+ * natif avant tout chargement d'annonce. Les appels simultanés au démarrage
+ * attendent la même configuration.
  */
 export async function initAds(userId?: string): Promise<void> {
   if (!isNative()) return;
   if (userId) currentUserId = userId;
-  if (initialized) {
-    if (userId && userId !== appliedUserId) {
-      appliedUserId = userId;
-      void LevelPlayAds.setUserId({ userId }).catch(() => undefined);
-    }
-    return;
+  if (!consentSubscribed) {
+    consentSubscribed = true;
+    subscribeAdConsent((choice) => {
+      currentConsent = choice;
+      void initAds();
+    });
   }
-  if (initialization) return initialization;
+  if (configuration) return configuration;
 
-  initialization = (async () => {
+  configuration = (async () => {
     try {
-      const consent = await getAdConsent();
-      adsAllowed = consent !== 'unknown';
-      // Le SDK doit connaître le consentement AVANT l'initialisation : LevelPlay
-      // le transmet aux réseaux (dont Meta) au moment de la configuration.
-      await LevelPlayAds.initialize({
-        appKey: LEVELPLAY_APP_KEY,
-        userId: currentUserId,
-        personalized: consent === 'granted',
-      });
-      initialized = true;
-      appliedConsent = consent;
-      appliedUserId = currentUserId;
-      if (!consentSubscribed) {
-        consentSubscribed = true;
-        subscribeAdConsent(() => { void applyConsent(); });
+      const savedChoice = await getAdConsent();
+      currentConsent ??= savedChoice;
+      if (currentConsent === 'unknown') return;
+
+      if (!initialized) {
+        const choice = currentConsent;
+        const initialUserId = currentUserId;
+        await LevelPlayAds.initialize({
+          appKey: LEVELPLAY_APP_KEY,
+          userId: initialUserId,
+          personalized: choice === 'granted',
+        });
+        initialized = true;
+        appliedConsent = choice;
+        appliedUserId = initialUserId;
+      }
+
+      // Le choix a pu changer pendant l'initialisation ou une mise à jour.
+      while (currentConsent !== appliedConsent) {
+        const choice = currentConsent;
+        appOpenPreloaded = false;
+        await hideBottomAd();
+        await LevelPlayAds.setConsent({ personalized: choice === 'granted' });
+        appliedConsent = choice;
+      }
+
+      if (currentUserId && currentUserId !== appliedUserId) {
+        appliedUserId = currentUserId;
+        void LevelPlayAds.setUserId({ userId: currentUserId }).catch(() => undefined);
       }
     } catch (e) {
-      console.warn('[LevelPlay] init error', e);
+      console.warn('[LevelPlay] configuration error', e);
     } finally {
-      initialization = null;
+      configuration = null;
     }
   })();
-  return initialization;
+  return configuration;
 }
 
-/** `true` si un choix de consentement autorise la diffusion d'annonces. */
+/** Indique si le SDK a bien reçu le dernier choix explicite. */
 export function canShowAds(): boolean {
-  return initialized && adsAllowed;
+  return initialized && !configuration && appliedConsent !== 'unknown' && appliedConsent === currentConsent;
 }
 
 /**
@@ -185,8 +176,8 @@ export type AdGate = 'ready' | 'no-consent' | 'unavailable';
 export async function adGate(): Promise<AdGate> {
   if (!isNative()) return 'unavailable';
   await initAds();
-  if (!adsAllowed) return 'no-consent';
-  return initialized ? 'ready' : 'unavailable';
+  if (!currentConsent || currentConsent === 'unknown') return 'no-consent';
+  return canShowAds() ? 'ready' : 'unavailable';
 }
 
 /** Ouvre l'écran « Confidentialité des annonces ». */
@@ -233,9 +224,7 @@ export async function showBottomAd(kind: BottomAdKind): Promise<void> {
   try {
     let height = await showBannerKind(kind);
     let effective: BottomAdKind | null = height > 0 ? kind : null;
-    // Pas de remplissage sur le format natif (Meta ne « bidde » pas en natif sur
-    // LevelPlay) : on retombe sur la bannière 320×50 pour ne jamais laisser un
-    // trou en bas d'écran.
+    // Sans remplissage sur le format natif, on retombe sur la bannière 320×50.
     if (height <= 0 && kind === 'nativeBanner') {
       height = await showBannerKind('banner');
       effective = height > 0 ? 'banner' : null;

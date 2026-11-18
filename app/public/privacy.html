@@ -68,7 +68,7 @@
     </div>
   </div>
   <p class="meta">Éditeur : l’association Elysium — association loi 1901, RNA W772011943, 22 Avenue Lamartine, 77380 Combs-la-Ville, France.</p>
-  <p class="meta">Dernière mise à jour : <strong>11 novembre 2026</strong> — entrée en vigueur immédiate.<br />Version 2.1.4 : ajout de la section 4.2 « Applications installées ».</p>
+  <p class="meta">Dernière mise à jour : <strong>18 novembre 2026</strong> — ajout des régies Chartboost, Liftoff Monetize et BIGO Ads.</p>
 </header>
 
 <p>Cette politique explique, de manière exhaustive, quelles données l’application mobile <strong>ElyWalk</strong> collecte, pourquoi elle les collecte, avec qui elles sont partagées, combien de temps elles sont conservées et quels sont vos droits. Elle est propre à l’application ElyWalk et ne couvre aucun autre service de l’association Elysium.</p>
@@ -140,8 +140,9 @@
 </table>
 
 <h2>4. Publicité et consentement</h2>
-<p>Les annonces sont diffusées par <strong>Unity LevelPlay</strong> (Unity Technologies / ironSource), plateforme de médiation, à laquelle participe <strong>Meta Audience Network</strong> (Meta Platforms Ireland Ltd) en in-app bidding. <strong>Aucune annonce n’est demandée tant que vous n’avez pas exprimé de choix</strong> : un écran de consentement est présenté au premier lancement et peut être rouvert à tout moment depuis <em>Profil → Confidentialité des annonces</em>. Vous pouvez accepter les annonces personnalisées ou demander des annonces non personnalisées (traitement limité des données) ; votre choix est conservé sur l’appareil et révocable à volonté.</p>
-<p>Notre domaine de développeur publie un fichier <a href="/app-ads.txt">app-ads.txt</a> déclarant les plateformes de médiation et réseaux autorisés (Meta Audience Network, Unity LevelPlay), conformément aux règles de transparence du secteur.</p>
+<p>Les annonces sont diffusées par <strong>Unity LevelPlay</strong> (Unity Technologies / ironSource), plateforme de médiation. Les réseaux partenaires comprennent <strong>Meta Audience Network</strong> (Meta Platforms Ireland Ltd), <strong>Chartboost</strong>, <strong>Liftoff Monetize</strong> (Vungle) et <strong>BIGO Ads</strong>.</p>
+<p><strong>ElyWalk n’initialise pas LevelPlay tant que vous n’avez pas exprimé de choix.</strong> Vous pouvez accepter ou refuser la personnalisation des annonces. Le choix est conservé sur l’appareil et peut être modifié depuis <em>Profil → Confidentialité des annonces</em>. Si vous refusez la personnalisation, les SDK reçoivent les signaux de confidentialité qu’ils prennent en charge ; un réseau peut ne pas diffuser d’annonce dans ce cas.</p>
+<p>Notre domaine de développeur publie un fichier <a href="/app-ads.txt">app-ads.txt</a> déclarant les vendeurs d’inventaire publicitaire autorisés, notamment Meta Audience Network et Liftoff Monetize.</p>
 <div class="note">
   <strong>Aucune donnée d’activité physique (pas, distance, calories, position) n’est transmise à Meta Audience Network ou à une quelconque régie publicitaire.</strong> Vos données de santé ne sont jamais utilisées à des fins publicitaires.
 </div>
@@ -166,7 +167,8 @@
 <table>
   <tr><th>Destinataire</th><th>Rôle</th><th>Données concernées</th></tr>
   <tr><td><strong>Google Firebase</strong> (Google Ireland Limited)</td><td>Hébergement, base de données, authentification, stockage, notifications push</td><td>Compte, activité physique, localisation, jetons de notification, opérations</td></tr>
-  <tr><td><strong>Unity LevelPlay</strong> (Unity Technologies) et <strong>Meta Audience Network</strong> (Meta Platforms Ireland Ltd)</td><td>Diffusion des annonces</td><td>Identifiant publicitaire, données techniques et d’interaction publicitaire, <strong>liste des applications installées</strong> (voir 4.2) — aucune donnée d’activité physique</td></tr>
+  <tr><td><strong>Unity LevelPlay</strong> (Unity Technologies) et <strong>Meta Audience Network</strong> (Meta Platforms Ireland Ltd)</td><td>Médiation et diffusion des annonces</td><td>Identifiant publicitaire, données techniques et d’interaction publicitaire, <strong>liste des applications installées</strong> (voir 4.1) — aucune donnée d’activité physique</td></tr>
+  <tr><td><strong>Chartboost</strong>, <strong>Liftoff Monetize</strong> (Vungle) et <strong>BIGO Ads</strong></td><td>Enchères, diffusion et mesure des annonces</td><td>Identifiant publicitaire, données techniques et d’interaction publicitaire — aucune donnée d’activité physique</td></tr>
   <tr><td><strong>Cloudflare, Inc.</strong></td><td>Backend de confiance (attestation d’intégrité Play Integrity, anti-fraude sur les récompenses publicitaires, envoi des notifications, file de retraits)</td><td>Identifiant de compte, jetons d’intégrité, horodatages de récompense</td></tr>
   <tr><td><strong>PayPal</strong></td><td>Exécution des retraits</td><td>Adresse PayPal, montant — uniquement si vous demandez un retrait</td></tr>
   <tr><td><strong>ipify / ipapi.co</strong></td><td>Obtention de l’adresse IP publique (anti-fraude parrainage)</td><td>Adresse IP</td></tr>
@@ -226,7 +228,7 @@
   <tr><td><code>POST_NOTIFICATIONS</code></td><td>Notification persistante du comptage, rappel quotidien et notifications push</td></tr>
   <tr><td><code>FOREGROUND_SERVICE</code> / <code>FOREGROUND_SERVICE_HEALTH</code> / <code>FOREGROUND_SERVICE_LOCATION</code></td><td>Maintien du comptage des pas et du suivi GPS en arrière-plan</td></tr>
   <tr><td><code>RECEIVE_BOOT_COMPLETED</code></td><td>Relance du comptage après redémarrage du téléphone</td></tr>
-  <tr><td><code>INTERNET</code></td><td>Communication avec les services Firebase, Meta Audience Network et le backend</td></tr>
+  <tr><td><code>INTERNET</code></td><td>Communication avec Firebase, le backend et les services publicitaires</td></tr>
   <tr><td><code>ACCESS_NETWORK_STATE</code></td><td>Vérification de la connectivité avant le chargement d’une annonce</td></tr>
   <tr><td><code>com.google.android.gms.permission.AD_ID</code></td><td>Identifiant publicitaire, uniquement après consentement explicite</td></tr>
 </table>
@@ -239,7 +241,7 @@
 </div>
 
 <footer>
-  <p>Politique de confidentialité de l’application ElyWalk (<code>com.elysium.elywalk</code>) — version du 14 octobre 2026.</p>
+  <p>Politique de confidentialité de l’application ElyWalk (<code>com.elysium.elywalk</code>) — version du 18 novembre 2026.</p>
   <p>Conditions générales d’utilisation et mentions légales disponibles dans l’application, rubrique Profil → CGU / Mentions légales.</p>
 </footer>
 
