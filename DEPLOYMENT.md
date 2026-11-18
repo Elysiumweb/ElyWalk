@@ -42,8 +42,8 @@ L'`applicationId` / `appId` est désormais **`com.elysium.elywalk`** (fini
    `google-services.json`** et remplacer `app/google-services.json` **et**
    `app/android/app/google-services.json`.
 2. **Unity LevelPlay** : ajouter l'application Android `com.elysium.elywalk`
-   (app key `29767936d`), créer les ad units et configurer les instances des
-   réseaux (voir § « Unity LevelPlay » plus bas).
+   (app key `29767936d`), créer les ad units et brancher Meta Audience Network
+   en bidding (voir § « Unity LevelPlay » plus bas).
 3. **Play Console** : créer la fiche de l'app avec `com.elysium.elywalk`.
 
 Les réglages suivants ont déjà été propagés dans le code :
@@ -504,25 +504,24 @@ rm -rf .gradle ~/.gradle/kotlin   # PowerShell : Remove-Item -Recurse -Force .gr
 Depuis la 1.9.0, le consentement n'est plus fourni par Google UMP : il est
 recueilli **dans l'application** (`src/lib/adConsent.ts` + `components/AdConsentSheet.tsx`).
 
-- L'écran « Confidentialité des annonces » présente les réseaux et propose
-  d'accepter ou de refuser la personnalisation. Le choix est conservé dans
-  `Preferences` (`ads.consent.v2`). L'ancien choix `v1` ne couvre pas les
-  nouveaux réseaux : l'écran est reproposé une fois à la mise à jour.
-- Tant que le choix est `unknown`, ElyWalk **n'initialise pas LevelPlay et ne
-  demande aucune annonce**. Le plugin applique `setGDPRConsent(personalized)`
-  et `setCCPA(!personalized)` avant l'initialisation. Le réglage est modifiable
-  depuis Profil → *Confidentialité des annonces* (`LevelPlayAds.setConsent`).
-- Meta reçoit séparément son option *Limited Data Use* (`AdSettings`), pour
-  les États américains où elle s'applique. LDU n'est pas un signal RGPD.
-- ElyWalk n'est pas destinée aux enfants : `setCOPPA(false)`,
-  `CHARTBOOST_COPPA=NO` et `Vungle_coppa=false` sont appliqués avant l'init.
-  Vérifier que les réglages correspondants concordent dans les consoles.
+- Au premier lancement, l'écran « Confidentialité des annonces » propose deux
+  choix : annonces personnalisées, ou annonces non personnalisées (`LDU`).
+- Tant qu'aucun choix n'est exprimé (`unknown`), **aucune annonce n'est
+  demandée** : ni bannière, ni interstitiel, ni vidéo récompensée.
+- Le choix est persisté (`Preferences`, clé `ads.consent.v1`), transmis au SDK
+  natif **avant l'initialisation** via `LevelPlayAds.initialize({ personalized })`
+  → `LevelPlayPrivacySettings.setGDPRConsent(boolean)`, complété par
+  `setCCPA(!personalized)` (refus de la vente/partage) et `setCOPPA(false)`,
+  puis modifiable à chaud
+  (`LevelPlayAds.setConsent`) depuis Profil → *Confidentialité des annonces*.
+- LevelPlay relaie ce consentement à chaque réseau médié : Meta Audience Network
+  applique son mode *Limited Data Use* en cas de refus.
 
-> **EEE / Royaume-Uni** : ne pas se fonder uniquement sur ce choix local pour
-> la mise en production. Configurer une CMP compatible avec LevelPlay et les
-> régies activées (TCF et signal de consentement additionnel, selon leurs
-> exigences), puis vérifier la transmission des choix par réseau. Un refus
-> peut se traduire par une absence de remplissage, pas par une annonce garantie.
+> ⚠️ **EEE / Royaume-Uni** : ce garde-fou applicatif ne remplace pas une CMP
+> enregistrée IAB TCF v2. Pour une mise en production conforme, brancher une CMP
+> (Didomi, Axeptio, Google UMP + adaptateur) qui écrit la chaîne `IABTCF_*` lue
+> par LevelPlay, et vérifier dans le tableau de bord LevelPlay que la
+> réglementation GDPR est activée pour l'app.
 
 ## Sécurité des données Play — « Applis installées »
 
@@ -595,10 +594,10 @@ collecte provient exclusivement du SDK publicitaire, déjà déclaré.
 
 ## Unity LevelPlay (médiation publicitaire depuis 2.1.0)
 
-**Unity LevelPlay** arbitre les enchères et initialise les SDK partenaires via
-leurs adaptateurs Android. Meta Audience Network, Chartboost, Liftoff Monetize
-(Vungle) et BIGO Ads utilisent la même app key et les mêmes ad units LevelPlay :
-aucun ID de placement partenaire ni secret de reporting n'est à ajouter au code.
+Depuis la 2.1.0, l'application passe par **Unity LevelPlay** comme plateforme de
+médiation. **Meta Audience Network** y est branché en *in-app bidding* : le SDK
+Meta n'est plus appelé directement par l'application, c'est LevelPlay qui
+arbitre les enchères et sert l'annonce gagnante.
 
 ### Identifiants
 
@@ -620,50 +619,41 @@ crédité reste borné à 0,1 EC par heure par la règle Firestore `validAdCredi
 
 ### Côté tableau de bord LevelPlay
 
-Même si les réseaux ont déjà été ajoutés, vérifier dans **Setup → SDK Networks**
-et **Instances** que leurs instances Android sont actives pour ElyWalk
-(`com.elysium.elywalk`) et associées aux ad units définies ci-dessus.
-
-| Réseau | À vérifier dans LevelPlay |
-| --- | --- |
-| [Meta Audience Network](https://docs.unity.com/en-us/grow/levelplay/sdk/android/networks/guides/meta-audience-network) | Compte Meta lié, App ID et Placement ID complet par instance en bidding. |
-| [Chartboost](https://docs.unity.com/en-us/grow/levelplay/sdk/android/networks/guides/chartboost) | App ID, App Signature et Location ID par format ; créer des emplacements **Bidding**. Vérifier aussi le reporting. |
-| [Liftoff Monetize](https://docs.unity.com/en-us/grow/levelplay/sdk/android/networks/guides/liftoff-monetize) | App ID et Placement Reference ID par format, via auto-setup ou via la configuration manuelle et les paramètres de reporting. |
-| [BIGO Ads](https://docs.unity.com/en-us/grow/levelplay/sdk/android/networks/guides/bigo-ads) | App ID et Ad Slot ID par format ; les slots doivent être de type **Server Bidding**. |
-
-Les quatre réseaux peuvent servir bannière, interstitiel et vidéo récompensée.
-Le natif est à vérifier séparément sur les instances qui le prennent en charge
-(dont Meta) ; ElyWalk conserve son repli sur la bannière dans les listes.
-Saisir signatures, clés et jetons uniquement dans les consoles concernées.
+1. **Ad units** : les quatre ad units ci-dessus existent (bannière,
+   interstitiel, natif, récompensée).
+2. **Meta Audience Network en bidding** : *Mediation management* → ajouter Meta
+   Audience Network, saisir l'**App ID** Meta (`1712220190424595`), l'*access
+   token* et les placements Meta, puis activer le bidding sur chaque groupe de
+   médiation. Formats biddables chez Meta : bannière, interstitiel, medium
+   rectangle, vidéo récompensée — **pas le natif** (le natif reste servi en
+   médiation classique ; sans *fill*, l'app retombe automatiquement sur la
+   bannière 320×50).
+3. **app-ads.txt** : copier la ligne `ironsrc.com, <PUBLISHER_ID>, DIRECT`
+   affichée dans *LevelPlay → Compte → app-ads.txt* et la décommenter dans
+   `app/public/app-ads.txt`.
+4. **Test suite** : `LevelPlay.setMetaData("is_test_suite", "enable")` avant
+   l'init, puis `LevelPlay.launchTestSuite(context)` (à retirer en production).
 
 ### `app-ads.txt` (obligatoire)
 
-La source `app/public/app-ads.txt` est copiée à la racine de `app/dist/` par
-Vite. Elle conserve la ligne Meta et contient le bloc Liftoff fourni, dont :
+Le fichier `app/public/app-ads.txt` est copié à la racine de `dist/` par
+`npm run build`, donc servi par Firebase Hosting. Il contient la ligne Meta
+(réseau en bidding) et un emplacement pour la ligne de l'éditeur LevelPlay :
 
-```text
-vungle.com, 6afd795a8a4ab1588b4bbc18, DIRECT, c107d686becd2d77
+```
+facebook.com, 1598870752271390, DIRECT, c3e20eee3f780d68
+# ironsrc.com, <PUBLISHER_ID>, DIRECT      ← à décommenter avec votre Publisher ID
+# unity.com, <PUBLISHER_ID>, DIRECT        ← si LevelPlay affiche aussi cette ligne
 ```
 
-L'identifiant du vendeur `vungle.com` n'est pas un ID de placement. Ajouter
-les lignes d'éditeur ou d'autres régies si leurs consoles les demandent, en
-copiant les enregistrements exacts. Les modèles commentés `ironsrc.com` et
-`unity.com` ne sont pas des vendeurs actifs sans les lignes remises par LevelPlay.
-
-Depuis la racine du dépôt, publier uniquement Hosting pour mettre à jour le fichier :
-
-```bash
-npm --prefix app run build
-firebase deploy --only hosting --project elywalk-2f7ba
-curl -fsSI https://elywalk-2f7ba.web.app/app-ads.txt
-curl -fsS https://elywalk-2f7ba.web.app/app-ads.txt | grep -F 'vungle.com, 6afd795a8a4ab1588b4bbc18, DIRECT'
-```
-
-- La fiche Play Store doit indiquer `https://elywalk-2f7ba.web.app` comme site
-  développeur. Le fichier doit répondre **200** en `text/plain` sur ce domaine.
-- Demander une nouvelle lecture dans LevelPlay et les consoles partenaires.
-  La copie Android est régénérée par `npx cap sync android` ; celle-ci ne
-  remplace pas la publication Firebase Hosting.
+- URL à déclarer dans Play Console (champ *Site web* de la fiche) :
+  `https://elywalk-2f7ba.web.app` — c'est ce domaine qui est exploré pour
+  trouver `app-ads.txt`.
+- Vérification : `curl https://elywalk-2f7ba.web.app/app-ads.txt` doit renvoyer
+  les lignes en `text/plain` (les rewrites SPA ne s'appliquent pas aux fichiers
+  existants).
+- Après modification, forcer la relecture dans le tableau de bord LevelPlay et
+  dans Monetization Manager (le crawl peut prendre 24 à 48 h).
 
 ### Formats et emplacements
 
@@ -685,49 +675,40 @@ exigé par les règles Play.
 
 ### Build Android
 
-Avec un JDK 21 et le SDK Android (API 36), depuis la racine du dépôt :
-
 ```bash
 cd app
-npm ci
 npm run build && npx cap sync android
-cd android
-bash ./gradlew :app:assembleDebug
 ```
 
-`android/app/build.gradle` conserve **LevelPlay 9.7.0** et configure :
+Le SDK est déclaré dans `android/app/build.gradle` :
 
-| Adaptateur LevelPlay | Version | SDK transitif |
-| --- | --- | --- |
-| `facebook-adapter` | 5.7.0 | Meta Audience Network 6.22.0 |
-| `chartboost-adapter` | 5.12.0 | Chartboost 9.14.1 |
-| `vungle-adapter` | 5.18.0 | Liftoff Monetize 7.8.0 |
-| `bigo-adapter` | 5.15.0 | BIGO Ads 6.2.0 |
+```gradle
+implementation 'com.unity3d.ads-mediation:mediation-sdk:9.5.0'
+implementation 'com.unity3d.ads-mediation:facebook-adapter:5.7.0' // embarque le SDK Meta
+implementation 'com.google.android.gms:play-services-appset:16.0.0'
+implementation 'com.google.android.gms:play-services-ads-identifier:18.2.0'
+```
 
-Les adaptateurs sont sur Maven Central. Le dépôt Maven Chartboost est limité
-au groupe `com.chartboost`. Chartboost utilise la stdlib Kotlin 2.3.0 ; le
-projet utilise le plugin Kotlin 2.3.10 et AGP 8.13.2 pour D8/R8. Ne pas ajouter
-les SDK à la main : ils sont résolus transitivement. Les versions recommandées
-sont dans la [documentation LevelPlay Android](https://docs.unity.com/en-us/grow/levelplay/sdk/android/mediation-networks).
+Vérifier les versions recommandées :
+<https://docs.unity.com/en-us/grow/levelplay/sdk/android/mediation-networks>
+(la version de l'adaptateur Meta fixe la version du SDK Audience Network
+embarquée — l'adaptateur 5.7.0 s'appuie sur le SDK Meta 6.22.0).
 
-L'accélération matérielle reste active pour les vidéos. Les activités des
-régies sont déclarées dans leurs AAR. Pour le cache média Meta,
-`network_security_config.xml` autorise HTTP **uniquement** vers `127.0.0.1` ;
-les autres destinations restent soumises à l'interdiction de trafic en clair.
+`minSdkVersion` doit rester ≥ 21 (ElyWalk est à 24), le SDK LevelPlay exige
+Kotlin ≥ 1.7 (fourni par Gradle/Maven Central) et
+`android:hardwareAccelerated="true"` est activé dans le manifeste (vidéos).
+L'activité et le provider du SDK (`ControllerActivity`, `IronsourceLifecycleProvider`)
+sont fusionnés depuis l'AAR : rien à déclarer à la main.
 
 ### Test des annonces
 
-- Sur un appareil Android, utiliser l'[Integration Test Suite](https://docs.unity.com/en-us/grow/levelplay/sdk/android/integration-test-suite)
-  dans un build de test : `LevelPlay.setMetaData("is_test_suite", "enable")`
-  avant l'init, puis `LevelPlay.launchTestSuite(context)` après une init réussie.
-  Ne pas activer ce mode dans le build de production.
-- Vérifier les versions SDK/adaptateur et le chargement/affichage d'**annonces
-  de test** de chaque réseau par format actif. Vérifier aussi la conversion de
-  la vidéo récompensée et le repli si un réseau ne propose aucune annonce.
-- Avant envoi sur le Play Store, contrôler les permissions du manifeste
-  **fusionné** et réévaluer la fiche « Sécurité des données » pour les SDK ajoutés.
-- Le build web (`npm run dev`) ne lance pas LevelPlay ; il ne valide pas
-  l'intégration native ni le remplissage publicitaire.
+- Sans réseau configuré ou sans campagne active, LevelPlay renvoie un *no fill*
+  (`onAdLoadFailed`) — c'est normal, l'application continue de fonctionner
+  (toutes les fonctions publicitaires résolvent sans bloquer).
+- Pour tester un remplissage : activer les *test mode* des ad units dans le
+  tableau de bord LevelPlay, ou passer par l'Integration Test Suite.
+- Sur la version web (`npm run dev`), les publicités sont **inertes** : les
+  fonctions de `lib/ads.ts` résolvent immédiatement.
 
 ## Notifications (F10)
 
@@ -739,7 +720,7 @@ Aucune permission n'est demandée de façon inconditionnelle.
 
 - Les mentions légales (`LegalPage.tsx`) sont complètes (CGU, confidentialité,
   mentions légales). Mettre à jour la **fiche Play « Sécurité des données »** en
-  cohérence : publicité (Unity LevelPlay et ses réseaux partenaires),
+  cohérence : publicité (Unity LevelPlay + Meta Audience Network),
   géolocalisation, activité physique/santé, âge
   minimum 15 ans.
 - Configurer `contact@elysium-esport.fr` comme adresse d'assistance Play Store.

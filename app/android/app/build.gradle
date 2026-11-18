@@ -53,11 +53,6 @@ repositories {
     }
     // Unity LevelPlay et ses adaptateurs sont publiés sur Maven Central.
     mavenCentral()
-    // Le SDK transitif de Chartboost est distribué par Chartboost.
-    maven {
-        url 'https://cboost.jfrog.io/artifactory/chartboost-ads/'
-        content { includeGroup 'com.chartboost' }
-    }
 }
 
 dependencies {
@@ -70,13 +65,9 @@ dependencies {
     implementation 'com.google.android.gms:play-services-location:21.3.0'
 
     // --- Unity LevelPlay (médiation) -------------------------------------
-    // Les adaptateurs apportent chacun leur SDK transitif. LevelPlay seul
-    // initialise les réseaux et reçoit leurs placements depuis le dashboard.
+    // LevelPlay arbitre les enchères.
     implementation 'com.unity3d.ads-mediation:mediation-sdk:9.7.0'
-    implementation 'com.unity3d.ads-mediation:facebook-adapter:5.7.0'  // Meta Audience Network
-    implementation 'com.unity3d.ads-mediation:chartboost-adapter:5.12.0'
-    implementation 'com.unity3d.ads-mediation:vungle-adapter:5.18.0'   // Liftoff Monetize
-    implementation 'com.unity3d.ads-mediation:bigo-adapter:5.15.0'     // BIGO Ads
+    implementation 'com.unity3d.ads-mediation:facebook-adapter:5.7.0'
     implementation 'com.unity3d.ads-mediation:unityads-adapter:5.16.0'
     implementation 'com.unity3d.ads-mediation:admob-adapter:5.19.0'
     // Identifiants publicitaires lus par LevelPlay (GAID + App Set ID).

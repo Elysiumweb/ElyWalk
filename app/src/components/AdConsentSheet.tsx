@@ -9,7 +9,8 @@ import {
 import { PRIVACY_POLICY_URL } from '../lib/constants';
 
 /**
- * Écran de consentement publicitaire — Unity LevelPlay et ses réseaux partenaires.
+ * Écran de consentement publicitaire (RGPD) — Unity LevelPlay (médiation),
+ * avec Meta Audience Network parmi les réseaux en in-app bidding.
  *
  * S'affiche au premier lancement tant qu'aucun choix n'a été exprimé (aucune
  * annonce n'est demandée d'ici là), puis reste accessible depuis
@@ -52,11 +53,9 @@ export default function AdConsentSheet() {
       <p style={{ marginBottom: 12, lineHeight: 1.5 }}>
         ElyWalk est financé par la publicité. Les annonces sont diffusées par <strong>Unity LevelPlay</strong>,
         notre plateforme de médiation, à laquelle participent des réseaux partenaires dont{' '}
-        <strong>Meta Audience Network</strong>, <strong>Chartboost</strong>,{' '}
-        <strong>Liftoff Monetize</strong> (Vungle) et <strong>BIGO Ads</strong>.
-        Les régies peuvent utiliser l’identifiant publicitaire et des données techniques ou
-        d’interaction avec les annonces. ElyWalk ne leur transmet ni vos pas, ni vos sorties,
-        ni vos données de santé.
+        <strong>Meta Audience Network</strong>.
+        Nous ne transmettons <strong>jamais</strong> vos pas, vos sorties ou vos données de santé :
+        seuls l’identifiant publicitaire de votre appareil et des données techniques sont utilisés.
       </p>
       <p
         style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}
@@ -71,8 +70,8 @@ export default function AdConsentSheet() {
         </a>.
       </p>
       <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 12, lineHeight: 1.5 }}>
-        Vous pouvez accepter ou refuser la personnalisation. Le refus peut limiter les annonces
-        disponibles. Vous pouvez modifier votre choix à tout moment depuis votre profil.
+        Vous pouvez choisir des annonces personnalisées (plus rémunératrices pour l’application)
+        ou non personnalisées. Ce choix est révocable à tout moment depuis votre profil.
       </p>
       <div style={{ display: 'grid', gap: 10, marginTop: 8 }}>
         <button
@@ -91,7 +90,7 @@ export default function AdConsentSheet() {
           onClick={() => choose('refused')}
           data-testid="ad-consent-non-personalized"
         >
-          Refuser la personnalisation
+          Annonces non personnalisées uniquement
         </button>
         <a
           className="text-button"

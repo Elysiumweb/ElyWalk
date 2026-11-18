@@ -21,7 +21,7 @@
 #-renamesourcefileattribute SourceFile
 
 # ---------------------------------------------------------------------------
-# Meta Audience Network (médié par LevelPlay — voir LevelPlayAdsPlugin.java)
+# Meta Audience Network (régie publicitaire — voir MetaAdsPlugin.java)
 # À conserver même si `minifyEnabled` est aujourd'hui à false : le SDK est
 # chargé par réflexion (adaptateurs, rapports AdChoices).
 # ---------------------------------------------------------------------------

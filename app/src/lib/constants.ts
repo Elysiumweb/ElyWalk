@@ -1,9 +1,10 @@
 // ===== ElyWalk — Constantes globales =====
 
 // --- Unity LevelPlay (médiation publicitaire) ---
-// Les identifiants ci-dessous sont des **ad units LevelPlay** (LevelPlay → Ad
-// units). Les placements de chaque régie restent configurés dans LevelPlay
-// (voir DEPLOYMENT.md § « Unity LevelPlay »).
+// LevelPlay est la plateforme de médiation ; Meta Audience Network y participe
+// en in-app bidding (voir DEPLOYMENT.md § « Unity LevelPlay »). Les identifiants
+// ci-dessous sont des **ad units LevelPlay** (LevelPlay → Ad units), et non plus
+// des placements Meta : le SDK natif ne connaît que ces derniers.
 export const LEVELPLAY_APP_KEY = '29767936d';
 
 /** Bannière 320×50 (bas de page, toutes les pages). */

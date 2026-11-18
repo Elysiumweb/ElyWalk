@@ -9,16 +9,17 @@ import { useEffect, useState } from 'react';
 // Trois états :
 //   - `unknown`  : aucun choix exprimé → AUCUNE annonce n'est demandée.
 //   - `granted`  : annonces personnalisées autorisées.
-//   - `refused`  : personnalisation refusée, signaux de restriction envoyés.
+//   - `refused`  : annonces non personnalisées uniquement (Limited Data Use).
 //
-// Ce choix local ne remplace pas une CMP et ses signaux par régie dans l'EEE
-// et au Royaume-Uni : voir DEPLOYMENT.md § « Consentement ».
+// ⚠️ Ce garde-fou applicatif garantit qu'aucune requête publicitaire n'est
+// émise sans choix explicite. Pour l'EEE/UK, la réglementation exige aussi une
+// CMP enregistrée IAB TCF v2 (ou le consentement natif Meta) qui transmet la
+// chaîne de consentement au SDK : voir DEPLOYMENT.md § « Consentement ».
 // ============================================================================
 
 export type AdConsent = 'unknown' | 'granted' | 'refused';
 
-// Le choix v1 a été recueilli sans présenter les nouveaux réseaux médiés.
-const STORAGE_KEY = 'ads.consent.v2';
+const STORAGE_KEY = 'ads.consent.v1';
 const STORAGE_EVENT = 'elywalk:ad-consent-changed';
 const PRIVACY_EVENT = 'elywalk:ad-privacy-options';
 

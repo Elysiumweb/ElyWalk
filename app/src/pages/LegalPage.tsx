@@ -87,7 +87,7 @@ const content: Record<string, LegalDoc> = {
   },
   privacy: {
     title: 'Politique de confidentialité',
-    updated: '18 novembre 2026',
+    updated: '14 octobre 2026',
     body: (
       <>
         <p className="legal-online">
@@ -122,27 +122,27 @@ const content: Record<string, LegalDoc> = {
             dans l’application).</li>
         </ul>
 
-        <h2>4. Publicité et consentement</h2>
+        <h2>4. Publicité (Unity LevelPlay, Meta Audience Network) et consentement</h2>
         <p>
           Les annonces sont diffusées par <strong>Unity LevelPlay</strong> (Unity Technologies /
-          ironSource), plateforme de médiation publicitaire. Les réseaux partenaires comprennent
-          Meta Audience Network (Meta Platforms Ireland Ltd), Chartboost, Liftoff Monetize (Vungle)
-          et BIGO Ads. ElyWalk n’initialise pas LevelPlay tant que vous n’avez pas exprimé de choix.
-          Vous pouvez accepter ou refuser la personnalisation et modifier votre décision à tout
-          moment depuis Profil → « Confidentialité des annonces ».
+          ironSource), plateforme de médiation publicitaire, à laquelle participent des réseaux
+          partenaires, dont <strong>Meta Audience Network</strong> (Meta Platforms Ireland Ltd) en
+          in-app bidding. Aucune annonce n’est demandée tant que vous n’avez pas exprimé de choix :
+          un écran de consentement s’affiche au premier lancement et reste accessible à tout
+          moment depuis Profil → « Confidentialité des annonces ». Vous pouvez accepter les
+          annonces personnalisées ou opter pour des annonces non personnalisées ; ce choix est
+          révocable et modifiable à volonté.
         </p>
         <p>
-          La diffusion publicitaire peut utiliser l’identifiant publicitaire, des données techniques
-          et des données d’interaction avec les annonces. LevelPlay peut aussi consulter la liste
-          des applications installées. ElyWalk ne transmet pas ses données de pas, de sorties,
-          de position ou de santé aux régies publicitaires.
+          Seuls l’identifiant publicitaire de l’appareil et des données techniques sont utilisés.
+          Vos pas, vos sorties, votre position et vos données de santé ne sont jamais transmis à
+          la régie publicitaire.
         </p>
 
         <h2>5. Destinataires</h2>
         <p>
           Google Firebase (hébergement, base de données, authentification, notifications),
-          Unity LevelPlay / ironSource et les réseaux publicitaires cités ci-dessus,
-          Cloudflare (backend de confiance : attestation d’intégrité,
+          Unity LevelPlay / ironSource et Meta Audience Network (publicité), Cloudflare (backend de confiance : attestation d’intégrité,
           vérification serveur des récompenses, envoi des notifications, file de retraits),
           PayPal (exécution des retraits) et les services publics d’affichage d’adresse IP
           (anti-fraude au parrainage) agissent en qualité de sous-traitants. Aucune donnée
