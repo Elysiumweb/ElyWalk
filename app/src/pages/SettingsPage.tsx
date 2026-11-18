@@ -238,11 +238,11 @@ export default function SettingsPage() {
       <div className="card" data-testid="settings-ads">
         <div className="card-title">Confidentialité des annonces</div>
         <p className="card-help">
-          Choisissez les partenaires publicitaires autorisés à utiliser vos données. Ce choix est
-          conservé sur cet appareil et peut être modifié à tout moment.
+          Choisissez si les annonces peuvent être personnalisées. Ce choix est conservé sur cet
+          appareil et peut être modifié à tout moment.
         </p>
         <button className="btn btn-outline" onClick={() => openAdPrivacyOptions()}>
-          Confidentialité des annonces (LevelPlay · Meta)
+          Gérer mes préférences publicitaires
         </button>
       </div>
 
