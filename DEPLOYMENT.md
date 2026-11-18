@@ -505,17 +505,20 @@ Depuis la 1.9.0, le consentement n'est plus fourni par Google UMP : il est
 recueilli **dans l'application** (`src/lib/adConsent.ts` + `components/AdConsentSheet.tsx`).
 
 - Au premier lancement, l'écran « Confidentialité des annonces » propose deux
-  choix : annonces personnalisées, ou annonces non personnalisées (`LDU`).
-- Tant qu'aucun choix n'est exprimé (`unknown`), **aucune annonce n'est
-  demandée** : ni bannière, ni interstitiel, ni vidéo récompensée.
+  choix : annonces personnalisées, ou annonces non personnalisées.
+- Tant qu'aucun choix n'est exprimé (`unknown`), l'app **n'initialise pas
+  LevelPlay et ne demande aucune annonce**. Un refus explicite permet de
+  démarrer la médiation avec `personalized: false`.
 - Le choix est persisté (`Preferences`, clé `ads.consent.v1`), transmis au SDK
   natif **avant l'initialisation** via `LevelPlayAds.initialize({ personalized })`
   → `LevelPlayPrivacySettings.setGDPRConsent(boolean)`, complété par
   `setCCPA(!personalized)` (refus de la vente/partage) et `setCOPPA(false)`,
   puis modifiable à chaud
   (`LevelPlayAds.setConsent`) depuis Profil → *Confidentialité des annonces*.
-- LevelPlay relaie ce consentement à chaque réseau médié : Meta Audience Network
-  applique son mode *Limited Data Use* en cas de refus.
+- Pour Meta, le plugin configure aussi `AdSettings.setDataProcessingOptions`
+  **avant** `LevelPlay.init` et lors d'un changement de choix : `LDU, 0, 0` en
+  cas de refus (Meta détermine si la région est concernée), options vides en
+  cas d'acceptation. Ce signal pour les lois américaines ne vaut pas consentement RGPD.
 
 > ⚠️ **EEE / Royaume-Uni** : ce garde-fou applicatif ne remplace pas une CMP
 > enregistrée IAB TCF v2. Pour une mise en production conforme, brancher une CMP
@@ -595,9 +598,9 @@ collecte provient exclusivement du SDK publicitaire, déjà déclaré.
 ## Unity LevelPlay (médiation publicitaire depuis 2.1.0)
 
 Depuis la 2.1.0, l'application passe par **Unity LevelPlay** comme plateforme de
-médiation. **Meta Audience Network** y est branché en *in-app bidding* : le SDK
-Meta n'est plus appelé directement par l'application, c'est LevelPlay qui
-arbitre les enchères et sert l'annonce gagnante.
+médiation. **Meta Audience Network** participe en *in-app bidding*. L'adaptateur
+initialise le SDK Meta : aucun appel direct d'initialisation ou de chargement
+Meta dans l'app. LevelPlay arbitre les enchères et sert l'annonce gagnante.
 
 ### Identifiants
 
@@ -606,9 +609,15 @@ arbitre les enchères et sert l'annonce gagnante.
 | App key | `LEVELPLAY_APP_KEY` | `29767936d` |
 | Bannière 320×50 (toutes les pages) | `LEVELPLAY_AD_UNIT_BANNER` | `g1zzk5uxi41cpcc2` |
 | Interstitiel (ouverture, validation des pas, fin de sortie) | `LEVELPLAY_AD_UNIT_INTERSTITIAL` | `s73ihk59x7y52d6v` |
-| Natif (bandeau des listes + carte de fin de sortie) | `LEVELPLAY_AD_UNIT_NATIVE` | `kz81dz4wdl6v0kue` |
+| Natif (bandeau des listes + carte de fin de sortie) | placement par défaut (voir ci-dessous) | `kz81dz4wdl6v0kue` (tableau de bord uniquement) |
 | Vidéo récompensée (vidéo → ElyCoins) | `LEVELPLAY_AD_UNIT_REWARDED` | `l9z2u3fws3nm1cfc` |
 | Medium rectangle 300×250 (retrait) | `LEVELPLAY_AD_UNIT_MEDIUM_RECTANGLE` | réutilise l'ad unit bannière (taille `MEDIUM_RECTANGLE`) |
+
+Pour le **natif**, le builder Android prend un **nom de placement LevelPlay**,
+facultatif, pas un ID. Si vous utilisez des placements nommés, définir
+`VITE_LEVELPLAY_NATIVE_BANNER_PLACEMENT` et/ou `VITE_LEVELPLAY_NATIVE_CARD_PLACEMENT`
+avec leurs noms exacts avant `npm run build`. Sans nom, l'app conserve le
+placement par défaut. Ne pas y mettre l'ID d'ad unit ni l'ID de placement Meta.
 
 **Récompense** — ad unit récompensée configurée avec *Reward item name*
 `ElyCoin` et *Reward amount* `1`. Côté application, 1 unité LevelPlay = **0,1
@@ -619,31 +628,33 @@ crédité reste borné à 0,1 EC par heure par la règle Firestore `validAdCredi
 
 ### Côté tableau de bord LevelPlay
 
-1. **Ad units** : les quatre ad units ci-dessus existent (bannière,
-   interstitiel, natif, récompensée).
-2. **Meta Audience Network en bidding** : *Mediation management* → ajouter Meta
-   Audience Network, saisir l'**App ID** Meta (`1712220190424595`), l'*access
-   token* et les placements Meta, puis activer le bidding sur chaque groupe de
-   médiation. Formats biddables chez Meta : bannière, interstitiel, medium
-   rectangle, vidéo récompensée — **pas le natif** (le natif reste servi en
-   médiation classique ; sans *fill*, l'app retombe automatiquement sur la
-   bannière 320×50).
-3. **app-ads.txt** : copier la ligne `ironsrc.com, <PUBLISHER_ID>, DIRECT`
-   affichée dans *LevelPlay → Compte → app-ads.txt* et la décommenter dans
-   `app/public/app-ads.txt`.
-4. **Test suite** : `LevelPlay.setMetaData("is_test_suite", "enable")` avant
-   l'init, puis `LevelPlay.launchTestSuite(context)` (à retirer en production).
+1. **Meta Monetization Manager** : vérifier que la propriété Android est approuvée
+   pour `com.elysium.elywalk`, que les informations de paiement sont complètes
+   et qu'il existe un placement du bon format pour chaque instance.
+2. **LevelPlay → SDK Networks → Meta Audience Network** : connecter le compte
+   Meta autorisé. Sur l'application (app key `29767936d`), vérifier l'**App ID
+   Meta** (`1712220190424595`, préfixe avant `_` des placements). Sur chaque
+   instance, saisir le **Placement ID Meta complet**, puis vérifier que le
+   bidder est **actif** dans le groupe de médiation de l'ad unit correspondante.
+   Ces ID et les accès au compte Meta ne sont pas des paramètres de la WebView.
+3. Vérifier aussi le **natif** : Meta prend en charge le bidding Android sur
+   bannière/MREC, interstitiel, vidéo récompensée **et natif**. Sur les listes,
+   le repli vers la bannière indique une absence de remplissage du placement
+   natif, pas un format systématiquement exclu des enchères.
+
+Guide d'intégration Meta pour Android [1](https://docs.unity.com/en-us/grow/levelplay/sdk/android/networks/guides/meta-audience-network) ;
+formats par réseau [9](https://docs.unity.com/en-us/grow/levelplay/platform/fundamentals/mediated-networks).
 
 ### `app-ads.txt` (obligatoire)
 
 Le fichier `app/public/app-ads.txt` est copié à la racine de `dist/` par
 `npm run build`, donc servi par Firebase Hosting. Il contient la ligne Meta
-(réseau en bidding) et un emplacement pour la ligne de l'éditeur LevelPlay :
+(identifiant vendeur, **distinct de l'App ID Meta**) et les lignes éditeur LevelPlay :
 
 ```
 facebook.com, 1598870752271390, DIRECT, c3e20eee3f780d68
-# ironsrc.com, <PUBLISHER_ID>, DIRECT      ← à décommenter avec votre Publisher ID
-# unity.com, <PUBLISHER_ID>, DIRECT        ← si LevelPlay affiche aussi cette ligne
+ironsrc.com, 700117, DIRECT
+unity.com, 800433932, DIRECT
 ```
 
 - URL à déclarer dans Play Console (champ *Site web* de la fiche) :
@@ -683,7 +694,7 @@ npm run build && npx cap sync android
 Le SDK est déclaré dans `android/app/build.gradle` :
 
 ```gradle
-implementation 'com.unity3d.ads-mediation:mediation-sdk:9.5.0'
+implementation 'com.unity3d.ads-mediation:mediation-sdk:9.7.0'
 implementation 'com.unity3d.ads-mediation:facebook-adapter:5.7.0' // embarque le SDK Meta
 implementation 'com.google.android.gms:play-services-appset:16.0.0'
 implementation 'com.google.android.gms:play-services-ads-identifier:18.2.0'
@@ -697,16 +708,31 @@ embarquée — l'adaptateur 5.7.0 s'appuie sur le SDK Meta 6.22.0).
 `minSdkVersion` doit rester ≥ 21 (ElyWalk est à 24), le SDK LevelPlay exige
 Kotlin ≥ 1.7 (fourni par Gradle/Maven Central) et
 `android:hardwareAccelerated="true"` est activé dans le manifeste (vidéos).
-L'activité et le provider du SDK (`ControllerActivity`, `IronsourceLifecycleProvider`)
-sont fusionnés depuis l'AAR : rien à déclarer à la main.
+Les activités et providers des SDK sont fusionnés depuis les AAR. Sur Android
+9+, le cache média de Meta a besoin d'HTTP vers `127.0.0.1` : l'exception de
+`res/xml/network_security_config.xml` ne porte que sur cette adresse. Ne pas
+activer `usesCleartextTraffic` globalement ni le contenu mixte de la WebView.
 
 ### Test des annonces
 
 - Sans réseau configuré ou sans campagne active, LevelPlay renvoie un *no fill*
   (`onAdLoadFailed`) — c'est normal, l'application continue de fonctionner
   (toutes les fonctions publicitaires résolvent sans bloquer).
-- Pour tester un remplissage : activer les *test mode* des ad units dans le
-  tableau de bord LevelPlay, ou passer par l'Integration Test Suite.
+- **Vérifier les dépendances** après le build web et `cap sync` : depuis `app/android`,
+  exécuter `bash gradlew :app:dependencyInsight --configuration debugRuntimeClasspath --dependency audience-network-sdk`
+  (`gradlew.bat` sous Windows). Attendu : `com.facebook.android:audience-network-sdk:6.22.0`
+  apporté par `com.unity3d.ads-mediation:facebook-adapter:5.7.0`, sans deuxième SDK à ajouter.
+- **Tester la diffusion sans modifier le code** : dans *LevelPlay → Settings → Test devices*,
+  ajouter l'appareil Android de test, sélectionner **Meta Audience Network** et l'ad unit,
+  puis *Test ads* [1](https://docs.unity.com/en-us/grow/levelplay/sdk/android/integration-testing).
+  Faire un choix de confidentialité dans l'app et déclencher le format correspondant.
+- Pour diagnostiquer un échec, dans un build de test uniquement,
+  activer `LevelPlay.setMetaData("is_test_suite", "enable")`
+  avant l'init et lancer `LevelPlay.launchTestSuite(context)` (contexte applicatif)
+  dans `onInitSuccess`, avant toute demande d'annonce. Dans **Ad networks → Meta
+  Audience Network**, vérifier les versions SDK/adaptateur puis **Test → Load ad →
+  Show ad** sur le format voulu. Dans **Ad units**, vérifier la présence du bidder
+  Meta dans l'enchère. Ne pas activer la suite en production.
 - Sur la version web (`npm run dev`), les publicités sont **inertes** : les
   fonctions de `lib/ads.ts` résolvent immédiatement.
 

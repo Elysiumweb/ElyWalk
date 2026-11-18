@@ -3,26 +3,25 @@
 // --- Unity LevelPlay (médiation publicitaire) ---
 // LevelPlay est la plateforme de médiation ; Meta Audience Network y participe
 // en in-app bidding (voir DEPLOYMENT.md § « Unity LevelPlay »). Les identifiants
-// ci-dessous sont des **ad units LevelPlay** (LevelPlay → Ad units), et non plus
-// des placements Meta : le SDK natif ne connaît que ces derniers.
+// d'ad unit ci-dessous viennent de LevelPlay. Les ID de placement Meta se
+// configurent sur les instances du tableau de bord, pas dans l'application.
 export const LEVELPLAY_APP_KEY = '29767936d';
 
 /** Bannière 320×50 (bas de page, toutes les pages). */
 export const LEVELPLAY_AD_UNIT_BANNER = 'g1zzk5uxi41cpcc2';
 /** Interstitiel plein écran (ouverture de l'app, validation des pas, fin de sortie). */
 export const LEVELPLAY_AD_UNIT_INTERSTITIAL = 's73ihk59x7y52d6v';
-/** Natif (bandeau compact des listes + carte de fin de sortie). */
-export const LEVELPLAY_AD_UNIT_NATIVE = 'kz81dz4wdl6v0kue';
 /** Vidéo récompensée (vidéo → ElyCoins). */
 export const LEVELPLAY_AD_UNIT_REWARDED = 'l9z2u3fws3nm1cfc';
-
-// Medium rectangle 300×250 et native banner n'ont pas d'ad unit dédiée dans le
-// compte LevelPlay :
-//  • un ad unit bannière accepte aussi la taille MEDIUM_RECTANGLE (MREC) ;
-//  • le format natif LevelPlay est piloté par un *placement* déclaré sur l'ad
-//    unit native, pas par un identifiant supplémentaire côté SDK.
+/** Le medium rectangle 300×250 utilise l'ad unit bannière avec la taille MREC. */
 export const LEVELPLAY_AD_UNIT_MEDIUM_RECTANGLE = LEVELPLAY_AD_UNIT_BANNER;
-export const LEVELPLAY_AD_UNIT_NATIVE_BANNER = LEVELPLAY_AD_UNIT_NATIVE;
+
+// Le builder natif Android attend un NOM de placement LevelPlay, pas l'ID
+// de l'ad unit ni celui du placement Meta. Sans nom, il utilise le placement par défaut.
+export const LEVELPLAY_NATIVE_BANNER_PLACEMENT =
+  import.meta.env.VITE_LEVELPLAY_NATIVE_BANNER_PLACEMENT?.trim() || undefined;
+export const LEVELPLAY_NATIVE_CARD_PLACEMENT =
+  import.meta.env.VITE_LEVELPLAY_NATIVE_CARD_PLACEMENT?.trim() || undefined;
 
 /**
  * Récompense déclarée sur l'ad unit récompensée LevelPlay :

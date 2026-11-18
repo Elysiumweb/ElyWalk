@@ -9,7 +9,7 @@ import { useEffect, useState } from 'react';
 // Trois états :
 //   - `unknown`  : aucun choix exprimé → AUCUNE annonce n'est demandée.
 //   - `granted`  : annonces personnalisées autorisées.
-//   - `refused`  : annonces non personnalisées uniquement (Limited Data Use).
+//   - `refused`  : annonces non personnalisées uniquement.
 //
 // ⚠️ Ce garde-fou applicatif garantit qu'aucune requête publicitaire n'est
 // émise sans choix explicite. Pour l'EEE/UK, la réglementation exige aussi une
@@ -35,9 +35,10 @@ export async function getAdConsent(): Promise<AdConsent> {
   if (cached) return cached;
   try {
     const { value } = await Preferences.get({ key: STORAGE_KEY });
-    cached = normalize(value);
+    // Un choix peut avoir été fait pendant la lecture du stockage.
+    cached ??= normalize(value);
   } catch {
-    cached = 'unknown';
+    cached ??= 'unknown';
   }
   return cached;
 }
@@ -45,16 +46,17 @@ export async function getAdConsent(): Promise<AdConsent> {
 /** Enregistre un nouveau choix et prévient l'application (et le SDK natif). */
 export async function setAdConsent(consent: 'granted' | 'refused'): Promise<void> {
   cached = consent;
-  try {
-    await Preferences.set({ key: STORAGE_KEY, value: consent });
-  } catch (e) {
-    console.warn('[Ads] consent storage error', e);
-  }
+  // Prévenir le SDK dès le choix, sans attendre une écriture potentiellement lente.
   listeners.forEach((listener) => listener(consent));
   try {
     window.dispatchEvent(new CustomEvent(STORAGE_EVENT, { detail: consent }));
   } catch {
     /* environnement non web (tests) */
+  }
+  try {
+    await Preferences.set({ key: STORAGE_KEY, value: consent });
+  } catch (e) {
+    console.warn('[Ads] consent storage error', e);
   }
 }
 

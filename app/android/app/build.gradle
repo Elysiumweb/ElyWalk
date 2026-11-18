@@ -67,6 +67,7 @@ dependencies {
     // --- Unity LevelPlay (médiation) -------------------------------------
     // LevelPlay arbitre les enchères.
     implementation 'com.unity3d.ads-mediation:mediation-sdk:9.7.0'
+    // Le POM de cet adaptateur fournit com.facebook.android:audience-network-sdk:6.22.0.
     implementation 'com.unity3d.ads-mediation:facebook-adapter:5.7.0'
     implementation 'com.unity3d.ads-mediation:unityads-adapter:5.16.0'
     implementation 'com.unity3d.ads-mediation:admob-adapter:5.19.0'

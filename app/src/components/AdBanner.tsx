@@ -6,9 +6,8 @@ import { useAdConsent } from '../lib/adConsent';
 
 /**
  * Pages de type liste : le bandeau natif compact y est plus lisible qu'une
- * bannière 320×50 classique. Le format natif LevelPlay étant piloté par un
- * placement (Meta ne « bidde » pas en natif), `showBottomAd` retombe
- * automatiquement sur la bannière s'il n'y a pas de remplissage.
+ * bannière 320×50 classique. En l'absence de remplissage du placement natif
+ * LevelPlay, `showBottomAd` retombe sur la bannière.
  */
 const NATIVE_BANNER_ROUTES = ['/history'];
 

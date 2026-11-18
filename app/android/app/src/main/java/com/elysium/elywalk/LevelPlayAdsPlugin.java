@@ -22,6 +22,7 @@ import android.widget.TextView;
 
 import androidx.annotation.Nullable;
 
+import com.facebook.ads.AdSettings;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -56,10 +57,9 @@ import com.unity3d.mediation.rewarded.LevelPlayRewardedAdListener;
  * Pont Capacitor vers <b>Unity LevelPlay</b> (plateforme de médiation) avec
  * <b>Meta Audience Network</b> branché en in-app bidding.
  *
- * <p>Depuis la 2.1.0, l'application ne dialogue plus avec le SDK Meta : c'est
- * LevelPlay qui arbitre les enchères (Meta via l'adaptateur
- * {@code facebook-adapter}) et sert les annonces. Les identifiants reçus de la
- * WebView sont des <b>ad units LevelPlay</b>.</p>
+ * <p>LevelPlay initialise les réseaux et arbitre les enchères (Meta via
+ * {@code facebook-adapter}). La WebView utilise les ad units LevelPlay ou,
+ * pour le natif, un nom de placement LevelPlay facultatif.</p>
  *
  * <p>Formats exposés à la WebView :</p>
  * <ul>
@@ -77,8 +77,7 @@ import com.unity3d.mediation.rewarded.LevelPlayRewardedAdListener;
  *
  * <p>Aucune annonce n'est demandée tant que {@code initialize} n'a pas reçu un
  * choix de consentement explicite ({@code personalized}) : il est transmis au
- * SDK avant l'initialisation ({@link LevelPlayPrivacySettings#setGDPRConsent}),
- * qui le répercute sur chaque réseau (dont Meta).</p>
+ * SDK avant l'initialisation. Pour Meta, on règle aussi l'option LDU.</p>
  */
 @CapacitorPlugin(name = "LevelPlayAds")
 public class LevelPlayAdsPlugin extends Plugin {
@@ -93,8 +92,6 @@ public class LevelPlayAdsPlugin extends Plugin {
     private final Handler main = new Handler(Looper.getMainLooper());
 
     private boolean initialized;
-    private boolean personalized;
-    private String appKey;
 
     private LevelPlayInterstitialAd interstitialAd;
     private LevelPlayRewardedAd rewardedAd;
@@ -342,27 +339,16 @@ public class LevelPlayAdsPlugin extends Plugin {
 
     /**
      * Initialise le SDK LevelPlay. {@code personalized} traduit le choix RGPD de
-     * l'utilisateur et doit être appliqué <b>avant</b> l'init : LevelPlay le
-     * transmet ensuite aux réseaux médiés (dont Meta, en LDU si refus).
+     * l'utilisateur et doit être appliqué <b>avant</b> l'init des réseaux.
      */
     @PluginMethod
     public void initialize(PluginCall call) {
-        String key = call.getString("appKey");
-        if (key == null || key.isEmpty()) {
+        final String appKey = call.getString("appKey");
+        if (appKey == null || appKey.isEmpty()) {
             call.reject("appKey LevelPlay manquant");
             return;
         }
         final String userId = call.getString("userId");
-        final boolean wantsPersonalized = Boolean.TRUE.equals(call.getBoolean("personalized", false));
-        this.appKey = key;
-        this.personalized = wantsPersonalized;
-
-        if (initialized) {
-            applyPrivacy(wantsPersonalized);
-            call.resolve();
-            return;
-        }
-
         final Activity activity = getActivity();
         if (activity == null) {
             call.reject("Activité indisponible");
@@ -371,7 +357,11 @@ public class LevelPlayAdsPlugin extends Plugin {
 
         final Once once = new Once();
         runOnUi(() -> {
-            applyPrivacy(wantsPersonalized);
+            if (!applyPrivacy(call)) return;
+            if (initialized) {
+                call.resolve();
+                return;
+            }
             if (userId != null && !userId.isEmpty()) {
                 try {
                     LevelPlay.setDynamicUserId(userId);
@@ -417,11 +407,8 @@ public class LevelPlayAdsPlugin extends Plugin {
      */
     @PluginMethod
     public void setConsent(PluginCall call) {
-        personalized = Boolean.TRUE.equals(call.getBoolean("personalized", false));
         runOnUi(() -> {
-            applyPrivacy(personalized);
-            Log.d(TAG, "Consentement publicitaire: " + (personalized ? "personnalisé" : "non personnalisé"));
-            call.resolve();
+            if (applyPrivacy(call)) call.resolve();
         });
     }
 
@@ -443,26 +430,29 @@ public class LevelPlayAdsPlugin extends Plugin {
         });
     }
 
-    /** Applique le consentement RGPD au SDK (personnalisé ou annonces limitées). */
-    private void applyPrivacy(boolean wantsPersonalized) {
-        try {
-            LevelPlayPrivacySettings.setGDPRConsent(wantsPersonalized);
-        } catch (Throwable t) {
-            Log.w(TAG, "setGDPRConsent: " + t.getMessage());
+    /** Refuse l'appel plutôt que de démarrer la médiation avec des réglages inconnus. */
+    private boolean applyPrivacy(PluginCall call) {
+        Boolean personalized = call.getBoolean("personalized");
+        if (personalized == null) {
+            call.reject("Choix de confidentialité publicitaire requis");
+            return false;
         }
         try {
-            // Refus de la vente / du partage des données personnelles quand
-            // l'utilisateur a choisi des annonces non personnalisées (CCPA et
-            // lois équivalentes). API dédiée depuis le SDK 9.4.0.
-            LevelPlayPrivacySettings.setCCPA(!wantsPersonalized);
-        } catch (Throwable t) {
-            Log.w(TAG, "setCCPA: " + t.getMessage());
-        }
-        try {
-            // ElyWalk n'est pas destinée aux enfants.
+            // Le signal CCPA de LevelPlay ne configure pas l'option LDU de Meta.
+            // 0, 0 : Meta détermine si la région relève de LDU. Pas d'init Meta ici.
+            if (personalized) {
+                AdSettings.setDataProcessingOptions(new String[] {});
+            } else {
+                AdSettings.setDataProcessingOptions(new String[] { "LDU" }, 0, 0);
+            }
+            LevelPlayPrivacySettings.setGDPRConsent(personalized);
+            LevelPlayPrivacySettings.setCCPA(!personalized);
             LevelPlayPrivacySettings.setCOPPA(false);
-        } catch (Throwable t) {
-            Log.w(TAG, "setCOPPA: " + t.getMessage());
+            return true;
+        } catch (RuntimeException | LinkageError e) {
+            Log.e(TAG, "Configuration de confidentialité impossible", e);
+            call.reject("Impossible d’appliquer le choix de confidentialité publicitaire");
+            return false;
         }
     }
 

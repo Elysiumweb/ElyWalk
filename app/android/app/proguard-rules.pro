@@ -21,7 +21,7 @@
 #-renamesourcefileattribute SourceFile
 
 # ---------------------------------------------------------------------------
-# Meta Audience Network (régie publicitaire — voir MetaAdsPlugin.java)
+# Meta Audience Network (bidding via l’adaptateur LevelPlay facebook-adapter)
 # À conserver même si `minifyEnabled` est aujourd'hui à false : le SDK est
 # chargé par réflexion (adaptateurs, rapports AdChoices).
 # ---------------------------------------------------------------------------

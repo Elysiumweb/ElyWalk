@@ -5,10 +5,10 @@ import {
   LEVELPLAY_AD_UNIT_BANNER,
   LEVELPLAY_AD_UNIT_INTERSTITIAL,
   LEVELPLAY_AD_UNIT_MEDIUM_RECTANGLE,
-  LEVELPLAY_AD_UNIT_NATIVE,
-  LEVELPLAY_AD_UNIT_NATIVE_BANNER,
   LEVELPLAY_AD_UNIT_REWARDED,
   LEVELPLAY_APP_KEY,
+  LEVELPLAY_NATIVE_BANNER_PLACEMENT,
+  LEVELPLAY_NATIVE_CARD_PLACEMENT,
   LEVELPLAY_REWARD_NAME,
 } from './constants';
 import { getAdConsent, subscribeAdConsent, type AdConsent } from './adConsent';
@@ -16,8 +16,7 @@ import { getAdConsent, subscribeAdConsent, type AdConsent } from './adConsent';
 // ============================================================================
 // Publicité — Unity LevelPlay (médiation) avec Meta Audience Network en bidding.
 //
-// Depuis 2.1.0, l'application ne parle plus directement au SDK Meta : elle
-// passe par **Unity LevelPlay**, la plateforme de médiation. Meta Audience
+// Toutes les demandes d'annonce passent par **Unity LevelPlay**. Meta Audience
 // Network y est branché en in-app bidding (le SDK Meta est embarqué par
 // l'adaptateur `facebook-adapter`), ce qui permet d'ajouter d'autres réseaux
 // sans retoucher l'application.
@@ -58,14 +57,14 @@ interface LevelPlayAdsPlugin {
   setConsent(options: { personalized: boolean }): Promise<void>;
   showBanner(options: { adUnitId: string; adaptive?: boolean }): Promise<{ height: number }>;
   hideBanner(): Promise<void>;
-  showNativeBanner(options: { adUnitId: string; placementName?: string }): Promise<{ height: number }>;
+  showNativeBanner(options: { placementName?: string }): Promise<{ height: number }>;
   hideNativeBanner(): Promise<void>;
   loadInterstitial(options: { adUnitId: string }): Promise<{ loaded: boolean }>;
   showInterstitial(): Promise<{ shown: boolean }>;
   loadRewarded(options: { adUnitId: string }): Promise<{ loaded: boolean }>;
   showRewarded(): Promise<LevelPlayRewardResult>;
   showMediumRectangle(options: { adUnitId: string }): Promise<{ shown: boolean }>;
-  showNativeCard(options: { adUnitId: string; placementName?: string }): Promise<{ shown: boolean }>;
+  showNativeCard(options: { placementName?: string }): Promise<{ shown: boolean }>;
 }
 
 const LevelPlayAds = registerPlugin<LevelPlayAdsPlugin>('LevelPlayAds');
@@ -97,68 +96,59 @@ const LOAD_TIMEOUT_MS = 10000;
 
 let initialized = false;
 let initialization: Promise<void> | null = null;
-/** `true` uniquement quand l'utilisateur a exprimé un choix (personnalisé ou non). */
-let adsAllowed = false;
+let requestedConsent: AdConsent = 'unknown';
 let appliedConsent: AdConsent | null = null;
 let consentSubscribed = false;
 let currentUserId: string | undefined;
 /** Dernier UID réellement transmis au SDK (utile pour les callbacks S2S). */
 let appliedUserId: string | undefined;
 
-/** Applique le consentement courant au SDK LevelPlay (RGPD : personnalisé ou non). */
-async function applyConsent(): Promise<void> {
-  const consent = await getAdConsent();
-  adsAllowed = consent !== 'unknown';
-  if (!initialized) return;
-  if (appliedConsent === consent) return;
-  try {
-    await LevelPlayAds.setConsent({ personalized: consent === 'granted' });
-    appliedConsent = consent;
-  } catch (e) {
-    console.warn('[LevelPlay] setConsent error', e);
-  }
-  if (!adsAllowed) await hideBottomAd();
-}
-
 /**
- * Initialise le SDK LevelPlay puis applique le consentement RGPD.
- *
- * `userId` (facultatif) est transmis à LevelPlay (`setDynamicUserId`) : il est
- * requis pour les callbacks server-to-server et pour le parcours utilisateur
- * d'Ad Quality.
+ * Attend un choix explicite avant d'initialiser LevelPlay. Les demandes d'annonce
+ * concurrentes attendent la même initialisation / mise à jour de confidentialité.
  */
 export async function initAds(userId?: string): Promise<void> {
   if (!isNative()) return;
   if (userId) currentUserId = userId;
-  if (initialized) {
-    if (userId && userId !== appliedUserId) {
-      appliedUserId = userId;
-      void LevelPlayAds.setUserId({ userId }).catch(() => undefined);
-    }
-    return;
+  if (!consentSubscribed) {
+    consentSubscribed = true;
+    subscribeAdConsent((consent) => {
+      requestedConsent = consent;
+      void initAds();
+    });
   }
   if (initialization) return initialization;
 
   initialization = (async () => {
     try {
-      const consent = await getAdConsent();
-      adsAllowed = consent !== 'unknown';
-      // Le SDK doit connaître le consentement AVANT l'initialisation : LevelPlay
-      // le transmet aux réseaux (dont Meta) au moment de la configuration.
-      await LevelPlayAds.initialize({
-        appKey: LEVELPLAY_APP_KEY,
-        userId: currentUserId,
-        personalized: consent === 'granted',
-      });
-      initialized = true;
-      appliedConsent = consent;
-      appliedUserId = currentUserId;
-      if (!consentSubscribed) {
-        consentSubscribed = true;
-        subscribeAdConsent(() => { void applyConsent(); });
+      const stored = await getAdConsent();
+      if (requestedConsent === 'unknown') requestedConsent = stored;
+      // Un choix (ou la connexion du compte) peut survenir pendant l'appel natif.
+      // N'autoriser le chargement qu'une fois le dernier choix appliqué.
+      while (requestedConsent !== 'unknown') {
+        const consent = requestedConsent;
+        const uid = currentUserId;
+        const personalized = consent === 'granted';
+        if (!initialized) {
+          await LevelPlayAds.initialize({ appKey: LEVELPLAY_APP_KEY, userId: uid, personalized });
+          initialized = true;
+          appliedConsent = consent;
+          appliedUserId = uid;
+        } else if (appliedConsent !== consent) {
+          appliedConsent = null;
+          appOpenPreloaded = false;
+          await hideBottomAd();
+          await LevelPlayAds.setConsent({ personalized });
+          appliedConsent = consent;
+        } else if (uid && uid !== appliedUserId) {
+          await LevelPlayAds.setUserId({ userId: uid });
+          appliedUserId = uid;
+        } else {
+          break;
+        }
       }
     } catch (e) {
-      console.warn('[LevelPlay] init error', e);
+      console.warn('[LevelPlay] init/consent error', e);
     } finally {
       initialization = null;
     }
@@ -166,9 +156,9 @@ export async function initAds(userId?: string): Promise<void> {
   return initialization;
 }
 
-/** `true` si un choix de consentement autorise la diffusion d'annonces. */
-export function canShowAds(): boolean {
-  return initialized && adsAllowed;
+/** Une annonce déjà en chargement n'est affichable que sous le même consentement. */
+export function canShowAds(consent = requestedConsent): boolean {
+  return initialized && consent !== 'unknown' && consent === requestedConsent && consent === appliedConsent;
 }
 
 /**
@@ -185,8 +175,8 @@ export type AdGate = 'ready' | 'no-consent' | 'unavailable';
 export async function adGate(): Promise<AdGate> {
   if (!isNative()) return 'unavailable';
   await initAds();
-  if (!adsAllowed) return 'no-consent';
-  return initialized ? 'ready' : 'unavailable';
+  if (requestedConsent === 'unknown') return 'no-consent';
+  return canShowAds() ? 'ready' : 'unavailable';
 }
 
 /** Ouvre l'écran « Confidentialité des annonces ». */
@@ -209,14 +199,16 @@ function setBannerHeight(height: number): void {
   }
 }
 
-async function showBannerKind(kind: BottomAdKind): Promise<number> {
+async function showBannerKind(kind: BottomAdKind, consent: AdConsent): Promise<number> {
   if (kind === 'nativeBanner') {
     // Un seul ancrage bas à la fois : on retire l'autre format.
     await LevelPlayAds.hideBanner().catch(() => undefined);
-    const { height } = await LevelPlayAds.showNativeBanner({ adUnitId: LEVELPLAY_AD_UNIT_NATIVE_BANNER });
+    if (!canShowAds(consent)) return 0;
+    const { height } = await LevelPlayAds.showNativeBanner({ placementName: LEVELPLAY_NATIVE_BANNER_PLACEMENT });
     return height;
   }
   await LevelPlayAds.hideNativeBanner().catch(() => undefined);
+  if (!canShowAds(consent)) return 0;
   const { height } = await LevelPlayAds.showBanner({ adUnitId: LEVELPLAY_AD_UNIT_BANNER });
   return height;
 }
@@ -231,13 +223,14 @@ export async function showBottomAd(kind: BottomAdKind): Promise<void> {
   }
   if (bottomKind === kind) return;
   try {
-    let height = await showBannerKind(kind);
+    const consent = requestedConsent;
+    let height = await showBannerKind(kind, consent);
+    if (!canShowAds(consent)) return;
     let effective: BottomAdKind | null = height > 0 ? kind : null;
-    // Pas de remplissage sur le format natif (Meta ne « bidde » pas en natif sur
-    // LevelPlay) : on retombe sur la bannière 320×50 pour ne jamais laisser un
-    // trou en bas d'écran.
+    // Si aucun réseau ne remplit le placement natif, essayer la bannière 320×50.
     if (height <= 0 && kind === 'nativeBanner') {
-      height = await showBannerKind('banner');
+      height = await showBannerKind('banner', consent);
+      if (!canShowAds(consent)) return;
       effective = height > 0 ? 'banner' : null;
     }
     bottomKind = effective;
@@ -271,13 +264,14 @@ export async function showInterstitial(): Promise<void> {
   if (!isNative()) return;
   await initAds();
   if (!canShowAds()) return;
+  const consent = requestedConsent;
   try {
     const { loaded } = await withTimeout(
       LevelPlayAds.loadInterstitial({ adUnitId: LEVELPLAY_AD_UNIT_INTERSTITIAL }),
       LOAD_TIMEOUT_MS,
       { loaded: false }
     );
-    if (!loaded) return;
+    if (!loaded || !canShowAds(consent)) return;
     await LevelPlayAds.showInterstitial();
   } catch (e) {
     console.warn('[LevelPlay] interstitial error', e);
@@ -312,13 +306,14 @@ export async function showRewardedAd(_uid?: string): Promise<LevelPlayRewardResu
   if (!isNative()) return { rewarded: false, coins: 0 };
   await initAds(_uid);
   if (!canShowAds()) return { rewarded: false, coins: 0 };
+  const consent = requestedConsent;
   try {
     const { loaded } = await withTimeout(
       LevelPlayAds.loadRewarded({ adUnitId: LEVELPLAY_AD_UNIT_REWARDED }),
       LOAD_TIMEOUT_MS,
       { loaded: false }
     );
-    if (!loaded) return { rewarded: false, coins: 0 };
+    if (!loaded || !canShowAds(consent)) return { rewarded: false, coins: 0 };
     const result = await LevelPlayAds.showRewarded();
     const coins = rewardCoinsFrom(result);
     if (result.rewarded && coins === 0) {
@@ -363,7 +358,7 @@ export async function showEndOfActivityAd(): Promise<void> {
   await initAds();
   if (!canShowAds()) return;
   try {
-    await LevelPlayAds.showNativeCard({ adUnitId: LEVELPLAY_AD_UNIT_NATIVE });
+    await LevelPlayAds.showNativeCard({ placementName: LEVELPLAY_NATIVE_CARD_PLACEMENT });
   } catch (e) {
     console.warn('[LevelPlay] native card error', e);
   }
@@ -448,13 +443,14 @@ export async function loadAppOpenAd(): Promise<void> {
   if (!isNative()) return;
   await initAds();
   if (!canShowAds()) return;
+  const consent = requestedConsent;
   try {
     const { loaded } = await withTimeout(
       LevelPlayAds.loadInterstitial({ adUnitId: LEVELPLAY_AD_UNIT_INTERSTITIAL }),
       LOAD_TIMEOUT_MS,
       { loaded: false }
     );
-    appOpenPreloaded = loaded;
+    appOpenPreloaded = loaded && canShowAds(consent);
   } catch (e) {
     console.warn('[LevelPlay] appOpen load error', e);
   }
@@ -465,7 +461,8 @@ export async function showAppOpenAdIfReady(): Promise<void> {
   if (!isNative()) return;
   await initAds();
   if (!canShowAds()) return;
-  if (!(await shouldShowAppOpenAd())) return;
+  const consent = requestedConsent;
+  if (!(await shouldShowAppOpenAd()) || !canShowAds(consent)) return;
   try {
     if (!appOpenPreloaded) {
       const { loaded } = await withTimeout(
@@ -473,7 +470,7 @@ export async function showAppOpenAdIfReady(): Promise<void> {
         LOAD_TIMEOUT_MS,
         { loaded: false }
       );
-      if (!loaded) return;
+      if (!loaded || !canShowAds(consent)) return;
     }
     appOpenPreloaded = false;
     const { shown } = await LevelPlayAds.showInterstitial();
