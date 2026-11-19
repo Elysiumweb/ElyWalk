@@ -136,15 +136,15 @@ function Shell() {
   }, [profile?.onboardingDone, profile?.uid]);
 
   /*
-    Mise à jour publiée sur le Play Store : contrôle au lancement, avant de
-    laisser entrer dans l'application. Le contrôle est silencieux en cas
-    d'échec (hors ligne, Play Store absent) — il ne retarde jamais l'accès.
-    L'écran revient au retour au premier plan (l'utilisateur a pu mettre à jour
-    entre-temps, ou la version publiée a changé).
+    Mise à jour publiée sur le Play Store : contrôle après le chargement de
+    l'authentification pour que la lecture de la version publiée ne parte pas
+    avant Firebase. Le contrôle reste silencieux hors ligne et est relancé au
+    retour au premier plan.
   */
   const [updateDecision, setUpdateDecision] = useState<UpdateDecision | null>(null);
   const updateCheckedRef = useRef(false);
   useEffect(() => {
+    if (loading) return;
     let cancelled = false;
     const run = async () => {
       const decision = await checkForUpdate();
@@ -160,7 +160,7 @@ function Shell() {
       cancelled = true;
       void sub.then((handle) => handle.remove());
     };
-  }, []);
+  }, [loading]);
 
   if (loading) {
     return (

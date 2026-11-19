@@ -17,6 +17,20 @@ before(async () => { env = await initializeTestEnvironment({ projectId: PROJECT,
 beforeEach(() => env.clearFirestore());
 after(() => env.cleanup());
 
+describe('version de l’application', () => {
+  it('autorise la lecture publique des métadonnées de mise à jour, sans ouvrir les écritures', async () => {
+    await env.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'appRelease/current'), {
+        latestVersion: '9.9.9', notes: 'Nouvelle version', enabled: true,
+      });
+    });
+    const publicDb = env.unauthenticatedContext().firestore();
+    await assertSucceeds(getDoc(doc(publicDb, 'appRelease/current')));
+    await assertFails(setDoc(doc(publicDb, 'appRelease/other'), { latestVersion: '10.0.0' }));
+    await assertFails(setDoc(doc(as(BOB), 'appRelease/current'), { latestVersion: '10.0.0' }));
+  });
+});
+
 describe('blocage bilatéral', () => {
   it('refuse demandes, messages et encouragements après un blocage', async () => {
     await setDoc(doc(as(ALICE), 'blockedAccounts/alice_bob'), block(ALICE, BOB));
