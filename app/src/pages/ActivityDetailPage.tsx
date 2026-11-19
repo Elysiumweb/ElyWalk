@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -54,7 +54,8 @@ export default function ActivityDetailPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
-  const [busy, setBusy] = useState(false);
+  const [busyAction, setBusyAction] = useState<BusyAction | null>(null);
+  const busy = busyAction !== null;
   const [visibility, setVisibility] = useState<'private' | 'friends' | 'link'>('private');
   const [reportOpen, setReportOpen] = useState(false);
   // Partage par lien **révocable** : un jeton explicite remplace l'audience
@@ -178,52 +179,52 @@ export default function ActivityDetailPage() {
 
   const onShare = async () => {
     if (!profile || !session) return;
-    setBusy(true);
+    setBusyAction('share');
     try {
       const result = await shareActivity(session, profile, profile.strideLengthCm || 75, { mapStyle });
       toast(result === 'shared' ? 'Sortie partagée !' : 'Carte enregistrée dans vos téléchargements.', 'success');
     } catch (e) {
       if ((e as Error).name !== 'AbortError') toast((e as Error).message, 'error');
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
 
   const onExportGpx = async () => {
     if (!session) return;
-    setBusy(true);
+    setBusyAction('gpx');
     try {
       const result = await exportActivityGpx(session);
       toast(result === 'shared' ? 'Fichier GPX prêt à importer (Strava, Garmin…).' : 'GPX enregistré dans vos téléchargements.', 'success');
     } catch (e) {
       toast((e as Error).message, 'error');
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
 
   const onSaveRoute = async () => {
     if (!profile || !session || session.points.length < 2) return;
-    setBusy(true);
+    setBusyAction('route');
     try {
       const step = Math.max(1, Math.ceil(session.points.length / 5000));
       const points = session.points.filter((_, index) => index % step === 0 || index === session.points.length - 1).slice(0, 5000);
       await saveRoute(profile, { name: session.title?.trim() || `Parcours du ${new Date(session.startedAt).toLocaleDateString()}`, description: session.caption?.trim() || '', points, visibility: 'private' });
       toast('Parcours privé enregistré.', 'success'); navigate('/routes');
     } catch (e) { toast((e as Error).message, 'error'); }
-    finally { setBusy(false); }
+    finally { setBusyAction(null); }
   };
 
   const onExportCsv = async () => {
     if (!session) return;
-    setBusy(true);
+    setBusyAction('csv');
     try {
       const result = await exportActivitiesCsv([session]);
       toast(result === 'shared' ? 'CSV partagé.' : 'CSV enregistré dans vos téléchargements.', 'success');
     } catch (e) {
       toast((e as Error).message, 'error');
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
 
@@ -238,7 +239,7 @@ export default function ActivityDetailPage() {
 
   const saveEdit = async () => {
     if (!profile || !session?.id) return;
-    setBusy(true);
+    setBusyAction('edit');
     try {
       // Titre, légende et météo sont partageables ; la note reste privée et
       // part dans la sous-collection du propriétaire (F01).
@@ -260,14 +261,14 @@ export default function ActivityDetailPage() {
     } catch (e) {
       toast((e as Error).message, 'error');
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
 
   const [deleteOpen, setDeleteOpen] = useState(false);
   const onDelete = async () => {
     if (!profile || !session?.id) return;
-    setBusy(true);
+    setBusyAction('delete');
     try {
       await deleteActivitySession(profile.uid, session.id);
       toast('Sortie et tracé GPS supprimés.', 'success');
@@ -276,13 +277,13 @@ export default function ActivityDetailPage() {
     } catch (e) {
       toast((e as Error).message, 'error');
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
 
   const onVisibilityChange = async (v: 'private' | 'friends' | 'link') => {
     if (!profile || !session?.id) return;
-    setBusy(true);
+    setBusyAction('visibility');
     try {
       if (v === 'link') {
         // Un lien n'a de sens qu'avec un jeton révocable : on le crée ici.
@@ -308,7 +309,7 @@ export default function ActivityDetailPage() {
     } catch (e) {
       toast((e as Error).message, 'error');
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
 
@@ -363,28 +364,45 @@ export default function ActivityDetailPage() {
 
   if (loading) {
     return (
-      <div className="screen" data-testid="activity-detail-screen">
+      <div className="screen v2-det v2-det-page" data-testid="activity-detail-screen">
+        <style>{V2_STYLES}</style>
         <div className="screen-header"><div><h1 className="screen-title">Sortie</h1></div></div>
-        <div className="card" role="status" aria-live="polite">
-          <div className="activity-detail-skeleton" aria-hidden="true" />
-          <div className="row-sub" style={{ marginTop: 10 }}>Chargement de la sortie et de la carte…</div>
+        <div role="status" aria-live="polite" aria-busy="true" data-testid="activity-detail-loading">
+          <div className="v2-skel v2-skel-map" aria-hidden="true" />
+          <div className="card v2-card" aria-hidden="true">
+            <div className="v2-hero">
+              <span className="v2-skel v2-skel-big" />
+              <span className="v2-skel v2-skel-big" />
+            </div>
+            <div className="v2-grid4">
+              {[0, 1, 2, 3].map((i) => <span className="v2-skel v2-skel-cell" key={i} />)}
+            </div>
+          </div>
+          <div className="card v2-card" aria-hidden="true">
+            <span className="v2-skel v2-skel-line" style={{ width: '45%' }} />
+            <span className="v2-skel v2-skel-line" style={{ width: '80%' }} />
+            <span className="v2-skel v2-skel-line" style={{ width: '60%' }} />
+          </div>
+          <div className="row-sub v2-loading-text">Chargement de la sortie et de la carte…</div>
         </div>
-        <div className="spinner" style={{ margin: '18px auto' }} />
       </div>
     );
   }
   if (!session && loadError) {
     return (
-      <div className="screen" data-testid="activity-detail-screen">
+      <div className="screen v2-det v2-det-page" data-testid="activity-detail-screen">
+        <style>{V2_STYLES}</style>
         <div className="screen-header"><div><h1 className="screen-title">Sortie indisponible</h1></div></div>
-        <div className="card" role="alert">
+        <div className="card v2-card" role="alert" data-testid="activity-detail-error">
           <div className="card-title">La sortie n’a pas pu être chargée</div>
           <p className="muted-text">{loadError}</p>
-          <div className="two-col" style={{ marginTop: 10 }}>
+          <div className="v2-stack">
             <button className="btn btn-gold" onClick={() => setReloadToken((n) => n + 1)} data-testid="activity-detail-retry">
               🔄 Réessayer
             </button>
-            <button className="btn btn-ghost" onClick={() => navigate('/activity')}>← Mes sorties</button>
+            <button className="btn btn-ghost" onClick={() => navigate('/activity')} data-testid="activity-detail-error-back">
+              ← Mes sorties
+            </button>
           </div>
         </div>
       </div>
@@ -392,10 +410,17 @@ export default function ActivityDetailPage() {
   }
   if (!session) {
     return (
-      <div className="screen" data-testid="activity-detail-screen">
+      <div className="screen v2-det v2-det-page" data-testid="activity-detail-screen">
+        <style>{V2_STYLES}</style>
         <div className="screen-header"><div><h1 className="screen-title">Sortie introuvable</h1></div></div>
-        <p className="empty-state">Cette sortie n’existe plus ou ne vous appartient pas.</p>
-        <button className="btn btn-ghost" onClick={() => navigate('/activity')}>← Retour aux sorties</button>
+        <div className="card v2-card" data-testid="activity-detail-not-found">
+          <p className="empty-state">Cette sortie n’existe plus ou ne vous appartient pas.</p>
+          <div className="v2-stack">
+            <button className="btn btn-ghost" onClick={() => navigate('/activity')} data-testid="activity-detail-not-found-back">
+              ← Retour aux sorties
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
@@ -407,130 +432,188 @@ export default function ActivityDetailPage() {
   const unitSystem = profile?.unitSystem || profile?.health?.unitSystem || 'metric';
   const date = new Date(session.startedAt).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   const time = new Date(session.startedAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-  const gain = elevationGainM(session.points || []);
+  const pts = session.points || [];
+  const gain = elevationGainM(pts);
   const weather = weatherLabel(session.weather);
   const heading = session.title?.trim() || (session.type === 'run' ? '🏃 Course' : '🚶 Marche');
   const selectedStyle = MAP_STYLES.find((s) => s.id === mapStyle);
+  const hasPause = !!session.pausedSec && session.pausedSec >= 30;
+  const caption = session.caption?.trim();
 
   return (
-    <div className="screen activity-detail-screen" data-testid="activity-detail-screen">
+    <div className="screen activity-detail-screen v2-det v2-det-page" data-testid="activity-detail-screen" aria-busy={busy}>
+      <style>{V2_STYLES}</style>
       <div className="screen-header">
         <div>
-          <h1 className="screen-title">{heading}</h1>
-          <div className="screen-sub">
+          <h1 className="screen-title" data-testid="activity-detail-title">{heading}</h1>
+          <div className="screen-sub" data-testid="activity-detail-subtitle">
             {activityTypeLabel(session.type)} · {date} · {time}{weather ? ` · ${weather}` : ''}
           </div>
         </div>
-        <button className="btn btn-ghost btn-sm" onClick={() => navigate(-1)}>Retour</button>
+        <button className="btn btn-ghost btn-sm" onClick={() => navigate(-1)} data-testid="activity-detail-back">Retour</button>
       </div>
-      {/*
-        La carte est rendue dès que la sortie est connue ; les états « aucun
-        point », « chargement » et « erreur » sont explicites plutôt qu'un grand
-        rectangle vide (D03).
-      */}
-      <div className="activity-detail-map-wrap" style={{ borderRadius: 16, margin: '0 12px' }}>
-        <div className="activity-map" ref={containerRef} data-testid="activity-detail-map" style={{ height: 'min(46vh, 440px)', borderRadius: 16 }} />
-        {(session.points || []).length === 0 && (
-          <div className="activity-map-empty" role="status" data-testid="activity-detail-map-empty">
-            <strong>Aucun tracé enregistré</strong>
-            <span>Cette sortie n’a pas de points GPS (GPS indisponible ou sortie manuelle). Les statistiques restent exactes.</span>
-          </div>
-        )}
-      </div>
-      <div className="card" style={{ margin: '12px' }}>
-        <div className="activity-stats">
-          <div><strong>{formatDistance(session.distanceM || 0, unitSystem)}</strong><span>distance</span></div>
-          <div><strong>{fmtDuration(session.durationSec || 0)}</strong><span>durée active</span></div>
-          <div><strong>{fmtNumber(steps)}</strong><span>pas</span></div>
-          <div><strong>{session.calories || 0}</strong><span>kcal</span></div>
-          <div><strong>{speedKmh(session.distanceM || 0, session.durationSec || 0).toFixed(1)}</strong><span>vitesse moy. (km/h)</span></div>
-          <div><strong>{paceMinPerKm(session.distanceM || 0, session.durationSec || 0)}</strong><span>allure</span></div>
-        </div>
-        <div className="row-sub" style={{ marginTop: 6 }}>
-          {(session.points || []).length} points GPS enregistrés{gain > 0 ? ` · D+ ${gain} m` : ''}
-        </div>
-        {session.pausedSec && session.pausedSec >= 30 ? (
-          <div className="row-sub" style={{ marginTop: 4 }}>
-            ⏸ {fmtDuration(session.pausedSec)} de pause exclus de l’allure
-          </div>
-        ) : null}
 
-        {isOwner && (
-          <button className="btn btn-outline btn-sm" style={{ marginTop: 10 }} onClick={openEdit} disabled={busy}>
+      {pts.length > 0 ? (
+        <div className="activity-detail-map-wrap v2-map-wrap">
+          <div
+            className="activity-map"
+            ref={containerRef}
+            role="region"
+            aria-label="Carte du tracé"
+            data-testid="activity-detail-map"
+            style={{ height: 'min(40vh, 400px)', borderRadius: 16 }}
+          />
+        </div>
+      ) : (
+        <div className="v2-nomap" role="status" data-testid="activity-detail-map-empty">
+          <strong>Aucun tracé enregistré</strong>
+          <span>Cette sortie n’a pas de points GPS (GPS indisponible ou sortie manuelle). Les statistiques restent exactes.</span>
+        </div>
+      )}
+
+      <section className="card v2-card" aria-label="Chiffres clés" data-testid="activity-detail-stats">
+        <div className="v2-hero">
+          <div>
+            <strong data-testid="activity-detail-distance">{formatDistance(session.distanceM || 0, unitSystem)}</strong>
+            <span>distance</span>
+          </div>
+          <div>
+            <strong data-testid="activity-detail-duration">{fmtDuration(session.durationSec || 0)}</strong>
+            <span>durée active</span>
+          </div>
+        </div>
+        <div className="v2-grid4">
+          <div><strong data-testid="activity-detail-steps">{fmtNumber(steps)}</strong><span>pas</span></div>
+          <div><strong data-testid="activity-detail-calories">{session.calories || 0}</strong><span>kcal</span></div>
+          <div>
+            <strong data-testid="activity-detail-speed">{speedKmh(session.distanceM || 0, session.durationSec || 0).toFixed(1)}</strong>
+            <span>vitesse moy. (km/h)</span>
+          </div>
+          <div>
+            <strong data-testid="activity-detail-pace">{paceMinPerKm(session.distanceM || 0, session.durationSec || 0)}</strong>
+            <span>allure</span>
+          </div>
+        </div>
+        <div className="v2-meta-line" data-testid="activity-detail-meta">
+          <span>{pts.length} points GPS enregistrés</span>
+          {gain > 0 && <span>D+ {gain} m</span>}
+          {hasPause && <span>⏸ {fmtDuration(session.pausedSec || 0)} de pause exclus de l’allure</span>}
+        </div>
+      </section>
+
+      {!isOwner && (
+        <section className="card v2-card" aria-label="Réagir à cette sortie" data-testid="activity-reactions">
+          <div className="card-title">Réagir</div>
+          <div className="v2-react-row">
+            <button className="btn btn-outline" onClick={() => onReactOnActivity('👏')} aria-label="Envoyer un bravo" data-testid="activity-react-clap">👏 Bravo</button>
+            <button className="btn btn-outline" onClick={() => onReactOnActivity('🔥')} aria-label="Envoyer une réaction feu" data-testid="activity-react-fire">🔥</button>
+            <button className="btn btn-outline" onClick={() => onReactOnActivity('💛')} aria-label="Envoyer une réaction cœur" data-testid="activity-react-heart">💛</button>
+          </div>
+          <button
+            className="text-button v2-report"
+            onClick={() => setReportOpen(true)}
+            aria-label="Signaler cette sortie"
+            data-testid="activity-report-button"
+          >
+            ⚑ Signaler cette sortie
+          </button>
+        </section>
+      )}
+
+      {isOwner && (
+        <section className="card v2-card" aria-label="Titre, légende et note" data-testid="activity-detail-notes">
+          <div className="v2-section-head">
+            <div className="card-title">Titre, légende et note</div>
+          </div>
+          <div className="v2-field">
+            <span className="v2-label">Titre</span>
+            <p data-testid="activity-owner-title">{session.title?.trim() || <span className="v2-placeholder">Aucun titre</span>}</p>
+          </div>
+          <div className="v2-field v2-field-public">
+            <span className="v2-label">💬 Légende publique</span>
+            <p data-testid="activity-owner-caption">{caption || <span className="v2-placeholder">Aucune légende</span>}</p>
+          </div>
+          <div className="v2-field v2-field-private">
+            <span className="v2-label">📝 Note privée <small>· visible par vous seul</small></span>
+            {privateNote
+              ? <p data-testid="activity-private-note">{privateNote}</p>
+              : <p><span className="v2-placeholder">Aucune note</span></p>}
+          </div>
+          <button className="btn btn-outline v2-full" onClick={openEdit} disabled={busy} data-testid="activity-edit-button">
             ✏️ {session.title || session.note || session.weather ? 'Modifier titre, note et météo' : 'Renommer et annoter cette sortie'}
           </button>
-        )}
-        {isOwner && privateNote && (
-          <p className="activity-note" data-testid="activity-private-note">
-            📝 {privateNote} <small className="muted-xs">· note privée, visible par vous seul</small>
+        </section>
+      )}
+      {!isOwner && session.caption && (
+        <section className="card v2-card" aria-label="Légende">
+          <div className="v2-field v2-field-public">
+            <span className="v2-label">💬 Légende</span>
+            <p data-testid="activity-caption">{session.caption}</p>
+          </div>
+        </section>
+      )}
+
+      <section className="card v2-card" aria-labelledby="v2-share-title" data-testid="activity-share-block">
+        <h2 className="card-title" id="v2-share-title">Partage</h2>
+
+        <span className="v2-label">Visibilité</span>
+        <div className="chip-row" role="group" aria-label="Visibilité de la sortie">
+          <button className={`chip ${visibility === 'private' ? 'chip-active' : ''}`} aria-pressed={visibility === 'private'} onClick={() => onVisibilityChange('private')} disabled={!isOwner || busy} data-testid="visibility-private">🔒 Moi seul</button>
+          <button className={`chip ${visibility === 'friends' ? 'chip-active' : ''}`} aria-pressed={visibility === 'friends'} onClick={() => onVisibilityChange('friends')} disabled={!isOwner || busy} data-testid="visibility-friends">👥 Amis</button>
+          <button className={`chip ${visibility === 'link' ? 'chip-active' : ''}`} aria-pressed={visibility === 'link'} onClick={() => onVisibilityChange('link')} disabled={!isOwner || busy} data-testid="visibility-link">🔗 Lien</button>
+        </div>
+        <p className="v2-help" role="status" data-testid="visibility-help">
+          {busyAction === 'visibility' && <span className="v2-spin" aria-hidden="true" />}
+          {visibility === 'private' && 'Seul vous voyez cette sortie.'}
+          {visibility === 'friends' && 'Vérifié côté serveur : seules vos amitiés enregistrées voient cette sortie.'}
+          {visibility === 'link' && 'Accessible uniquement aux personnes qui possèdent le lien, tant qu’il n’est pas révoqué.'}
+        </p>
+        {!isOwner && (
+          <p className="v2-help v2-gold" data-testid="visibility-visitor-info">
+            Sortie de {session.uid === profile?.uid ? 'vous' : 'un ami'} · visibilité : {visibility}
           </p>
         )}
-        {!isOwner && session.caption && <p className="activity-note" data-testid="activity-caption">💬 {session.caption}</p>}
 
-        <div className="card" style={{ marginTop: 12, background: 'var(--surface-2)' }}>
-          <div className="card-title">Visibilité</div>
-          <div className="chip-row">
-            <button className={`chip ${visibility === 'private' ? 'chip-active' : ''}`} onClick={() => onVisibilityChange('private')} disabled={!isOwner}>🔒 Moi seul</button>
-            <button className={`chip ${visibility === 'friends' ? 'chip-active' : ''}`} onClick={() => onVisibilityChange('friends')} disabled={!isOwner}>👥 Amis</button>
-            <button className={`chip ${visibility === 'link' ? 'chip-active' : ''}`} onClick={() => onVisibilityChange('link')} disabled={!isOwner}>🔗 Lien</button>
-          </div>
-          <small style={{ color: 'var(--muted)', fontSize: 11 }}>
-            {visibility === 'private' && 'Seul vous voyez cette sortie.'}
-            {visibility === 'friends' && 'Vérifié côté serveur : seules vos amitiés enregistrées voient cette sortie.'}
-            {visibility === 'link' && 'Accessible uniquement aux personnes qui possèdent le lien, tant qu’il n’est pas révoqué.'}
-          </small>
-          {visibility === 'link' && isOwner && (
-            <div className="share-link-block" data-testid="share-link-block">
-              <small className="field-help">
-                Le lien porte un jeton propre à cette sortie et n’expose qu’un résumé
-                (distance, durée, date) : le tracé GPS reste privé. Le révoquer coupe
-                immédiatement l’accès.
-              </small>
-              <div className="two-col" style={{ marginTop: 6 }}>
-                <button type="button" className="btn btn-outline btn-sm" onClick={() => void copyShareLink()} disabled={!shareLink}>
-                  Copier le lien
-                </button>
-                <button type="button" className="btn btn-danger btn-sm" onClick={() => void revokeLink()} disabled={!shareLink || linkBusy} data-testid="revoke-share-link">
-                  Révoquer
-                </button>
-              </div>
-              {revokedLinkId && <p className="muted-xs">Lien révoqué · les destinataires n’ont plus accès.</p>}
-              <div style={{ marginTop: 10 }}>
-                <small className="field-help" style={{ display: 'block', marginBottom: 6 }}>
-                  Aperçu — ce que voit la personne qui ouvre le lien (sans compte) :
-                </small>
-                <SharedActivityCard
-                  compact
-                  activity={{
-                    title: session.title || session.routeName || 'Sortie ElyWalk',
-                    ownerName: profile?.displayName,
-                    type: session.type,
-                    startedAt: session.startedAt,
-                    durationSec: session.durationSec,
-                    distanceM: session.distanceM,
-                    calories: session.calories,
-                    steps: session.steps,
-                    caption: session.caption,
-                  }}
-                />
-              </div>
+        {visibility === 'link' && isOwner && (
+          <div className="share-link-block v2-sub" data-testid="share-link-block">
+            <span className="v2-label">Lien de partage</span>
+            <small className="field-help">
+              Le lien porte un jeton propre à cette sortie et n’expose qu’un résumé
+              (distance, durée, date) : le tracé GPS reste privé. Le révoquer coupe
+              immédiatement l’accès.
+            </small>
+            <div className="v2-two">
+              <button type="button" className="btn btn-outline" onClick={() => void copyShareLink()} disabled={!shareLink} data-testid="copy-share-link">
+                Copier le lien
+              </button>
+              <button type="button" className="btn btn-danger" onClick={() => void revokeLink()} disabled={!shareLink || linkBusy} aria-busy={linkBusy} data-testid="revoke-share-link">
+                <BusyLabel active={linkBusy}>Révoquer</BusyLabel>
+              </button>
             </div>
-          )}
-          {!isOwner && <small style={{ color: 'var(--gold)', display: 'block', marginTop: 6 }}>Sortie de {session.uid === profile?.uid ? 'vous' : 'un ami'} · visibilité : {visibility}</small>}
-        </div>
-
-        {!isOwner && (
-          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-            <button className="btn btn-outline btn-sm" style={{ flex: 1 }} onClick={() => onReactOnActivity('👏')}>👏 Bravo</button>
-            <button className="btn btn-outline btn-sm" style={{ flex: 1 }} onClick={() => onReactOnActivity('🔥')}>🔥</button>
-            <button className="btn btn-outline btn-sm" style={{ flex: 1 }} onClick={() => onReactOnActivity('💛')}>💛</button>
-            <button className="btn btn-danger btn-sm" onClick={() => setReportOpen(true)} aria-label="Signaler cette sortie">⚑</button>
+            {revokedLinkId && <p className="muted-xs" role="status" data-testid="share-link-revoked">Lien révoqué · les destinataires n’ont plus accès.</p>}
+            <small className="field-help">
+              Aperçu — ce que voit la personne qui ouvre le lien (sans compte) :
+            </small>
+            <SharedActivityCard
+              compact
+              activity={{
+                title: session.title || session.routeName || 'Sortie ElyWalk',
+                ownerName: profile?.displayName,
+                type: session.type,
+                startedAt: session.startedAt,
+                durationSec: session.durationSec,
+                distanceM: session.distanceM,
+                calories: session.calories,
+                steps: session.steps,
+                caption: session.caption,
+              }}
+            />
           </div>
         )}
 
-        <div className="share-style-block" data-testid="map-style-picker">
-          <div className="card-title">Style de la carte partagée</div>
-          <div className="chip-row">
+        <div className="share-style-block v2-sub" data-testid="map-style-picker">
+          <span className="v2-label">Style de la carte partagée</span>
+          <div className="chip-row" role="group" aria-label="Style de la carte partagée">
             {MAP_STYLES.map((style) => (
               <button
                 key={style.id}
@@ -539,6 +622,7 @@ export default function ActivityDetailPage() {
                 onClick={() => chooseMapStyle(style.id)}
                 title={style.description}
                 aria-pressed={mapStyle === style.id}
+                data-testid={`map-style-${style.id}`}
               >
                 {style.icon} {style.label}
               </button>
@@ -547,81 +631,118 @@ export default function ActivityDetailPage() {
           <small className="share-style-hint">{selectedStyle?.description}</small>
         </div>
 
-        <button className="btn btn-gold" style={{ marginTop: 12, width: '100%' }} onClick={onShare} disabled={busy}>
-          {busy ? 'Préparation…' : `📤 Partager cette sortie (${mapStyleLabel(mapStyle)})`}
+        <button className="btn btn-gold v2-full v2-primary" onClick={onShare} disabled={busy} aria-busy={busyAction === 'share'} data-testid="share-activity-button">
+          <BusyLabel active={busyAction === 'share'}>
+            {busyAction === 'share' ? 'Préparation…' : `📤 Partager cette sortie (${mapStyleLabel(mapStyle)})`}
+          </BusyLabel>
         </button>
+      </section>
 
-        {isOwner && session.points.length >= 2 && <button className="btn btn-gold" style={{ marginTop: 12, width: '100%' }} onClick={onSaveRoute} disabled={busy} data-testid="save-activity-route">Enregistrer comme parcours privé</button>}
-        <div className="activity-export-row">
-          <button className="btn btn-outline" onClick={onExportGpx} disabled={busy}>🧭 Export GPX</button>
-          <button className="btn btn-outline" onClick={onExportCsv} disabled={busy}>📄 Export CSV</button>
+      <section className="card v2-card" aria-label="Autres actions" data-testid="activity-other-actions">
+        <div className="card-title">Autres actions</div>
+        <div className="v2-actions">
+          {isOwner && session.points.length >= 2 && (
+            <button className="v2-action" onClick={onSaveRoute} disabled={busy} aria-busy={busyAction === 'route'} data-testid="save-activity-route">
+              <span><BusyLabel active={busyAction === 'route'}>Enregistrer comme parcours privé</BusyLabel></span>
+              <span aria-hidden="true">›</span>
+            </button>
+          )}
+          <button className="v2-action" onClick={onExportGpx} disabled={busy} aria-busy={busyAction === 'gpx'} data-testid="export-gpx-button">
+            <span><BusyLabel active={busyAction === 'gpx'}>🧭 Export GPX</BusyLabel></span>
+            <span aria-hidden="true">›</span>
+          </button>
+          <button className="v2-action" onClick={onExportCsv} disabled={busy} aria-busy={busyAction === 'csv'} data-testid="export-csv-button">
+            <span><BusyLabel active={busyAction === 'csv'}>📄 Export CSV</BusyLabel></span>
+            <span aria-hidden="true">›</span>
+          </button>
+          <button className="v2-action" onClick={() => navigate('/activity')} data-testid="all-activities-button">
+            <span>Voir toutes mes sorties</span>
+            <span aria-hidden="true">›</span>
+          </button>
         </div>
         <small className="activity-export-hint">
           Le GPX s’importe dans Strava, Garmin, Google Earth ; le CSV s’ouvre dans un tableur.
         </small>
+      </section>
 
-        <button className="btn btn-outline" style={{ marginTop: 8, width: '100%' }} onClick={() => navigate('/activity')}>Voir toutes mes sorties</button>
-        {isOwner && <button className="btn btn-danger" style={{ marginTop: 8, width: '100%' }} onClick={() => setDeleteOpen(true)} disabled={busy}>🗑 Supprimer cette sortie et son tracé GPS</button>}
-      </div>
+      {isOwner && (
+        <section className="v2-danger" aria-label="Suppression de la sortie" data-testid="activity-danger-zone">
+          <p>La suppression est définitive. Une confirmation vous sera demandée.</p>
+          <button className="btn btn-danger v2-full" onClick={() => setDeleteOpen(true)} disabled={busy} data-testid="delete-activity-button">
+            🗑 Supprimer cette sortie et son tracé GPS
+          </button>
+        </section>
+      )}
 
       <Sheet open={editing} onClose={() => setEditing(false)} title="Renommer et annoter" testId="activity-edit-sheet">
-        <div className="field">
-          <label htmlFor="activity-title">Titre</label>
-          <input
-            id="activity-title"
-            className="input"
-            maxLength={80}
-            value={draftTitle}
-            placeholder="ex. Balade au bord de l’Authie"
-            onChange={(e) => setDraftTitle(e.target.value)}
-          />
-          <small className="field-help">80 caractères max — ce titre apparaît aussi sur l’image partagée.</small>
-        </div>
-        <div className="field">
-          <label htmlFor="activity-weather">Météo ressentie</label>
-          <div className="chip-row" id="activity-weather">
-            {WEATHER_OPTIONS.map((option) => (
-              <button
-                key={option.id}
-                type="button"
-                className={`chip ${draftWeather === option.id ? 'chip-active' : ''}`}
-                onClick={() => setDraftWeather(draftWeather === option.id ? null : option.id)}
-              >
-                {option.icon} {option.label}
-              </button>
-            ))}
+        <div className="v2-det v2-det-sheet">
+          <div className="field">
+            <label htmlFor="activity-title">Titre</label>
+            <input
+              id="activity-title"
+              className="input"
+              maxLength={80}
+              value={draftTitle}
+              placeholder="ex. Balade au bord de l’Authie"
+              onChange={(e) => setDraftTitle(e.target.value)}
+              data-testid="activity-edit-title-input"
+            />
+            <small className="field-help">
+              <CharCount value={draftTitle.length} max={80} testId="activity-edit-title-count" /> caractères — ce titre apparaît aussi sur l’image partagée.
+            </small>
           </div>
+          <div className="field">
+            <label htmlFor="activity-weather">Météo ressentie</label>
+            <div className="chip-row" id="activity-weather" role="group" aria-label="Météo ressentie">
+              {WEATHER_OPTIONS.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  className={`chip ${draftWeather === option.id ? 'chip-active' : ''}`}
+                  aria-pressed={draftWeather === option.id}
+                  onClick={() => setDraftWeather(draftWeather === option.id ? null : option.id)}
+                  data-testid={`activity-edit-weather-${option.id}`}
+                >
+                  {option.icon} {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="field">
+            <label htmlFor="activity-caption">Légende publique</label>
+            <textarea
+              id="activity-caption"
+              className="input"
+              maxLength={500}
+              value={draftCaption}
+              placeholder="Un souvenir ou un message à partager avec cette sortie…"
+              onChange={(e) => setDraftCaption(e.target.value)}
+              data-testid="activity-edit-caption-input"
+            />
+            <small className="field-help">
+              <CharCount value={draftCaption.length} max={500} testId="activity-edit-caption-count" /> caractères · visible par les personnes autorisées à voir la sortie.
+            </small>
+          </div>
+          <div className="field">
+            <label htmlFor="activity-note">Note privée</label>
+            <textarea
+              id="activity-note"
+              className="input"
+              maxLength={500}
+              value={draftNote}
+              placeholder="Sensations, météo, compagnie, souvenir…"
+              onChange={(e) => setDraftNote(e.target.value)}
+              data-testid="activity-edit-note-input"
+            />
+            <small className="field-help">
+              <CharCount value={draftNote.length} max={500} testId="activity-edit-note-count" /> caractères · note <strong>privée</strong> : elle n’est jamais envoyée aux
+              personnes avec qui vous partagez cette sortie.
+            </small>
+          </div>
+          <button className="btn btn-gold" onClick={saveEdit} disabled={busy} aria-busy={busyAction === 'edit'} data-testid="activity-edit-save-button">
+            <BusyLabel active={busyAction === 'edit'}>{busyAction === 'edit' ? 'Enregistrement…' : 'Enregistrer'}</BusyLabel>
+          </button>
         </div>
-        <div className="field">
-          <label htmlFor="activity-caption">Légende publique</label>
-          <textarea
-            id="activity-caption"
-            className="input"
-            maxLength={500}
-            value={draftCaption}
-            placeholder="Un souvenir ou un message à partager avec cette sortie…"
-            onChange={(e) => setDraftCaption(e.target.value)}
-          />
-          <small className="field-help">
-            {draftCaption.length}/500 caractères · visible par les personnes autorisées à voir la sortie.
-          </small>
-        </div>
-        <div className="field">
-          <label htmlFor="activity-note">Note privée</label>
-          <textarea
-            id="activity-note"
-            className="input"
-            maxLength={500}
-            value={draftNote}
-            placeholder="Sensations, météo, compagnie, souvenir…"
-            onChange={(e) => setDraftNote(e.target.value)}
-          />
-          <small className="field-help">
-            {draftNote.length}/500 caractères · note <strong>privée</strong> : elle n’est jamais envoyée aux
-            personnes avec qui vous partagez cette sortie.
-          </small>
-        </div>
-        <button className="btn btn-gold" onClick={saveEdit} disabled={busy}>{busy ? 'Enregistrement…' : 'Enregistrer'}</button>
       </Sheet>
       <ConfirmSheet
         open={deleteOpen}
@@ -642,3 +763,89 @@ export default function ActivityDetailPage() {
     </div>
   );
 }
+
+type BusyAction = 'share' | 'gpx' | 'route' | 'csv' | 'edit' | 'delete' | 'visibility';
+
+function BusyLabel({ active, children }: { active: boolean; children: ReactNode }) {
+  return (
+    <>
+      {active && <span className="v2-spin" aria-hidden="true" />}
+      {children}
+    </>
+  );
+}
+
+function CharCount({ value, max, testId }: { value: number; max: number; testId: string }) {
+  const ratio = value / max;
+  const level = ratio >= 1 ? 'full' : ratio >= 0.9 ? 'near' : 'ok';
+  return (
+    <span className={`v2-count v2-count-${level}`} aria-live={level === 'ok' ? 'off' : 'polite'} data-testid={testId}>
+      {value}/{max}
+    </span>
+  );
+}
+
+const V2_STYLES = `
+.v2-det{--v2-line:color-mix(in srgb,currentColor 14%,transparent)}
+.v2-det-page{max-width:720px;width:100%;margin-inline:auto;padding-bottom:calc(24px + env(safe-area-inset-bottom,0px))}
+.v2-det-sheet{display:contents}
+.v2-sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.v2-det :focus-visible{outline:2px solid var(--gold,#D8CA82);outline-offset:2px}
+.v2-det .btn,.v2-det .chip,.v2-det .text-button{min-height:44px}
+.v2-det .chip{display:inline-flex;align-items:center;justify-content:center;white-space:nowrap}
+.v2-det .v2-card{margin:12px}
+.v2-det h2.card-title{margin-top:0}
+.v2-map-wrap{margin:0 12px;border-radius:16px;overflow:hidden}
+.v2-nomap{display:flex;flex-direction:column;gap:6px;margin:0 12px;padding:16px;border:1px dashed var(--v2-line);border-radius:16px;background:var(--surface-2)}
+.v2-nomap span{font-size:.9rem;line-height:1.4;color:var(--muted)}
+.v2-hero{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.v2-hero strong{display:block;font-size:clamp(2rem,10vw,3.2rem);line-height:1.05;font-weight:800;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.v2-hero span,.v2-grid4 span{display:block;margin-top:4px;font-size:.78rem;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+.v2-grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:14px;padding-top:14px;border-top:1px solid var(--v2-line)}
+.v2-grid4 strong{display:block;font-size:1.2rem;line-height:1.2;font-variant-numeric:tabular-nums}
+.v2-meta-line{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:14px;font-size:.85rem;color:var(--muted)}
+.v2-react-row{display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px}
+.v2-det .v2-react-row .btn{min-height:48px;margin:0}
+.v2-det .v2-report{display:block;margin-top:10px;font-size:.85rem;color:var(--muted)}
+.v2-section-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.v2-field{margin-top:12px;padding:10px 12px;border-radius:12px;background:var(--surface-2)}
+.v2-field p{margin:4px 0 0;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere}
+.v2-field-public{border-left:3px solid var(--gold,#D8CA82)}
+.v2-field-private{border:1px dashed var(--v2-line)}
+.v2-label{display:block;margin-bottom:6px;font-size:.8rem;font-weight:600;letter-spacing:.03em;color:var(--muted)}
+.v2-label small{font-weight:400}
+.v2-field .v2-label{margin-bottom:0}
+.v2-placeholder{color:var(--muted);font-style:italic}
+.v2-det .v2-help{margin:8px 0 0;font-size:.85rem;line-height:1.4;color:var(--muted)}
+.v2-det .v2-gold{color:var(--gold,#D8CA82)}
+.v2-det .v2-sub{display:flex;flex-direction:column;gap:8px;margin-top:16px;padding-top:16px;border-top:1px solid var(--v2-line)}
+.v2-det .v2-sub>*{margin-top:0;margin-bottom:0}
+.v2-det .v2-sub .v2-label{margin-bottom:0}
+.v2-two{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.v2-det .v2-two .btn{margin:0}
+.v2-det .v2-full{width:100%;margin-top:14px}
+.v2-det .v2-primary{min-height:52px}
+.v2-stack{display:flex;flex-direction:column;gap:8px;margin-top:12px}
+.v2-actions{display:flex;flex-direction:column}
+.v2-action{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;min-height:52px;padding:8px 2px;border:0;border-bottom:1px solid var(--v2-line);background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.v2-action:last-child{border-bottom:0}
+.v2-action:disabled{opacity:.5;cursor:not-allowed}
+.v2-det .activity-export-hint{display:block;margin-top:8px}
+.v2-danger{margin:24px 12px 12px;padding:14px;border:1px solid #e8837a;border-radius:16px}
+.v2-danger p{margin:0;font-size:.85rem;line-height:1.4;color:var(--muted)}
+.v2-det .v2-danger .v2-full{margin-top:10px}
+.v2-count{font-variant-numeric:tabular-nums}
+.v2-count-near{color:var(--gold,#D8CA82);font-weight:600}
+.v2-count-full{color:#e8837a;font-weight:700}
+.v2-spin{display:inline-block;width:14px;height:14px;margin-right:8px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;vertical-align:-2px;animation:v2-rotate .7s linear infinite}
+.v2-skel{display:block;border-radius:12px;background:var(--v2-line);animation:v2-pulse 1.2s ease-in-out infinite}
+.v2-skel-map{height:min(40vh,400px);margin:0 12px;border-radius:16px}
+.v2-skel-big{height:52px}
+.v2-skel-cell{height:40px}
+.v2-skel-line{height:14px;margin-bottom:10px}
+.v2-det .v2-loading-text{margin:0 12px;text-align:center}
+@keyframes v2-pulse{50%{opacity:.45}}
+@keyframes v2-rotate{to{transform:rotate(360deg)}}
+@media (max-width:360px){.v2-grid4{grid-template-columns:repeat(2,1fr)}}
+@media (prefers-reduced-motion:reduce){.v2-skel,.v2-spin{animation:none}}
+`;
