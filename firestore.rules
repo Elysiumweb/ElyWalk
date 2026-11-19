@@ -551,7 +551,9 @@ service cloud.firestore {
     // client (`decideUpdate`) ne propose jamais de mise à jour vers une valeur
     // qu'il ne sait pas comparer.
     match /appRelease/{docId} {
-      allow read: if auth();
+      // Version et notes de publication ne contiennent aucune donnée privée :
+      // doivent rester lisibles avant connexion pour signaler les mises à jour.
+      allow read: if true;
       allow write: if president()
         && docId == 'current'
         && request.resource.data.keys().hasOnly([

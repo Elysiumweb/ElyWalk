@@ -20,61 +20,22 @@ import { APP_VERSION } from './version';
 /**
  * Détection d'une mise à jour publiée sur le Play Store.
  *
- * Deux sources, dans cet ordre :
- *  1. **Play Store** (natif uniquement) : sonde `market://details?id=<pkg>` sans
- *     l'ouvrir. Quand le Play Store est présent, il répond avec le
- *     `versionName` publié — c'est la source de vérité, aucun déploiement
- *     n'est nécessaire de notre côté. S'il est absent (émulateur, appareil
- *     sans Play Services) ou si la sonde échoue, on passe à 2.
- *  2. **Document `appRelease/current`** (Firestore) : la version publiée est
- *     déclarée par l'administration / le worker. Fonctionne aussi sur le web et
- *     quand le Play Store ne répond pas.
+ * La source de vérité est `appRelease/current` (Firestore). Le Worker
+ * synchronise ce document avec la version de production publiée dans Play
+ * Console toutes les six heures ; les administrateurs peuvent aussi gérer les
+ * notes et la politique de mise à jour depuis l'application. Les métadonnées
+ * sont publiques pour que l'avis fonctionne également avant connexion.
  *
- * Un échec des deux sources est **silencieux** : on ne bloque jamais le
- * démarrage sur un contrôle de version, et on ne propose jamais une version
- * plus ancienne que celle installée.
+ * Une erreur réseau est **silencieuse** : elle ne bloque jamais le démarrage et
+ * ne propose jamais une version plus ancienne que celle installée.
  */
 
 const SNOOZE_KEY = 'elywalk.update.snooze.v1';
 
-/** Document éditable par le président ; lisible par toute session authentifiée. */
+/** Métadonnées publiques de version, éditables uniquement par l'administration. */
 export const RELEASE_DOC_PATH = 'appRelease/current';
 
-/** Nombre de millisecondes avant de retenter le Play Store sur la même session. */
-const STORE_RECHECK_MS = 6 * 60 * 60 * 1000;
-let lastStoreProbe = 0;
-let cachedStoreVersion: string | null = null;
-
-/**
- * Lit `versionName` dans le Play Store sans jamais ouvrir d'écran.
- *
- * Android résout `content://com.android.vending...` via le Play Store : la
- * requête est lue par l'application Play Store elle-même, qui expose le
- * `versionName` publié. Si le Play Store n'est pas installé (émulateur, appareil
- * sans Play Services) ou si l'appel échoue, on renvoie `null` et le repli
- * Firestore prend le relais — aucun écran n'est ouvert, aucune promesse rejetée
- * ne remonte à l'utilisateur.
- */
-export async function readPlayStoreVersion(packageName: string): Promise<string | null> {
-  if (!Capacitor.isNativePlatform()) return null;
-  const now = Date.now();
-  if (cachedStoreVersion && now - lastStoreProbe < STORE_RECHECK_MS) return cachedStoreVersion;
-  const bridge = (CapApp as unknown as {
-    openUrl?: (options: { url: string }) => Promise<void>;
-  }).openUrl;
-  if (!bridge) return null;
-  try {
-    // Une `content://` ne peut pas être ouverte par le navigateur : seul le Play
-    // Store peut la traiter, donc aucune application tierce n'est lancée.
-    await bridge({ url: `content://${packageName}.market.version` });
-    lastStoreProbe = Date.now();
-    return cachedStoreVersion;
-  } catch {
-    return null;
-  }
-}
-
-/** Version publiée déclarée dans Firestore (source de repli et source web). */
+/** Version publiée dans le document synchronisé par le Worker et Play Console. */
 export async function readReleaseInfo(): Promise<ReleaseInfo | null> {
   try {
     const snapshot = await getDoc(doc(db, RELEASE_DOC_PATH));
@@ -141,20 +102,7 @@ export async function checkForUpdate(options: { now?: number } = {}): Promise<Up
   const none: UpdateDecision = { available: false, severity: 'recommended', dismissed: false };
   try {
     const installed = await readInstalledVersion();
-    let release = await readReleaseInfo();
-
-    // Le Play Store, quand il répond, prime : il connaît la version réellement
-    // publiée, y compris si le document Firestore a pris du retard.
-    const storeVersion = await readPlayStoreVersion(playStorePackageName());
-    if (storeVersion) {
-      release = {
-        ...(release || { enabled: true }),
-        latestVersion: storeVersion,
-        // La politique (obligatoire/recommandée) reste celle de Firestore.
-        minSupportedVersion: release?.minSupportedVersion,
-      };
-    }
-
+    const release = await readReleaseInfo();
     const decision = decideUpdate(installed, release, await readSnooze(), options.now ?? Date.now());
     return decision;
   } catch {

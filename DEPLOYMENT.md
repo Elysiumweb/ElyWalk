@@ -419,8 +419,10 @@ jour. Deux niveaux :
      « Afficher les données de l'application »).
    - Endpoint testable à la main :
      `curl https://<worker>.workers.dev/cron/sync-release`.
-2. **Le Play Store lui-même** (Android uniquement) : l'app tente une lecture
-   sans ouvrir d'écran ; si elle réussit elle prime sur Firestore.
+2. **L'application** lit `appRelease/current` au démarrage (et au retour au
+   premier plan). Le document est public en lecture pour que l'avis fonctionne
+   aussi avant connexion ; ses écritures restent réservées au président et au
+   worker.
 3. **L'administration** : Profil → Administration → onglet **Mise à jour**, qui
    publie `notes` (affichées sur l'écran), `minSupportedVersion` (bascule en
    obligatoire) et permet de **suspendre** l'écran sans publier de version.
