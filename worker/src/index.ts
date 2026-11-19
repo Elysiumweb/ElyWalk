@@ -465,6 +465,7 @@ function haversineM(a: { lat: number; lng: number }, b: { lat: number; lng: numb
  * `DEFAULT_ALERT_PREFERENCES` côté app : 10 km de rayon, rappel 1 h avant.
  */
 function readAlertPreferences(fields: Record<string, unknown>): {
+  messages: boolean;
   nearbyEvents: boolean;
   nearbyRadiusKm: number;
   eventReminders: boolean;
@@ -481,6 +482,7 @@ function readAlertPreferences(fields: Record<string, unknown>): {
     return Number.isFinite(n) ? Number(n) : fallback;
   };
   return {
+    messages: bool('messages', true),
     nearbyEvents: bool('nearbyEvents', true),
     nearbyRadiusKm: Math.min(100, Math.max(1, num('nearbyRadiusKm', 10))),
     eventReminders: bool('eventReminders', true),
@@ -501,11 +503,28 @@ function trimNotifiedKeys(keys: string[]): string[] {
 }
 
 /** `YYYY-MM-DD` + `HH:MM` en heure de Paris → horodatage (ms). */
-function eventTimestamp(date?: string, time?: string): number | null {
+function eventTimestamp(date?: string, time?: string, storedStartsAt?: number): number | null {
+  if (Number.isFinite(storedStartsAt)) return storedStartsAt as number;
   if (!date) return null;
   const clock = /^\d{2}:\d{2}$/.test(String(time || '')) ? time : '09:00';
-  const parsed = Date.parse(`${date}T${clock}:00+01:00`);
-  return Number.isFinite(parsed) ? parsed : null;
+  const [year, month, day] = date.split('-').map(Number);
+  const [hour, minute] = String(clock).split(':').map(Number);
+  if (![year, month, day, hour, minute].every(Number.isFinite)) return null;
+
+  // Compatibilité DST pour les documents historiques sans startsAt. Itérer
+  // l'écart entre heure murale et heure affichée à Paris (UTC+1 ou UTC+2).
+  const targetAsUtc = Date.UTC(year, month - 1, day, hour, minute);
+  let instant = targetAsUtc;
+  const parisParts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const parts = Object.fromEntries(parisParts.formatToParts(new Date(instant)).map((part) => [part.type, part.value]));
+    const parisAsUtc = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), Number(parts.hour), Number(parts.minute));
+    instant -= parisAsUtc - targetAsUtc;
+  }
+  return Number.isFinite(instant) ? instant : null;
 }
 
 /**
@@ -549,28 +568,54 @@ async function processEventAlerts(sa: ServiceAccount): Promise<{ processed: numb
         waitlist: ((f.waitlist as { arrayValue?: { values?: Array<{ stringValue?: string }> } })
           ?.arrayValue?.values || []).map((v) => v.stringValue || '').filter(Boolean),
         creatorUid: (f.creatorUid as { stringValue?: string })?.stringValue || '',
-        startAt: eventTimestamp(date, time),
+        startAt: eventTimestamp(
+          date,
+          time,
+          Number((f.startsAt as { integerValue?: string; doubleValue?: number })?.integerValue
+            ?? (f.startsAt as { doubleValue?: number })?.doubleValue),
+        ),
       };
     })
     .filter((e) => e.startAt != null && (e.startAt as number) > now - 60 * 60 * 1000);
 
   if (parsed.length === 0) return { processed, sent };
 
-  // Candidats : les inscrits (rappel) et tous ceux qui ont des coordonnées
-  // (rencontre proche). Le rayon dépend de chaque profil, donc on lit les
-  // préférences du compte concerné et non une valeur globale.
-  const candidateUids = new Set<string>();
+  // Candidats : les inscrits (rappel) et tous les profils ayant une latitude
+  // enregistrée (rencontre proche). La requête sur lastLat évite de balayer les
+  // comptes sans géolocalisation ; on filtre ensuite les préférences et la
+  // longitude en mémoire. Les profils lus par cette requête sont réutilisés,
+  // ce qui évite une lecture point-par-point pour chaque candidat géolocalisé.
+  const candidateFields = new Map<string, Record<string, unknown>>();
+  const geoProfiles = await runQuery(sa, {
+    from: [{ collectionId: 'users' }],
+    where: {
+      fieldFilter: {
+        field: { fieldPath: 'lastLat' },
+        op: 'GREATER_THAN_OR_EQUAL',
+        value: { doubleValue: -90 },
+      },
+    },
+    limit: 1000,
+  });
+  for (const profile of geoProfiles) {
+    const uid = profile.name.split('/').pop();
+    if (uid) candidateFields.set(uid, profile.fields || {});
+  }
+  const candidateUids = new Set<string>(candidateFields.keys());
   for (const event of parsed) {
     for (const uid of [...event.participants, ...event.waitlist]) candidateUids.add(uid);
   }
 
   for (const uid of candidateUids) {
-    const profileSnap = await runQuery(sa, {
-      from: [{ collectionId: 'users' }],
-      where: { fieldFilter: { field: { fieldPath: '__name__' }, op: 'EQUAL', value: { referenceValue: docName(sa, `users/${uid}`) } } },
-      limit: 1,
-    }).catch(() => []);
-    const fields = profileSnap[0]?.fields || {};
+    let fields = candidateFields.get(uid);
+    if (!fields) {
+      const profileSnap = await runQuery(sa, {
+        from: [{ collectionId: 'users' }],
+        where: { fieldFilter: { field: { fieldPath: '__name__' }, op: 'EQUAL', value: { referenceValue: docName(sa, `users/${uid}`) } } },
+        limit: 1,
+      }).catch(() => []);
+      fields = profileSnap[0]?.fields || {};
+    }
     const prefs = readAlertPreferences(fields);
     const origin = {
       lat: Number((fields.lastLat as { doubleValue?: number })?.doubleValue ?? NaN),
@@ -725,7 +770,62 @@ async function processNotifications(sa: ServiceAccount): Promise<{ processed: nu
     await patchFields(sa, doc.name, { notified: fBool(true) });
     processed++;
   }
-  // 4) Alertes de rencontre : sortie proposée dans le rayon choisi et rappel
+  // 4) Messages et encouragements : le listener Firestore de l'app ne vit que
+  //    lorsque celle-ci est ouverte. Le cron consomme donc les nouveaux docs
+  //    non traités et envoie un vrai push FCM pour l'application fermée.
+  const messagePreferenceCache = new Map<string, boolean>();
+  const allowSocialPush = async (uid: string): Promise<boolean> => {
+    const cached = messagePreferenceCache.get(uid);
+    if (cached !== undefined) return cached;
+    const fields = await readDoc(sa, `users/${uid}`).catch(() => null);
+    const enabled = readAlertPreferences(fields || {}).messages;
+    messagePreferenceCache.set(uid, enabled);
+    return enabled;
+  };
+  const directMessages = await runQuery(sa, {
+    from: [{ collectionId: 'directMessages' }],
+    where: { fieldFilter: { field: { fieldPath: 'pushNotified' }, op: 'EQUAL', value: { booleanValue: false } } },
+    limit: 100,
+  });
+  for (const doc of directMessages) {
+    const fields = doc.fields;
+    const to = (fields.to as { stringValue?: string })?.stringValue || '';
+    const from = (fields.from as { stringValue?: string })?.stringValue || '';
+    const fromName = (fields.fromName as { stringValue?: string })?.stringValue || 'Un ami';
+    const text = (fields.text as { stringValue?: string })?.stringValue || 'Vous a envoyé un message.';
+    if (to && from && await allowSocialPush(to)) {
+      const result = await sendToUser(sa, to, `Message de ${fromName}`,
+        text.replace(/\s+/g, ' ').trim().slice(0, 180) || 'Vous a envoyé un message.',
+        { type: 'message', fromUid: from, conversationUid: from, messageId: doc.name.split('/').pop() || '' });
+      sent += result.sent;
+    }
+    await patchFields(sa, doc.name, { pushNotified: fBool(true) });
+    processed++;
+  }
+
+  const friendReactions = await runQuery(sa, {
+    from: [{ collectionId: 'friendReactions' }],
+    where: { fieldFilter: { field: { fieldPath: 'pushNotified' }, op: 'EQUAL', value: { booleanValue: false } } },
+    limit: 100,
+  });
+  for (const doc of friendReactions) {
+    const fields = doc.fields;
+    const to = (fields.to as { stringValue?: string })?.stringValue || '';
+    const from = (fields.from as { stringValue?: string })?.stringValue || '';
+    const fromName = (fields.fromName as { stringValue?: string })?.stringValue || 'Un ami';
+    const emoji = (fields.emoji as { stringValue?: string })?.stringValue || '👏';
+    const message = (fields.message as { stringValue?: string })?.stringValue || '';
+    if (to && from && await allowSocialPush(to)) {
+      const bodyText = `${emoji}${message ? ` ${message}` : ' Bravo pour ta marche !'}`.slice(0, 180);
+      const result = await sendToUser(sa, to, `${fromName} vous encourage`, bodyText,
+        { type: 'reaction', fromUid: from, reactionId: doc.name.split('/').pop() || '' });
+      sent += result.sent;
+    }
+    await patchFields(sa, doc.name, { pushNotified: fBool(true) });
+    processed++;
+  }
+
+  // 5) Alertes de rencontre : sortie proposée dans le rayon choisi et rappel
   //    avant une rencontre où l'utilisateur est inscrit.
   const eventAlerts = await processEventAlerts(sa).catch((e) => {
     console.error('[cron] event alerts', e);

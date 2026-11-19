@@ -78,6 +78,7 @@ export default function ActivityDetailPage() {
   // Édition : titre, note, météo ressentie
   const [editing, setEditing] = useState(false);
   const [draftTitle, setDraftTitle] = useState('');
+  const [draftCaption, setDraftCaption] = useState('');
   const [draftNote, setDraftNote] = useState('');
   const [draftWeather, setDraftWeather] = useState<ActivityWeather | null>(null);
 
@@ -207,7 +208,7 @@ export default function ActivityDetailPage() {
     try {
       const step = Math.max(1, Math.ceil(session.points.length / 5000));
       const points = session.points.filter((_, index) => index % step === 0 || index === session.points.length - 1).slice(0, 5000);
-      await saveRoute(profile, { name: session.title || `Parcours du ${new Date(session.startedAt).toLocaleDateString()}`, description: session.note, points, visibility: 'private' });
+      await saveRoute(profile, { name: session.title?.trim() || `Parcours du ${new Date(session.startedAt).toLocaleDateString()}`, description: session.caption?.trim() || '', points, visibility: 'private' });
       toast('Parcours privé enregistré.', 'success'); navigate('/routes');
     } catch (e) { toast((e as Error).message, 'error'); }
     finally { setBusy(false); }
@@ -229,6 +230,7 @@ export default function ActivityDetailPage() {
   const openEdit = () => {
     if (!session) return;
     setDraftTitle(session.title || '');
+    setDraftCaption(session.caption || '');
     setDraftNote(privateNote);
     setDraftWeather(session.weather || null);
     setEditing(true);
@@ -238,10 +240,11 @@ export default function ActivityDetailPage() {
     if (!profile || !session?.id) return;
     setBusy(true);
     try {
-      // Le titre et la météo sont partageables ; la note reste privée et part
-      // dans la sous-collection du propriétaire (F01).
+      // Titre, légende et météo sont partageables ; la note reste privée et
+      // part dans la sous-collection du propriétaire (F01).
       await updateActivityMetadata(profile.uid, session.id, {
         title: draftTitle,
+        caption: draftCaption,
         weather: draftWeather,
       });
       await setPrivateActivityNote(profile.uid, session.id, draftNote);
@@ -249,6 +252,7 @@ export default function ActivityDetailPage() {
       setSession((s) => s ? {
         ...s,
         title: draftTitle.trim() || undefined,
+        caption: draftCaption.trim() || undefined,
         weather: draftWeather || undefined,
       } : s);
       setEditing(false);
@@ -589,7 +593,21 @@ export default function ActivityDetailPage() {
           </div>
         </div>
         <div className="field">
-          <label htmlFor="activity-note">Note</label>
+          <label htmlFor="activity-caption">Légende publique</label>
+          <textarea
+            id="activity-caption"
+            className="input"
+            maxLength={500}
+            value={draftCaption}
+            placeholder="Un souvenir ou un message à partager avec cette sortie…"
+            onChange={(e) => setDraftCaption(e.target.value)}
+          />
+          <small className="field-help">
+            {draftCaption.length}/500 caractères · visible par les personnes autorisées à voir la sortie.
+          </small>
+        </div>
+        <div className="field">
+          <label htmlFor="activity-note">Note privée</label>
           <textarea
             id="activity-note"
             className="input"

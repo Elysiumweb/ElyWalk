@@ -11,7 +11,7 @@ import type { UserProfile } from '../lib/types';
 
 export default function LeaderboardPage() {
   const { profile } = useAuth(); const navigate=useNavigate();
-  const [rows, setRows] = useState<UserProfile[]>([]); const [mode,setMode]=useState<'coins'|'today'|'steps'|'week'|'month'|'friends'>('coins'); const [friendIds,setFriendIds]=useState<string[]>([]); const [periodScores,setPeriodScores]=useState<Record<string,{week:number;month:number}>>({});
+  const [rows, setRows] = useState<UserProfile[]>([]); const [mode,setMode]=useState<'coins'|'today'|'steps'|'week'|'month'|'friends'>('coins'); const modeRef = useRef(mode); modeRef.current = mode; const [friendIds,setFriendIds]=useState<string[]>([]); const [periodScores,setPeriodScores]=useState<Record<string,{week:number;month:number}>>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<unknown>(null);
   // F10 — les périodes 7/30 jours lisaient les documents quotidiens de chaque
@@ -33,7 +33,8 @@ export default function LeaderboardPage() {
     setLoading(true);
     setLoadError(null);
     try {
-      const metric: LeaderboardMetric = current === 'today' ? 'today' : current === 'steps' ? 'steps' : 'coins';
+      // « Mes amis » conserve une métrique explicite et cohérente : pas cumulés.
+      const metric: LeaderboardMetric = current === 'today' ? 'today' : current === 'steps' || current === 'friends' ? 'steps' : 'coins';
       const users = await getLeaderboard(100, metric);
       setRows(users);
       // Les périodes n'ont besoin d'être recalculées qu'une fois par onglet et
@@ -84,7 +85,7 @@ export default function LeaderboardPage() {
     if (!profile) return;
     const unsub = watchFriendships(profile.uid, (ids) => {
       setFriendIds(ids);
-      void load();
+      void load(modeRef.current);
     }, () => {
       // Refus de règle : le classement public reste affiché, seul l'onglet
       // « Mes amis » se limite à l'utilisateur courant.
@@ -94,7 +95,7 @@ export default function LeaderboardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile?.uid]);
 
-  const score=(u:UserProfile)=>mode==='today'?(u.todaySteps||0):mode==='steps'?u.totalSteps:mode==='week'?(periodScores[u.uid]?.week||0):mode==='month'?(periodScores[u.uid]?.month||0):u.elycoins;
+  const score=(u:UserProfile)=>mode==='today'?(u.todaySteps||0):mode==='steps'||mode==='friends'?u.totalSteps:mode==='week'?(periodScores[u.uid]?.week||0):mode==='month'?(periodScores[u.uid]?.month||0):u.elycoins;
   const allRows = profile && !rows.some(u => u.uid === profile.uid) ? [...rows, profile] : rows;
   const ranked=(mode==='friends'?allRows.filter(u=>u.uid===profile?.uid||friendIds.includes(u.uid)):[...allRows]).sort((a,b)=>score(b)-score(a));
   useEffect(() => {
@@ -114,7 +115,7 @@ export default function LeaderboardPage() {
         <div className="header-actions"><NotificationBell /></div>
       </div>
 
-      <div className="chip-row"><button className={`chip ${mode==='coins'?'chip-active':''}`} onClick={()=>setMode('coins')}>Solde EC</button><button className={`chip ${mode==='today'?'chip-active':''}`} onClick={()=>setMode('today')}>Pas du jour</button><button className={`chip ${mode==='steps'?'chip-active':''}`} onClick={()=>setMode('steps')}>Pas cumulés</button><button className={`chip ${mode==='week'?'chip-active':''}`} onClick={()=>setMode('week')}>7 jours</button><button className={`chip ${mode==='month'?'chip-active':''}`} onClick={()=>setMode('month')}>30 jours</button><button className={`chip ${mode==='friends'?'chip-active':''}`} onClick={()=>setMode('friends')}>Mes amis</button><button className="chip" onClick={() => void load()}>Actualiser</button></div>
+      <div className="chip-row"><button className={`chip ${mode==='coins'?'chip-active':''}`} onClick={()=>{setMode('coins');void load('coins')}}>Solde EC</button><button className={`chip ${mode==='today'?'chip-active':''}`} onClick={()=>{setMode('today');void load('today')}}>Pas du jour</button><button className={`chip ${mode==='steps'?'chip-active':''}`} onClick={()=>{setMode('steps');void load('steps')}}>Pas cumulés</button><button className={`chip ${mode==='week'?'chip-active':''}`} onClick={()=>{setMode('week');void load('week')}}>7 jours</button><button className={`chip ${mode==='month'?'chip-active':''}`} onClick={()=>{setMode('month');void load('month')}}>30 jours</button><button className={`chip ${mode==='friends'?'chip-active':''}`} onClick={()=>{setMode('friends');void load('friends')}}>Mes amis</button><button className="chip" onClick={() => void load()}>Actualiser</button></div>
       {loading ? (
         <div className="card"><Skeleton rows={5} label="Chargement du classement" /></div>
       ) : loadError ? (
@@ -149,7 +150,7 @@ export default function LeaderboardPage() {
                       size={idx === 0 ? 72 : 58}
                     />
                     <div className="podium-name">{u.displayName}</div>
-                    <div className="podium-coins">{mode==='coins'||mode==='friends'?`${fmtCoins(score(u))} EC`:`${fmtNumber(score(u))} pas`}</div>
+                    <div className="podium-coins">{mode==='coins'?`${fmtCoins(score(u))} EC`:`${fmtNumber(score(u))} pas`}</div>
                     <div className="podium-base" aria-label={`Place ${rank}`}>{rank}</div>
                   </div>
                 );
@@ -185,7 +186,7 @@ export default function LeaderboardPage() {
                     {fmtNumber(u.totalSteps)} pas · 🔥 {u.streak} j · {getWalkerLevel(u.totalSteps).title}
                   </div>
                 </div>
-                <div className="row-value">{mode==='coins'||mode==='friends'?`${fmtCoins(u.elycoins)} EC`:`${fmtNumber(score(u))} pas`}</div>
+                <div className="row-value">{mode==='coins'?`${fmtCoins(u.elycoins)} EC`:`${fmtNumber(score(u))} pas`}</div>
               </div>
             ))}
           </div>

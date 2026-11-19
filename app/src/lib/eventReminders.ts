@@ -5,8 +5,13 @@ import { App as CapApp } from '@capacitor/app';
 import type { CommunityEvent } from './types';
 
 const prefix = 'event.reminder.';
-export function eventDate(event: Pick<CommunityEvent, 'date' | 'time'>): Date {
-  // Sans suffixe UTC : le navigateur applique le fuseau local de l'utilisateur.
+export function eventDate(event: Pick<CommunityEvent, 'date' | 'time' | 'startsAt'>): Date {
+  // Les événements récents portent l'instant UTC calculé à la création : les
+  // rappels locaux et le Worker FCM utilisent exactement le même instant.
+  if (typeof event.startsAt === 'number' && Number.isFinite(event.startsAt)) {
+    return new Date(event.startsAt);
+  }
+  // Compatibilité des anciennes rencontres sans startsAt.
   return new Date(`${event.date}T${event.time || '09:00'}:00`);
 }
 function idFor(eventId: string): number {
