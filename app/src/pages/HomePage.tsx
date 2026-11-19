@@ -51,7 +51,6 @@ export default function HomePage() {
   const previousSteps = useRef<number | null>(null);
   const celebratedToday = useRef(false);
   const [weekDays, setWeekDays] = useState<DailySteps[]>([]);
-  const [searchTerm, setSearchTerm] = useState('');
 
   const isNative = Capacitor.isNativePlatform();
   const today = dateStr();
@@ -218,6 +217,16 @@ export default function HomePage() {
     }
   };
 
+  const onShare = async () => {
+    if (!profile) return;
+    try {
+      const result = await shareDailyStats(profile, steps, formatDistance(distanceMeters, unitSystem), calories);
+      toast(result === 'shared' ? 'Carte partagée !' : 'Carte enregistrée dans vos téléchargements.', 'success');
+    } catch (e) {
+      if ((e as Error).name !== 'AbortError') toast((e as Error).message, 'error');
+    }
+  };
+
   /**
    * Cumul de pas **déjà validé** aujourd'hui. Rechargé après chaque validation
    * (via `profile.totalSteps`) et au changement de date : l'accueil peut ainsi
@@ -272,28 +281,62 @@ export default function HomePage() {
   const unitSystem = profile?.unitSystem || profile?.health?.unitSystem || 'metric';
   const distanceMeters = steps * (profile?.strideLengthCm || 75) / 100;
   const nextTier = nextStepTier(steps);
+  const freezes = profile?.streakFreezes ?? 1;
+  const shortcutStyle = { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 } as const;
+
   return (
     <div className="screen" data-testid="home-screen">
-      {celebration && <div className="celebration-overlay" role="status" aria-live="polite"><div className="celebration-card pop-in"><div className="celebration-confetti">✦ ✧ ✦</div><strong>{celebration}</strong><span>Continuez comme ça, marcheur ElyWalk !</span><div className="celebration-actions"><button className="btn btn-gold" onClick={() => setCelebration(null)}>Super !</button><button className="btn btn-ghost" onClick={async () => { if (!profile) return; try { await shareDailyStats(profile, steps, formatDistance(distanceMeters, unitSystem), calories); } catch (e) { if ((e as Error).name !== 'AbortError') toast((e as Error).message, 'error'); } }}>Partager</button></div></div></div>}
+      {celebration && (
+        <div className="celebration-overlay" role="status" aria-live="polite">
+          <div className="celebration-card pop-in">
+            <div className="celebration-confetti" aria-hidden="true" style={{ display: 'flex', justifyContent: 'center', gap: 10 }}>
+              <StarIcon size={18} /><StarIcon size={26} /><StarIcon size={18} />
+            </div>
+            <strong>{celebration}</strong>
+            <span>Continuez comme ça, marcheur ElyWalk !</span>
+            <div className="celebration-actions">
+              <button className="btn btn-gold" onClick={() => setCelebration(null)}>Super !</button>
+              <button className="btn btn-ghost" onClick={onShare}>Partager</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 1. En-tête allégé : le solde ouvre le barème, la loupe mène à la recherche. */}
       <div className="screen-header">
         <div>
           <h1 className="screen-title">ElyWalk</h1>
           <div className="screen-sub">Bonjour, {profile?.displayName}</div>
         </div>
         <div className="header-actions">
-          <span className="badge" data-testid="home-balance-badge">
+          <button
+            type="button"
+            className="badge"
+            onClick={() => setShowTiers(true)}
+            aria-label="Voir le barème ElyCoins"
+            style={{ cursor: 'pointer', font: 'inherit', border: 0 }}
+            data-testid="home-balance-badge"
+          >
             <CoinIcon /> {fmtCoins(profile?.elycoins || 0)} EC
-          </span>
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={() => navigate('/search')}
+            aria-label="Rechercher un marcheur, un parcours, un lieu"
+            style={{ padding: 8, lineHeight: 0 }}
+            data-testid="home-search-button"
+          >
+            <SearchIcon />
+          </button>
           <NotificationBell />
         </div>
       </div>
 
+      {/* 2. Héros « pas du jour » : anneau + validation dans le même bloc. */}
       <div className="gold-hero">
         <img src="/deco-1.webp" className="hero-deco" alt="" />
         <ProgressRing progress={steps / dailyGoal}>
-          {/* Compteur principal : couleur de texte du thème (blanc en sombre,
-              presque noir en clair). Le `#fff` figé devenait invisible sur
-              l'ivoire du thème clair (D01). */}
           <div className="display" style={{ fontSize: 34, color: 'var(--white)' }} data-testid="today-steps-value">
             {fmtNumber(steps)}
           </div>
@@ -306,56 +349,85 @@ export default function HomePage() {
           <div className="next-tier-note">{nextTier ? `Encore ${fmtNumber(nextTier.remaining)} pas pour le palier ${fmtNumber(nextTier.target)} · ${nextTier.coins} EC` : 'Palier ElyCoins maximum atteint'}</div>
         </ProgressRing>
 
-        <div className="stat-grid" style={{ marginTop: 16 }}>
-          <div className="stat">
-            <div className="stat-icon"><FlameIcon /></div>
-            <div className="stat-value" data-testid="stat-streak">{profile?.streak || 0}</div>
-            <div className="stat-label">jours d’affilée</div>
+        {!isNative && (
+          <p className="muted-xs web-counter-note" style={{ marginTop: 12, textAlign: 'center' }} data-testid="web-counter-note">
+            <strong>Compteur en mode aperçu</strong> — le navigateur n’accède pas au capteur de pas. Ouvrez ElyWalk sur votre téléphone Android.
+          </p>
+        )}
+
+        {isNative && perm !== 'granted' && (
+          <div className="card" style={{ marginTop: 12 }} data-testid="permission-card">
+            <div className="card-title">Activer le comptage des pas</div>
+            <p className="muted-text" style={{ marginBottom: 'var(--space-3)' }}>
+              ElyWalk utilise le capteur de pas de votre téléphone, même lorsque
+              l’application est fermée. Autorisez « Activité physique » — une
+              notification discrète restera visible pour continuer à compter.
+            </p>
+            <button className="btn btn-gold" onClick={askPermission} data-testid="request-permission-button">
+              Autoriser l’activité physique
+            </button>
           </div>
-          <div className="stat">
-            <div className="stat-icon"><BoltIcon /></div>
-            <div className="stat-value" data-testid="stat-calories">{fmtNumber(calories)}</div>
-            <div className="stat-label">kcal du jour</div>
+        )}
+
+        <section className={`daily-action ${canValidate ? '' : 'daily-action-done'}`} aria-live="polite" style={{ marginTop: 16 }}>
+          {alreadyValidated && (
+            <div className="validation-success" data-testid="validation-status" style={{ alignItems: 'center' }}>
+              <span aria-hidden="true" style={{ lineHeight: 0 }}><CheckIcon /></span>
+              <div>
+                <strong>{newSteps > 0 ? 'Encore des pas à valider' : 'Journée à jour'}</strong>
+                <small>
+                  {newSteps > 0
+                    ? ` · ${fmtNumber(newSteps)} nouveaux pas (${fmtNumber(validatedSteps)} déjà validés)`
+                    : ` · ${fmtNumber(validatedSteps)} pas validés aujourd’hui`}
+                </small>
+              </div>
+            </div>
+          )}
+          <button
+            type="button"
+            className="btn btn-gold"
+            onClick={onValidate}
+            disabled={!canValidate}
+            data-testid="validate-steps-button"
+          >
+            {busyValidate
+              ? 'Validation...'
+              : newSteps <= 0
+                ? 'Tous mes pas sont validés ✓'
+                : rewardPending > 0
+                  ? `Valider mes pas (+${fmtCoins(rewardPending)} EC)`
+                  : 'Valider mes pas'}
+          </button>
+          <p className="muted-xs daily-action-hint">
+            Validation illimitée, à tout moment de la journée.
+          </p>
+          <div className="secondary-actions">
+            <button type="button" className="text-button" onClick={onWatchAd} disabled={busyAd || !adAvailable} data-testid="watch-ad-button">
+              {busyAd ? 'Chargement...' : adAvailable ? `Voir une pub · +${fmtCoins(AD_REWARD_COINS)} EC` : `Prochaine pub dans ${adCountdown}`}
+            </button>
           </div>
-          <div className="stat">
-            <div className="stat-icon"><StepsIcon /></div>
-            <div className="stat-value" data-testid="stat-total-steps">{formatDistance(distanceMeters, unitSystem)}</div>
-            <div className="stat-label">distance aujourd’hui</div>
-          </div>
+        </section>
+      </div>
+
+      {/* 3. Activité et santé : une rangée de stats, l'objectif hebdo, puis série & niveau. */}
+      <div className="stat-grid" data-testid="home-stat-grid">
+        <div className="stat">
+          <div className="stat-icon"><FlameIcon /></div>
+          <div className="stat-value" data-testid="stat-streak">{profile?.streak || 0}</div>
+          <div className="stat-label">jours d’affilée</div>
+        </div>
+        <div className="stat">
+          <div className="stat-icon"><BoltIcon /></div>
+          <div className="stat-value" data-testid="stat-calories">{fmtNumber(calories)}</div>
+          <div className="stat-label">kcal du jour</div>
+        </div>
+        <div className="stat">
+          <div className="stat-icon"><StepsIcon /></div>
+          <div className="stat-value" data-testid="stat-total-steps">{formatDistance(distanceMeters, unitSystem)}</div>
+          <div className="stat-label">distance aujourd’hui</div>
         </div>
       </div>
 
-      {/*
-        A11 — point d'entrée unique de la recherche : marcheurs, parcours,
-        rencontres et partenaires en une seule saisie.
-      */}
-      <form
-        className="home-search"
-        role="search"
-        onSubmit={(event) => {
-          event.preventDefault();
-          const clean = searchTerm.trim();
-          navigate(clean ? `/search?q=${encodeURIComponent(clean)}` : '/search');
-        }}
-        data-testid="home-search-form"
-      >
-        <input
-          className="input"
-          type="search"
-          value={searchTerm}
-          onChange={(event) => setSearchTerm(event.target.value)}
-          placeholder="Rechercher un marcheur, un parcours, un lieu…"
-          aria-label="Recherche globale"
-          maxLength={80}
-          data-testid="home-search-input"
-        />
-        <button className="btn btn-outline btn-sm" type="submit">Rechercher</button>
-      </form>
-
-      {/*
-        A9 — anneau d'objectif hebdomadaire, distinct de l'objectif quotidien :
-        la semaine est l'échelle à laquelle la motivation tient.
-      */}
       <div className="card weekly-goal-card" data-testid="weekly-goal-card">
         <div className="row-between">
           <div className="card-title">Objectif de la semaine</div>
@@ -372,7 +444,7 @@ export default function HomePage() {
           <div className="weekly-goal-text">
             <strong data-testid="weekly-goal-label">{weeklyGoalLabel(weekly)}</strong>
             {weekly.achieved ? (
-              <span>Objectif atteint 🎉 Profitez du week-end.</span>
+              <span>Objectif atteint ! Profitez du week-end.</span>
             ) : (
               <span>
                 Encore {fmtNumber(weekly.remaining)} pas, soit environ{' '}
@@ -391,71 +463,37 @@ export default function HomePage() {
         </small>
       </div>
 
-      {!isNative && (
-        <div className="card web-counter-note" data-testid="web-counter-note">
-          <div className="card-title">Compteur en mode aperçu</div>
-          <p>Le navigateur ne peut pas accéder au capteur de pas Android. Ouvrez ElyWalk sur votre téléphone pour compter automatiquement votre activité.</p>
+      <div className="card streak-freeze-card" data-testid="streak-level-card">
+        <div className="card-title">Série &amp; niveau</div>
+        <div className="list-row">
+          <div className="row-main" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span className="stat-icon" aria-hidden="true"><FlameIcon /></span>
+            <div className="row-title" style={{ fontSize: 14 }}>Jours d’affilée</div>
+          </div>
+          <div className="row-value" data-testid="streak-days-value">{profile?.streak || 0}</div>
         </div>
-      )}
-
-      {isNative && perm !== 'granted' && (
-        <div className="card" data-testid="permission-card">
-          <div className="card-title">Activer le comptage des pas</div>
-          <p className="muted-text" style={{ marginBottom: 'var(--space-3)' }}>
-            ElyWalk utilise le capteur de pas de votre téléphone, même lorsque
-            l’application est fermée. Autorisez « Activité physique » — une
-            notification discrète restera visible pour continuer à compter.
-          </p>
-          <button className="btn btn-gold" onClick={askPermission} data-testid="request-permission-button">
-            Autoriser l’activité physique
-          </button>
+        <div className="list-row">
+          <div className="row-main" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span className="stat-icon" aria-hidden="true"><SnowflakeIcon /></span>
+            <div className="row-title" style={{ fontSize: 14 }}>Gels disponibles</div>
+          </div>
+          <div className="row-value freeze-count" data-testid="streak-freeze-count">{freezes}</div>
         </div>
-      )}
-
-      <section className={`daily-action ${canValidate ? '' : 'daily-action-done'}`} aria-live="polite">
-        {alreadyValidated && (
-          <div className="validation-success" data-testid="validation-status">
-            <span>✓</span>
-            <div>
-              <strong>{newSteps > 0 ? 'Encore des pas à valider' : 'Journée à jour'}</strong>
-              <small>
-                {newSteps > 0
-                  ? `${fmtNumber(newSteps)} nouveaux pas depuis votre dernière validation (${fmtNumber(validatedSteps)} déjà validés).`
-                  : `${fmtNumber(validatedSteps)} pas validés aujourd’hui — marchez encore pour revalider.`}
-              </small>
+        {profile && (
+          <div className="list-row" style={{ borderBottom: 0 }}>
+            <div className="row-main" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span className="stat-icon" aria-hidden="true"><StarIcon /></span>
+              <div className="row-title" style={{ fontSize: 14 }}>Niveau actuel</div>
             </div>
+            <div className="row-value"><LevelBadge totalSteps={profile.totalSteps} /></div>
           </div>
         )}
-        <button
-          type="button"
-          className="btn btn-gold"
-          onClick={onValidate}
-          disabled={!canValidate}
-          data-testid="validate-steps-button"
-        >
-          {busyValidate
-            ? 'Validation...'
-            : newSteps <= 0
-              ? 'Tous mes pas sont validés ✓'
-              : rewardPending > 0
-                ? `Valider mes pas (+${fmtCoins(rewardPending)} EC)`
-                : 'Valider mes pas'}
-        </button>
-        <p className="muted-xs daily-action-hint">
-          Validation illimitée : vous pouvez créditer vos pas à tout moment de la
-          journée, autant de fois que vous le souhaitez.
+        <p className="muted-xs" style={{ marginTop: 8 }}>
+          Un gel rattrape automatiquement une journée manquée : votre série ne repart plus forcément à 1.
         </p>
-        <div className="secondary-actions">
-          {/* Action publicitaire volontairement discrète : elle complète la
-              marche, elle ne la concurrence pas visuellement (audit § 2.2). */}
-          <button type="button" className="text-button" onClick={onWatchAd} disabled={busyAd || !adAvailable} data-testid="watch-ad-button">
-            {busyAd ? 'Chargement...' : adAvailable ? `Voir une pub · +${fmtCoins(AD_REWARD_COINS)} EC` : `Prochaine pub dans ${adCountdown}`}
-          </button>
-        </div>
-      </section>
-      {/* Audit § 2.2 — les destinations secondaires ne rivalisent plus avec la
-          validation : grille compacte (2 colonnes) et repliable, sous un seul
-          en-tête. Le compteur et « Valider mes pas » restent dominants. */}
+      </div>
+
+      {/* 4. Découverte et social : cinq raccourcis, repliables. */}
       <section className="home-shortcuts" aria-label="Raccourcis">
         <button
           type="button"
@@ -470,18 +508,16 @@ export default function HomePage() {
         </button>
         {showShortcuts && (
           <div className="home-shortcuts-grid" id="home-shortcuts-grid">
-            <button type="button" className="btn btn-ghost" onClick={() => navigate('/history')}>📊 Historique</button>
-            <button type="button" className="btn btn-outline" onClick={() => navigate('/challenges')}>🏆 Défis</button>
-            <button type="button" className="btn btn-outline" onClick={() => navigate('/events')}>👥 Rencontres</button>
-            <button type="button" className="btn btn-outline" onClick={() => navigate('/activity')}>▶ Sortie GPS</button>
-            <button type="button" className="btn btn-outline" onClick={async () => { if (!profile) return; try { const result = await shareDailyStats(profile, steps, formatDistance(distanceMeters, unitSystem), calories); toast(result === 'shared' ? 'Carte partagée !' : 'Carte enregistrée dans vos téléchargements.', 'success'); } catch (e) { if ((e as Error).name !== 'AbortError') toast((e as Error).message, 'error'); } }}>📤 Partager</button>
-            <button type="button" className="btn btn-outline" onClick={() => setShowTiers(true)}>💰 Barème</button>
+            <button type="button" className="btn btn-outline" style={shortcutStyle} onClick={() => navigate('/history')} data-testid="shortcut-history"><HistoryIcon /> Historique</button>
+            <button type="button" className="btn btn-outline" style={shortcutStyle} onClick={() => navigate('/challenges')} data-testid="shortcut-challenges"><TrophyIcon /> Défis</button>
+            <button type="button" className="btn btn-outline" style={shortcutStyle} onClick={() => navigate('/events')} data-testid="shortcut-events"><GroupIcon /> Rencontres</button>
+            <button type="button" className="btn btn-outline" style={shortcutStyle} onClick={() => navigate('/activity')} data-testid="shortcut-activity"><GpsIcon /> Sortie GPS</button>
+            <button type="button" className="btn btn-outline" style={shortcutStyle} onClick={onShare} data-testid="shortcut-share"><ShareIcon /> Partager</button>
           </div>
         )}
       </section>
-      {profile && <LevelBadge totalSteps={profile.totalSteps} />}
-      <div className="card streak-freeze-card"><div className="card-title">Série protégée</div><div className="freeze-count">🧊 {profile?.streakFreezes ?? 1} gel disponible</div><p>Une journée manquée peut être rattrapée automatiquement le lendemain. Votre série ne repart plus forcément à 1.</p></div>
 
+      {/* 5. Feuille Barème : ouverte depuis le solde dans l'en-tête. */}
       <Sheet open={showTiers} onClose={() => setShowTiers(false)} title="Barème quotidien" testId="tiers-sheet">
         {STEP_TIERS.map((t) => (
           <div className="list-row" key={t.min}>
@@ -538,6 +574,73 @@ function StepsIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
       <path d="M7 3.5c2 0 3 1.6 3 3.5s-.7 3.5-2.5 3.5S5 9 5 7.2 5.5 3.5 7 3.5ZM6 12.5h3.5V15a1.8 1.8 0 0 1-3.5 0v-2.5ZM17 9.5c-2 0-3 1.6-3 3.5s.7 3.5 2.5 3.5 2.5-1.5 2.5-3.3-.5-3.7-2-3.7ZM18 18.5h-3.5V21a1.8 1.8 0 0 0 3.5 0v-2.5Z" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function SearchIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <circle cx="11" cy="11" r="6.5" />
+      <path d="m20 20-4.2-4.2" strokeLinecap="round" />
+    </svg>
+  );
+}
+function CheckIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+      <path d="m5 12.5 4.5 4.5L19 7.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function HistoryIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M4 20V10M10 20V4M16 20v-8M22 20H2" strokeLinecap="round" />
+    </svg>
+  );
+}
+function TrophyIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M8 4h8v5a4 4 0 0 1-8 0V4ZM8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4M12 13v4M8.5 20h7M10 17h4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function GroupIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <circle cx="9" cy="8" r="3.2" />
+      <path d="M3.5 19a5.5 5.5 0 0 1 11 0M16 5.5a3 3 0 0 1 0 6M17.5 14.5a5 5 0 0 1 3.5 4.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+function GpsIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <circle cx="12" cy="12" r="6" />
+      <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" />
+      <path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3" strokeLinecap="round" />
+    </svg>
+  );
+}
+function ShareIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M12 3v12M8 7l4-4 4 4M5 13v6h14v-6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function SnowflakeIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M12 2v20M4 7l16 10M4 17 20 7M12 2l-2.5 2.5M12 2l2.5 2.5M12 22l-2.5-2.5M12 22l2.5-2.5M4 7l3.4 1M4 7l.9-3.4M20 17l-3.4-1M20 17l-.9 3.4M4 17l3.4-1M4 17l.9 3.4M20 7l-3.4 1M20 7l-.9-3.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+function StarIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="m12 3 2.7 5.6 6.1.8-4.5 4.3 1.1 6.1L12 17l-5.4 2.8 1.1-6.1L3.2 9.4l6.1-.8L12 3Z" strokeLinejoin="round" />
     </svg>
   );
 }
