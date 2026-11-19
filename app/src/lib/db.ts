@@ -947,6 +947,20 @@ export async function updateActivityMetadata(
   // la sous-collection privée.
   if (metadata.note !== undefined) await setPrivateActivityNote(uid, id, metadata.note);
   await updateDoc(ref, data);
+
+  // Le résumé public est une copie volontairement séparée de la sortie. Si un
+  // lien actif existe, synchroniser titre/légende pour que les destinataires
+  // voient les métadonnées fraîchement éditées sans exposer le tracé GPS.
+  const publicRef = doc(db, 'shareLinks', publicShareLinkDocId(id));
+  const legacyRef = doc(db, 'shareLinks', shareLinkDocId(id, uid));
+  const summaryPatch = {
+    title: title || 'Sortie ElyWalk',
+    caption: caption || '',
+  };
+  await Promise.all([
+    updateDoc(publicRef, summaryPatch).catch(() => undefined),
+    updateDoc(legacyRef, summaryPatch).catch(() => undefined),
+  ]);
 }
 
 /** Curseur de pagination d'une liste de sorties (tri startedAt desc + id). */
@@ -1499,7 +1513,7 @@ export async function searchUsersByName(name: string): Promise<UserProfile[]> {
 export async function sendFriendReaction(from: UserProfile, toUid: string, emoji: string, message = ''): Promise<void> {
   await assertNotBlocked(from.uid, toUid);
   if (!['👏','🔥','💛','👋'].includes(emoji)) throw new Error('Réaction invalide.');
-  await addDoc(collection(db, 'friendReactions'), { from: from.uid, fromName: from.displayName, to: toUid, emoji, message: message.slice(0, 160), createdAt: Date.now() });
+  await addDoc(collection(db, 'friendReactions'), { from: from.uid, fromName: from.displayName, to: toUid, emoji, message: message.slice(0, 160), createdAt: Date.now(), pushNotified: false });
 }
 
 export interface ReceivedReaction {
@@ -2032,8 +2046,10 @@ export async function getSharedActivityBySession(
   const snap = await getDoc(doc(db, 'shareLinks', publicShareLinkDocId(sessionId))).catch(() => null);
   if (!snap?.exists()) return null;
   const data = snap.data() as SharedActivitySummary & { expiresAt?: number | null };
-  if (data.expiresAt && data.expiresAt < Date.now()) return null;
-  if (token && data.token && token !== data.token) return null;
+  // L'URL-capacité est le couple identifiant + jeton : ne jamais accepter un
+  // lien sans jeton, ni un document explicitement révoqué/expiré.
+  if (data.revoked === true || !token || !data.token || token !== data.token) return null;
+  if (typeof data.expiresAt === 'number' && data.expiresAt <= Date.now()) return null;
   return { ...data, sessionId: data.sessionId || sessionId };
 }
 
@@ -2296,6 +2312,8 @@ export async function sendDirectMessage(from: UserProfile, toUid: string, text: 
     read: false,
     // F12 — figé à l'envoi (voir `FriendRequest.fromBlocked`).
     fromBlocked: false,
+    // Consommé une fois par le cron pour le push reçu app fermée.
+    pushNotified: false,
   } satisfies DirectMessage);
 }
 export function watchDirectMessages(uid: string, friendUid: string, cb: (msgs: DirectMessage[])=>void): Unsubscribe {
@@ -2370,7 +2388,7 @@ export function openDirectConversation(
   return watchDirectMessages(uid, friendUid, cb);
 }
 
-export async function createCommunityEvent(creator: UserProfile, data: { title:string; description:string; establishmentId?:string; establishmentName?:string; location?:string; lat?:number; lng?:number; date:string; time?:string; maxParticipants?:number | null }): Promise<string> {
+export async function createCommunityEvent(creator: UserProfile, data: { title:string; description:string; establishmentId?:string; establishmentName?:string; location?:string; lat?:number; lng?:number; date:string; time?:string; startsAt?:number; maxParticipants?:number | null }): Promise<string> {
   const ref = await addDoc(collection(db,'communityEvents'), {
     title: data.title.slice(0,80),
     description: data.description.slice(0,600),
@@ -2381,6 +2399,7 @@ export async function createCommunityEvent(creator: UserProfile, data: { title:s
     lng: data.lng||null,
     date: data.date,
     time: data.time||null,
+    startsAt: data.startsAt ?? new Date(`${data.date}T${data.time || '09:00'}`).getTime(),
     creatorUid: creator.uid,
     creatorName: creator.displayName,
     participants: [creator.uid],
@@ -2505,7 +2524,7 @@ export async function leaveCommunityEvent(uid:string, eventId:string):Promise<vo
   });
 }
 
-export async function updateCommunityEvent(uid:string, eventId:string, changes:{title?:string;description?:string;location?:string;lat?:number;lng?:number;date?:string;time?:string;status?:'scheduled'|'cancelled';message?:string}):Promise<void>{
+export async function updateCommunityEvent(uid:string, eventId:string, changes:{title?:string;description?:string;location?:string;lat?:number;lng?:number;date?:string;time?:string;startsAt?:number;status?:'scheduled'|'cancelled';message?:string}):Promise<void>{
   const ref=doc(db,'communityEvents',eventId);
   const recipients=await runTransaction(db, async tx => {
     const snap=await tx.get(ref);

@@ -426,6 +426,8 @@ export interface DirectMessage {
   read?: boolean;
   /** F12 — voir `FriendRequest.fromBlocked`. */
   fromBlocked?: boolean;
+  /** Worker a déjà traité le push système associé à ce message. */
+  pushNotified?: boolean;
 }
 
 // ========== Événements communautaires ==========
@@ -493,6 +495,8 @@ export interface CommunityEvent {
   lng?: number | null;
   date: string;
   time?: string | null;
+  /** Instant absolu calculé à la création/édition, epoch ms. */
+  startsAt?: number;
   creatorUid: string;
   creatorName: string;
   participants: string[];

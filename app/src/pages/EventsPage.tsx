@@ -125,8 +125,8 @@ export default function EventsPage() {
       const location = address.trim() || est?.address;
       const lat = addressPoint?.lat ?? est?.lat;
       const lng = addressPoint?.lng ?? est?.lng;
-      if (editing) await updateCommunityEvent(profile.uid, editing.id!, { title: title.trim(), description: desc.trim(), location, lat, lng, date, time, message: 'La date, l’heure ou le lieu de la sortie a été modifié.' });
-      else await createCommunityEvent(profile, { title: title.trim(), description: desc.trim() || 'Sortie communautaire ElyWalk', establishmentId: est?.id, establishmentName: est?.name, location, lat, lng, date, time, maxParticipants: max });
+      if (editing) await updateCommunityEvent(profile.uid, editing.id!, { title: title.trim(), description: desc.trim(), location, lat, lng, date, time, startsAt: startsAt.getTime(), message: 'La date, l’heure ou le lieu de la sortie a été modifié.' });
+      else await createCommunityEvent(profile, { title: title.trim(), description: desc.trim() || 'Sortie communautaire ElyWalk', establishmentId: est?.id, establishmentName: est?.name, location, lat, lng, date, time, startsAt: startsAt.getTime(), maxParticipants: max });
       toast(editing ? 'Événement modifié, participants prévenus.' : 'Événement créé !', 'success'); setOpen(false); reset();
     } catch (e) { toast((e as Error).message, 'error'); } finally { setBusy(false); }
   };
