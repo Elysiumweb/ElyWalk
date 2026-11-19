@@ -788,87 +788,171 @@ export default function ActivityPage() {
 
   const activeFilterCount = activeFiltersCount(filters);
 
+  const list = searchResults ?? sessions;
+  const showSkeleton = searching || (loadingSessions && sessions.length === 0);
+  const showGpsWarning = running && gps.level !== 'good' && gps.level !== 'unknown';
+  const liveStatus = !running ? '' : paused ? 'Sortie en pause.' : 'Sortie en cours.';
+
   return (
-    <div className="activity-screen" data-testid="activity-screen">
+    <div className={`activity-screen v2-act ${running ? 'v2-act-live' : ''}`.trim()} data-testid="activity-screen">
+      <style>{V2_STYLES}</style>
+      <p className="v2-sr" role="status" aria-live="polite" data-testid="activity-live-announcer">{liveStatus}</p>
+
       <div className="activity-header">
         <div>
           <h1 className="screen-title">Sortie GPS</h1>
           <div className="screen-sub">{native ? 'Marche ou course · continue même app fermée' : 'Marche ou course · trace privée'}</div>
         </div>
-        <button className="btn btn-ghost btn-sm" onClick={() => navigate(-1)}>Retour</button>
+        <button className="btn btn-ghost btn-sm" onClick={() => navigate(-1)} data-testid="activity-back-button">Retour</button>
       </div>
-      {/*
-        Composition adaptative (D04) : avant le départ, la carte est compacte
-        pour que « Démarrer la sortie » soit visible sans défilement, même sur
-        320 × 568 ; pendant la sortie, la carte reprend de la place pour suivre
-        le tracé. Le mode et l'objectif restent accessibles avant le départ.
-      */}
-      <div className={`activity-map ${running ? 'activity-map-live' : 'activity-map-compact'}`} ref={containerRef} />
-      <div className="activity-panel">
-        {plannedRoute && <div className="planned-route-banner" data-testid="planned-route"><div><strong>🧭 {plannedRoute.name}</strong><span>{formatDistance(plannedRoute.distanceM, unitSystem)} · {plannedRoute.elevationGainM} m D+</span></div><button className="btn btn-ghost btn-sm" disabled={running} onClick={() => { setPlannedRoute(null); plannedLineRef.current?.remove(); }}>Quitter</button>{routeDistance != null && <p role="status">{routeDistance <= 50 ? 'Vous êtes sur le tracé.' : `À ${routeDistance} m du tracé le plus proche.`}</p>}</div>}
-        <div className="activity-types">
-          <button className={type === 'walk' ? 'selected' : ''} disabled={running} onClick={() => setType('walk')}>🚶 Marche</button>
-          <button className={type === 'run' ? 'selected' : ''} disabled={running} onClick={() => setType('run')}>🏃 Course</button>
-        </div>
-        {/*
-          Avant le départ, six compteurs à zéro n'apportent rien et repoussent
-          le bouton principal hors de vue (D04). On garde les deux chiffres qui
-          décident du départ (durée et distance) et on déplie tout pendant la
-          sortie.
-        */}
-        <div className={`activity-stats ${running ? '' : 'activity-stats-idle'}`.trim()}>
-          <div><strong>{fmtDuration(elapsed)}</strong><span>durée active</span></div>
-          <div><strong>{formatDistance(distance, unitSystem)}</strong><span>distance</span></div>
-          <div className="activity-stat-extra"><strong>{calories}</strong><span>kcal</span></div>
-          <div className="activity-stat-extra"><strong>{Math.round(liveDeltaSteps).toLocaleString('fr-FR')}</strong><span>pas</span></div>
-          <div className="activity-stat-extra"><strong>{speedKmh(distance, elapsed).toFixed(1)}</strong><span>km/h</span></div>
-          <div className="activity-stat-extra"><strong>{paceMinPerKm(distance, elapsed)}</strong><span>allure</span></div>
+
+      <div
+        className={`activity-map ${running ? 'activity-map-live' : 'activity-map-compact'}`}
+        ref={containerRef}
+        role="region"
+        aria-label="Carte de la sortie"
+        data-testid="activity-map"
+      />
+
+      <div className="activity-panel v2-panel">
+        {plannedRoute && (
+          <div className="planned-route-banner" data-testid="planned-route">
+            <div>
+              <strong>🧭 {plannedRoute.name}</strong>
+              <span>{formatDistance(plannedRoute.distanceM, unitSystem)} · {plannedRoute.elevationGainM} m D+</span>
+            </div>
+            <button
+              className="btn btn-ghost btn-sm"
+              disabled={running}
+              aria-label="Quitter le parcours planifié"
+              data-testid="planned-route-quit-button"
+              onClick={() => { setPlannedRoute(null); plannedLineRef.current?.remove(); }}
+            >
+              Quitter
+            </button>
+            {routeDistance != null && (
+              <p role="status" data-testid="planned-route-distance">
+                {routeDistance <= 50 ? 'Vous êtes sur le tracé.' : `À ${routeDistance} m du tracé le plus proche.`}
+              </p>
+            )}
+          </div>
+        )}
+
+        {running && (
+          <div className={`v2-live ${paused ? 'v2-live-paused' : ''}`.trim()} data-testid="activity-live-stats">
+            <div className="v2-hero">
+              <div>
+                <strong data-testid="activity-live-duration">{fmtDuration(elapsed)}</strong>
+                <span>durée active</span>
+              </div>
+              <div>
+                <strong data-testid="activity-live-distance">{formatDistance(distance, unitSystem)}</strong>
+                <span>distance</span>
+              </div>
+            </div>
+            <div className="v2-grid4">
+              <div><strong data-testid="activity-live-pace">{paceMinPerKm(distance, elapsed)}</strong><span>allure</span></div>
+              <div><strong data-testid="activity-live-speed">{speedKmh(distance, elapsed).toFixed(1)}</strong><span>km/h</span></div>
+              <div><strong data-testid="activity-live-steps">{Math.round(liveDeltaSteps).toLocaleString('fr-FR')}</strong><span>pas</span></div>
+              <div><strong data-testid="activity-live-calories">{calories}</strong><span>kcal</span></div>
+            </div>
+          </div>
+        )}
+
+        <div className="activity-types" role="group" aria-label="Type de sortie">
+          <button
+            className={type === 'walk' ? 'selected' : ''}
+            aria-pressed={type === 'walk'}
+            disabled={running}
+            onClick={() => setType('walk')}
+            data-testid="activity-type-walk"
+          >
+            🚶 Marche
+          </button>
+          <button
+            className={type === 'run' ? 'selected' : ''}
+            aria-pressed={type === 'run'}
+            disabled={running}
+            onClick={() => setType('run')}
+            data-testid="activity-type-run"
+          >
+            🏃 Course
+          </button>
         </div>
 
-        <div className="activity-live-meta">
+        <div className="activity-live-meta v2-status">
           <span className={`gps-quality gps-${gps.level}`} data-testid="gps-quality" title={gps.hint}>
             <i aria-hidden="true" />{gps.label}
           </span>
-          {running && <span className="activity-points">{points.length} pts GPS</span>}
+          {running && <span className="activity-points" data-testid="activity-points-count">{points.length} pts GPS</span>}
           <button
             type="button"
             className={`chip ${batterySaver ? 'chip-active' : ''}`}
             aria-pressed={batterySaver}
             onClick={toggleBatterySaver}
             title="Moins de points GPS pour économiser la batterie"
+            data-testid="battery-saver-toggle"
           >
             🔋 Économie
           </button>
         </div>
-        {running && gps.level !== 'good' && gps.level !== 'unknown' && (
-          <p className="activity-gps-hint" role="status">⚠️ {gps.hint}</p>
+
+        {showGpsWarning && (
+          <p className="v2-banner v2-banner-warn" role="status" data-testid="activity-gps-banner">
+            <span aria-hidden="true">⚠️</span><span>{gps.hint}</span>
+          </p>
         )}
         {paused && (
-          <p className="activity-pause-note" role="status">
-            ⏸ Sortie en pause — appuyez sur « Reprendre » pour continuer. Le chrono et le GPS sont suspendus.
+          <p className="v2-banner v2-banner-warn" role="status" data-testid="activity-pause-banner">
+            <span aria-hidden="true">⏸</span>
+            <span>Sortie en pause — appuyez sur « Reprendre » pour continuer. Le chrono et le GPS sont suspendus.</span>
           </p>
         )}
         {!paused && (running || elapsed > 0) && pausedSec > 0 && (
-          <p className="activity-pause-note">⏸ Temps en pause exclu de l’allure : {fmtDuration(pausedSec)}</p>
+          <p className="v2-banner" data-testid="activity-paused-time-banner">
+            <span aria-hidden="true">⏸</span>
+            <span>Temps en pause exclu de l’allure : {fmtDuration(pausedSec)}</span>
+          </p>
+        )}
+        {running && batterySaver && (
+          <p className="v2-banner" data-testid="activity-battery-banner">
+            <span aria-hidden="true">🔋</span>
+            <span>Économie de batterie active : moins de points GPS enregistrés.</span>
+          </p>
+        )}
+        {running && goal?.reached && (
+          <p className="v2-banner v2-banner-ok" role="status" data-testid="activity-goal-banner">
+            <span aria-hidden="true">🎉</span><span>Objectif atteint{goalKm ? ` : ${goalKm.toLocaleString('fr-FR')} km` : ''}.</span>
+          </p>
         )}
 
         <div className="activity-goal" data-testid="activity-goal">
           <div className="activity-goal-head">
             <span>Objectif de sortie</span>
-            <strong>{goalKm ? `${goalKm.toLocaleString('fr-FR')} km` : 'Libre'}</strong>
+            <strong data-testid="activity-goal-value">{goalKm ? `${goalKm.toLocaleString('fr-FR')} km` : 'Libre'}</strong>
           </div>
-          <div className="chip-row">
+          <div className="chip-row v2-scroll-row" role="group" aria-label="Choisir un objectif de distance">
             {GOAL_PRESETS_KM.map((km) => (
               <button
                 key={km}
                 type="button"
                 className={`chip ${goalKm === km ? 'chip-active' : ''}`}
+                aria-pressed={goalKm === km}
                 onClick={() => changeGoal(goalKm === km ? null : km)}
+                data-testid={`activity-goal-preset-${km}`}
               >
                 {km} km
               </button>
             ))}
-            <button type="button" className={`chip ${goalKm === null ? 'chip-active' : ''}`} onClick={() => changeGoal(null)}>Aucun</button>
+            <button
+              type="button"
+              className={`chip ${goalKm === null ? 'chip-active' : ''}`}
+              aria-pressed={goalKm === null}
+              onClick={() => changeGoal(null)}
+              data-testid="activity-goal-none"
+            >
+              Aucun
+            </button>
             <input
               className="input goal-input"
               type="number"
@@ -880,6 +964,7 @@ export default function ActivityPage() {
               aria-label="Objectif personnalisé en kilomètres"
               value={goalInput}
               onChange={(e) => onGoalInput(e.target.value)}
+              data-testid="activity-goal-input"
             />
           </div>
           {goal ? (
@@ -891,10 +976,11 @@ export default function ActivityPage() {
                 aria-valuemin={0}
                 aria-valuemax={100}
                 aria-label="Progression vers l’objectif"
+                data-testid="activity-goal-progress"
               >
                 <div style={{ width: `${goal.percent}%` }} />
               </div>
-              <div className="goal-meta">
+              <div className="goal-meta" data-testid="activity-goal-meta">
                 <span>{goal.percent} %</span>
                 <span>{goal.reached ? 'Objectif atteint 🎉' : `reste ${formatDistance(goal.remainingM, unitSystem)}`}</span>
               </div>
@@ -902,148 +988,303 @@ export default function ActivityPage() {
           ) : null}
         </div>
 
-        {running ? (
-          <div className="activity-actions">
-            <button className={`btn ${paused ? 'btn-gold' : 'btn-outline'}`} onClick={togglePause}>
-              {paused ? '▶ Reprendre' : '⏸ Pause'}
-            </button>
-            <button className="btn btn-danger" onClick={stop}>■ Terminer et enregistrer</button>
-          </div>
-        ) : (
-          <button className="btn btn-gold" onClick={start}>▶ Démarrer la sortie</button>
+        {!running && (
+          <button className="btn btn-gold v2-start" onClick={start} data-testid="activity-start-button">
+            ▶ Démarrer la sortie
+          </button>
         )}
-        <p className="activity-privacy">
+        <p className="activity-privacy v2-privacy" data-testid="activity-privacy-note">
           {native
             ? 'Le GPS reste actif en arrière-plan (notification permanente) jusqu’à l’arrêt ou la pause. Le parcours n’est visible que par vous.'
             : 'Le GPS est activé uniquement pendant la sortie (onglet ouvert). Le parcours est visible seulement par vous.'}
         </p>
       </div>
 
-      <div className="activity-history card">
-        <div className="card-title">Mes sorties</div>
-          <div className="field" style={{ marginBottom: 10 }}>
-            <input
-              className="input"
-              type="search"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Rechercher par titre, note ou parcours…"
-              aria-label="Rechercher dans mes sorties"
-              data-testid="activity-search-input"
-            />
-            <small className="field-help">
-              La recherche porte sur toutes vos sorties, pas seulement sur la page affichée.
-            </small>
-          </div>
-          <div className="activity-filters">
-            <div className="filter-row" role="group" aria-label="Filtrer par type">
-              {(['all', 'walk', 'run'] as const).map((value) => (
-                <button
-                  key={value}
-                  type="button"
-                  className={`chip ${filters.type === value ? 'chip-active' : ''}`}
-                  onClick={() => updateFilters({ type: value })}
-                >
-                  {value === 'all' ? 'Toutes' : value === 'walk' ? '🚶 Marche' : '🏃 Course'}
-                </button>
-              ))}
-            </div>
-            <div className="filter-row" role="group" aria-label="Filtrer par période">
-              {PERIOD_OPTIONS.map((option) => (
-                <button
-                  key={option.days}
-                  type="button"
-                  className={`chip ${filters.periodDays === option.days ? 'chip-active' : ''}`}
-                  onClick={() => updateFilters({ periodDays: option.days })}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-            <div className="filter-row" role="group" aria-label="Filtrer par distance minimale">
-              {DISTANCE_OPTIONS_KM.map((km) => (
-                <button
-                  key={km}
-                  type="button"
-                  className={`chip ${filters.minDistanceKm === km ? 'chip-active' : ''}`}
-                  onClick={() => updateFilters({ minDistanceKm: km })}
-                >
-                  {km === 0 ? 'Toute distance' : `≥ ${km} km`}
-                </button>
-              ))}
-            </div>
-            {activeFilterCount > 0 && (
-              <button className="text-button" onClick={() => updateFilters(DEFAULT_ACTIVITY_FILTERS)}>
-                Réinitialiser les filtres ({activeFilterCount})
+      <section className="activity-history card v2-history" aria-labelledby="v2-history-title" data-testid="activity-history">
+        <div className="v2-section-head">
+          <h2 className="card-title" id="v2-history-title">Mes sorties</h2>
+          {activeFilterCount > 0 && (
+            <span className="v2-badge" data-testid="activity-filter-count">
+              {activeFilterCount} filtre{activeFilterCount > 1 ? 's' : ''} actif{activeFilterCount > 1 ? 's' : ''}
+            </span>
+          )}
+        </div>
+
+        <div className="field v2-search">
+          <input
+            className="input"
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Rechercher par titre, note ou parcours…"
+            aria-label="Rechercher dans mes sorties"
+            data-testid="activity-search-input"
+          />
+          <small className="field-help">
+            La recherche porte sur toutes vos sorties, pas seulement sur la page affichée.
+          </small>
+        </div>
+
+        <div className="v2-filter-scroll" data-testid="activity-filters">
+          <div className="v2-filter-group" role="group" aria-label="Filtrer par type">
+            {(['all', 'walk', 'run'] as const).map((value) => (
+              <button
+                key={value}
+                type="button"
+                className={`chip ${filters.type === value ? 'chip-active' : ''}`}
+                aria-pressed={filters.type === value}
+                onClick={() => updateFilters({ type: value })}
+                data-testid={`activity-filter-type-${value}`}
+              >
+                {value === 'all' ? 'Toutes' : value === 'walk' ? '🚶 Marche' : '🏃 Course'}
               </button>
+            ))}
+          </div>
+          <span className="v2-sep" aria-hidden="true" />
+          <div className="v2-filter-group" role="group" aria-label="Filtrer par période">
+            {PERIOD_OPTIONS.map((option) => (
+              <button
+                key={option.days}
+                type="button"
+                className={`chip ${filters.periodDays === option.days ? 'chip-active' : ''}`}
+                aria-pressed={filters.periodDays === option.days}
+                onClick={() => updateFilters({ periodDays: option.days })}
+                data-testid={`activity-filter-period-${option.days}`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <span className="v2-sep" aria-hidden="true" />
+          <div className="v2-filter-group" role="group" aria-label="Filtrer par distance minimale">
+            {DISTANCE_OPTIONS_KM.map((km) => (
+              <button
+                key={km}
+                type="button"
+                className={`chip ${filters.minDistanceKm === km ? 'chip-active' : ''}`}
+                aria-pressed={filters.minDistanceKm === km}
+                onClick={() => updateFilters({ minDistanceKm: km })}
+                data-testid={`activity-filter-distance-${km}`}
+              >
+                {km === 0 ? 'Toute distance' : `≥ ${km} km`}
+              </button>
+            ))}
+          </div>
+        </div>
+        {activeFilterCount > 0 && (
+          <button
+            className="text-button"
+            onClick={() => updateFilters(DEFAULT_ACTIVITY_FILTERS)}
+            data-testid="activity-filters-reset"
+          >
+            Réinitialiser les filtres ({activeFilterCount})
+          </button>
+        )}
+
+        {showSkeleton && (
+          <div className="v2-skel-list" role="status" aria-live="polite" data-testid="activity-history-loading">
+            <span className="v2-sr">{searching ? 'Recherche en cours…' : 'Chargement des sorties…'}</span>
+            {[0, 1, 2, 3].map((i) => (
+              <div className="v2-skel-row" key={i} aria-hidden="true">
+                <span className="v2-skel v2-skel-icon" />
+                <span className="v2-skel-lines">
+                  <span className="v2-skel v2-skel-line" style={{ width: '62%' }} />
+                  <span className="v2-skel v2-skel-line" style={{ width: '38%' }} />
+                </span>
+                <span className="v2-skel v2-skel-metric" />
+              </div>
+            ))}
+          </div>
+        )}
+
+        {!loadingSessions && !searching && list.length === 0 && (
+          <div className="empty-state v2-empty" data-testid="activity-history-empty">
+            {searchResults ? (
+              <>
+                <p>Aucune sortie ne correspond à cette recherche.</p>
+                <button className="btn btn-outline" onClick={() => setSearch('')} data-testid="activity-empty-clear-search">
+                  Effacer la recherche
+                </button>
+              </>
+            ) : activeFilterCount > 0 ? (
+              <>
+                <p>Aucune sortie ne correspond à ces filtres.</p>
+                <button
+                  className="btn btn-outline"
+                  onClick={() => updateFilters(DEFAULT_ACTIVITY_FILTERS)}
+                  data-testid="activity-empty-reset-filters"
+                >
+                  Réinitialiser les filtres
+                </button>
+              </>
+            ) : (
+              <p>Démarrez votre première sortie GPS.</p>
             )}
           </div>
+        )}
 
-          {searching && <div className="spinner" style={{ margin: '18px auto' }} />}
-          {loadingSessions && sessions.length === 0 && <div className="spinner" style={{ margin: '18px auto' }} />}
-          {!loadingSessions && !searching && (searchResults ?? sessions).length === 0 && (
-            <div className="empty-state">
-              {searchResults
-                ? 'Aucune sortie ne correspond à cette recherche.'
-                : activeFilterCount > 0
-                  ? 'Aucune sortie ne correspond à ces filtres.'
-                  : 'Démarrez votre première sortie GPS.'}
-            </div>
-          )}
-          {(searchResults ?? sessions).map((s) => (
-            <button className="list-row activity-session-row" key={s.id} onClick={() => navigate(`/activity/${s.id}`)}>
-              <span className="activity-history-icon">{s.type === 'run' ? '🏃' : '🚶'}</span>
-              <div className="row-main">
-                <div className="row-title">{sessionTitle(s)}</div>
-                <div className="row-sub">
-                  {formatDistance(s.distanceM, unitSystem)} · {Math.floor(s.durationSec / 60)} min · {s.calories || 0} kcal
-                  {typeof s.steps === 'number' && s.steps > 0 ? ` · ${s.steps.toLocaleString('fr-FR')} pas` : ''}
-                  {s.pausedSec && s.pausedSec >= 60 ? ` · ⏸ ${Math.round(s.pausedSec / 60)} min` : ''}
-                  {s.note ? ' · 📝' : ''}
-                </div>
+        {list.map((s) => (
+          <button
+            className="list-row activity-session-row v2-row"
+            key={s.id}
+            onClick={() => navigate(`/activity/${s.id}`)}
+            data-testid={`activity-session-row-${s.id}`}
+          >
+            <span className="activity-history-icon" aria-hidden="true">{s.type === 'run' ? '🏃' : '🚶'}</span>
+            <span className="v2-sr">{s.type === 'run' ? 'Course' : 'Marche'}</span>
+            <div className="row-main">
+              <div className="row-title">{sessionTitle(s)}</div>
+              <div className="row-sub">
+                {new Date(s.startedAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })}
+                {` · ${s.calories || 0} kcal`}
+                {typeof s.steps === 'number' && s.steps > 0 ? ` · ${s.steps.toLocaleString('fr-FR')} pas` : ''}
+                {s.pausedSec && s.pausedSec >= 60 ? ` · ⏸ ${Math.round(s.pausedSec / 60)} min` : ''}
+                {s.note ? ' · 📝' : ''}
               </div>
-              <span className="row-value activity-chev">›</span>
-            </button>
-          ))}
-          {hasMore && !searchResults && (
-            <button className="btn btn-outline" style={{ marginTop: 8 }} onClick={loadMoreSessions} disabled={loadingSessions}>
-              {loadingSessions ? 'Chargement…' : 'Charger plus de sorties'}
-            </button>
-          )}
-          {searchResults && (
-            <p className="muted-xs" style={{ marginTop: 8 }}>
-              {searchResults.length} résultat{searchResults.length > 1 ? 's' : ''} pour « {search.trim()} ».
-            </p>
-          )}
-          <div className="gpx-import" data-testid="gpx-import">
-            <input
-              ref={gpxInputRef}
-              type="file"
-              accept=".gpx,application/gpx+xml,text/xml"
-              style={{ display: 'none' }}
-              data-testid="gpx-import-input"
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                if (file) void importGpx(file);
-              }}
-            />
-            <button
-              type="button"
-              className="btn btn-outline"
-              disabled={importingGpx}
-              onClick={() => gpxInputRef.current?.click()}
-            >
-              {importingGpx ? 'Import en cours…' : 'Importer une trace GPX'}
-            </button>
-            <p className="muted-xs">
-              Une trace Strava, Garmin ou OSM devient une sortie ElyWalk : distance, durée et
-              pas recalculés depuis le tracé. Elle reste privée jusqu’à ce que vous la partagiez.
-            </p>
-          </div>
-          <button className="text-button" style={{ marginTop: 6 }} onClick={() => navigate('/history')}>
-            Voir l’historique quotidien
+            </div>
+            <span className="v2-row-metrics">
+              <strong>{formatDistance(s.distanceM, unitSystem)}</strong>
+              <span>{Math.floor(s.durationSec / 60)} min</span>
+            </span>
+            <span className="row-value activity-chev" aria-hidden="true">›</span>
           </button>
-      </div>
+        ))}
+
+        {hasMore && !searchResults && (
+          <button
+            className="btn btn-outline v2-full"
+            onClick={loadMoreSessions}
+            disabled={loadingSessions}
+            aria-busy={loadingSessions}
+            data-testid="activity-load-more"
+          >
+            {loadingSessions ? 'Chargement…' : 'Charger plus de sorties'}
+          </button>
+        )}
+        {searchResults && (
+          <p className="muted-xs v2-result-count" role="status" data-testid="activity-search-count">
+            {searchResults.length} résultat{searchResults.length > 1 ? 's' : ''} pour « {search.trim()} ».
+          </p>
+        )}
+
+        <button className="text-button v2-history-link" onClick={() => navigate('/history')} data-testid="activity-daily-history-link">
+          Voir l’historique quotidien
+        </button>
+
+        <div className="gpx-import v2-gpx" data-testid="gpx-import">
+          <div className="card-title">Importer une trace</div>
+          <p className="muted-xs">
+            Une trace Strava, Garmin ou OSM devient une sortie ElyWalk : distance, durée et
+            pas recalculés depuis le tracé. Elle reste privée jusqu’à ce que vous la partagiez.
+          </p>
+          <input
+            ref={gpxInputRef}
+            type="file"
+            accept=".gpx,application/gpx+xml,text/xml"
+            style={{ display: 'none' }}
+            data-testid="gpx-import-input"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) void importGpx(file);
+            }}
+          />
+          <button
+            type="button"
+            className="btn btn-outline v2-full"
+            disabled={importingGpx}
+            aria-busy={importingGpx}
+            onClick={() => gpxInputRef.current?.click()}
+            data-testid="gpx-import-button"
+          >
+            {importingGpx && <span className="v2-spin" aria-hidden="true" />}
+            {importingGpx ? 'Import en cours…' : 'Importer une trace GPX'}
+          </button>
+          {importingGpx && (
+            <p className="v2-banner" role="status" data-testid="gpx-import-status">
+              <span>Lecture du fichier et calcul de la distance, de la durée et des pas…</span>
+            </p>
+          )}
+        </div>
+      </section>
+
+      {running && (
+        <div className="v2-sticky" role="group" aria-label="Commandes de la sortie" data-testid="activity-controls">
+          <button
+            className={`btn ${paused ? 'btn-gold' : 'btn-outline'}`}
+            onClick={togglePause}
+            data-testid="activity-pause-button"
+          >
+            {paused ? '▶ Reprendre' : '⏸ Pause'}
+          </button>
+          <button className="btn btn-danger" onClick={stop} data-testid="activity-stop-button">
+            ■ Terminer et enregistrer
+          </button>
+        </div>
+      )}
     </div>
   );
 }
+
+const V2_STYLES = `
+.v2-act{--v2-line:color-mix(in srgb,currentColor 14%,transparent);max-width:720px;width:100%;margin-inline:auto}
+.v2-sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.v2-act :focus-visible{outline:2px solid var(--gold,#D8CA82);outline-offset:2px}
+.v2-act .btn,.v2-act .chip,.v2-act .text-button,.v2-act .activity-types button,.v2-act .goal-input{min-height:44px}
+.v2-act .chip{display:inline-flex;align-items:center;justify-content:center;white-space:nowrap}
+.v2-act .v2-panel{display:flex;flex-direction:column;gap:14px}
+.v2-act .v2-panel>*{margin-top:0;margin-bottom:0}
+.v2-live{padding:4px 2px;transition:opacity .2s ease}
+.v2-live-paused{opacity:.6}
+.v2-hero{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.v2-hero strong{display:block;font-size:clamp(2.1rem,10.5vw,3.4rem);line-height:1.05;font-weight:800;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.v2-hero span,.v2-grid4 span{display:block;margin-top:4px;font-size:.78rem;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+.v2-grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:14px;padding-top:14px;border-top:1px solid var(--v2-line)}
+.v2-grid4 strong{display:block;font-size:1.25rem;line-height:1.2;font-variant-numeric:tabular-nums}
+.v2-act .v2-status{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;font-size:.9rem}
+.v2-act .v2-status .chip{margin-left:auto}
+.v2-banner{display:flex;align-items:flex-start;gap:10px;margin:0;padding:12px 14px;border:1px solid var(--v2-line);border-radius:12px;background:var(--surface-2);font-size:.92rem;line-height:1.4}
+.v2-banner-warn{border-color:#e8837a}
+.v2-banner-ok{border-color:var(--gold,#D8CA82)}
+.v2-act .v2-scroll-row{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.v2-act .v2-scroll-row::-webkit-scrollbar{display:none}
+.v2-act .v2-scroll-row>*{flex:none}
+.v2-act .v2-start{width:100%;min-height:56px;font-size:1.05rem}
+.v2-act .v2-privacy{font-size:.8rem;line-height:1.45;color:var(--muted)}
+.v2-act .v2-history{margin-top:20px}
+.v2-section-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+.v2-section-head .card-title{margin:0}
+.v2-badge{flex:none;padding:4px 10px;border:1px solid var(--gold,#D8CA82);border-radius:999px;font-size:.78rem;color:var(--gold,#D8CA82)}
+.v2-act .v2-search{margin-bottom:10px}
+.v2-filter-scroll{display:flex;align-items:center;gap:8px;margin-inline:-2px;padding:4px 2px 8px;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.v2-filter-scroll::-webkit-scrollbar{display:none}
+.v2-filter-group{display:flex;flex:none;gap:8px}
+.v2-filter-scroll .chip{flex:none}
+.v2-sep{flex:none;width:1px;height:24px;background:var(--v2-line)}
+.v2-skel{display:block;border-radius:10px;background:var(--v2-line);animation:v2-pulse 1.2s ease-in-out infinite}
+.v2-skel-list{margin-top:8px}
+.v2-skel-row{display:flex;align-items:center;gap:12px;min-height:64px}
+.v2-skel-icon{flex:none;width:36px;height:36px;border-radius:50%}
+.v2-skel-lines{display:flex;flex:1;flex-direction:column;gap:8px}
+.v2-skel-line{height:12px}
+.v2-skel-metric{flex:none;width:56px;height:28px}
+.v2-act .v2-empty{display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center}
+.v2-act .v2-empty p{margin:0}
+.v2-act .v2-row{display:flex;align-items:center;gap:12px;width:100%;min-height:64px;text-align:left}
+.v2-act .v2-row .row-main{flex:1;min-width:0}
+.v2-act .v2-row .row-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.v2-row-metrics{display:flex;flex:none;flex-direction:column;align-items:flex-end;font-variant-numeric:tabular-nums}
+.v2-row-metrics strong{font-size:1rem}
+.v2-row-metrics span{font-size:.8rem;color:var(--muted)}
+.v2-act .v2-full{width:100%;margin-top:10px}
+.v2-act .v2-result-count{margin:10px 0 0}
+.v2-act .v2-history-link{display:block;margin-top:8px}
+.v2-act .v2-gpx{display:flex;flex-direction:column;gap:8px;margin-top:20px;padding-top:16px;border-top:1px solid var(--v2-line)}
+.v2-act .v2-gpx>*{margin-top:0;margin-bottom:0}
+.v2-spin{display:inline-block;width:14px;height:14px;margin-right:8px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;vertical-align:-2px;animation:v2-rotate .7s linear infinite}
+.v2-sticky{position:sticky;bottom:var(--v2-bottom-offset,0px);z-index:1100;display:grid;grid-template-columns:1fr 1.4fr;gap:10px;margin-top:16px;padding:10px 12px calc(10px + env(safe-area-inset-bottom,0px));padding-left:calc(12px + env(safe-area-inset-left,0px));padding-right:calc(12px + env(safe-area-inset-right,0px));border-top:1px solid var(--v2-line);background:var(--surface-2)}
+.v2-act .v2-sticky .btn{width:100%;min-height:56px;margin:0;font-size:1rem}
+@keyframes v2-pulse{50%{opacity:.45}}
+@keyframes v2-rotate{to{transform:rotate(360deg)}}
+@media (max-width:360px){.v2-grid4{grid-template-columns:repeat(2,1fr)}.v2-sticky{grid-template-columns:1fr 1fr}}
+@media (prefers-reduced-motion:reduce){.v2-skel,.v2-spin{animation:none}.v2-live{transition:none}}
+`;
