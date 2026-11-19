@@ -13,6 +13,15 @@ import { addBaseMap } from '../lib/mapTiles';
 
 const DEFAULT_CENTER: [number, number] = [46.6, 2.4]; // France
 const DEFAULT_ZOOM = 6;
+const FOCUS_ZOOM = 16;
+const WATCH_INTERVAL_MS = 4000;
+const RESIZE_DELAY_MS = 60;
+const MIN_GPS_QUERY_LENGTH = 3;
+const MAX_NEARBY_RESULTS = 5;
+const LOW_ACCURACY_METERS = 100;
+const MAX_ACCURACY_RADIUS = 250;
+
+const HINT_STYLE = { fontSize: 12, color: 'var(--muted)', marginTop: 6 };
 
 export default function MapPage() {
   const { toast } = useToast();
@@ -22,40 +31,58 @@ export default function MapPage() {
   const markersRef = useRef<L.Marker[]>([]);
   const userMarkerRef = useRef<L.Marker | null>(null);
   const accuracyRef = useRef<L.Circle | null>(null);
-  /** Suivi continu actif : la carte suit l'utilisateur tant qu'il ne la déplace pas. */
+  /** Suivi continu actif : la ref sert aux callbacks Leaflet, le state au rendu. */
   const followRef = useRef(true);
+  const [following, setFollowing] = useState(true);
   const watcherRef = useRef<{ stop: () => void } | null>(null);
+  const locFailedRef = useRef(false);
+  const [locFailed, setLocFailedState] = useState(false);
+  const gpsBusyRef = useRef(false);
   const [selected, setSelected] = useState<Establishment | null>(null);
   const [locating, setLocating] = useState(false);
   const [establishments, setEstablishments] = useState<Establishment[]>([]);
+  const [partnersLoaded, setPartnersLoaded] = useState(false);
   const [search, setSearch] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
   const [userPos, setUserPos] = useState<{ lat: number; lng: number } | null>(null);
   const [accuracy, setAccuracy] = useState<number | null>(null);
   const [directionsFor, setDirectionsFor] = useState<Establishment | null>(null);
-  /**
-   * GPS libre (nouveauté) : n'importe quelle adresse, pas seulement un
-   * partenaire. L'utilisateur saisit sa destination, choisit son mode de
-   * déplacement, puis « Démarrer le GPS » ouvre le guidage — annonce
-   * interstitielle au départ, puis à l'arrivée (NavigationView).
-   */
   const [gpsDestination, setGpsDestination] = useState<DirectionsDestination | null>(null);
   const [gpsQuery, setGpsQuery] = useState('');
   const [gpsMode, setGpsMode] = useState<TravelMode>('walk');
   const [gpsBusy, setGpsBusy] = useState(false);
   const [gpsSuggestion, setGpsSuggestion] = useState<AddressSuggestion | null>(null);
 
+  const setFollow = (value: boolean) => {
+    followRef.current = value;
+    setFollowing(value);
+  };
+
+  const setLocFailed = (value: boolean) => {
+    locFailedRef.current = value;
+    setLocFailedState(value);
+  };
+
+  /** Ouvrir une fiche met le suivi en pause : la carte ne s'échappe pas dessous. */
+  const selectPartner = (e: Establishment) => {
+    setFollow(false);
+    setSelected(e);
+  };
+
   /** Suggestion réellement retenue : ses coordonnées sont fiables. */
   const gpsPoint = gpsSuggestion && gpsSuggestion.label === gpsQuery.trim()
     ? { lat: gpsSuggestion.lat, lng: gpsSuggestion.lng }
     : null;
   const gpsLabel = gpsSuggestion?.label || '';
+  const gpsTyping = gpsQuery.trim().length > 0;
+  const gpsReady = gpsQuery.trim().length >= MIN_GPS_QUERY_LENGTH || !!gpsPoint;
 
   const startGps = async () => {
-    if (gpsBusy) return;
+    if (gpsBusyRef.current) return;
+    gpsBusyRef.current = true;
     setGpsBusy(true);
     try {
-      // Suggestion choisie : coordonnées déjà connues. Sinon, on géocode le
-      // texte saisi (même comportement que la barre d'adresse de Google Maps).
+      // Suggestion choisie : coordonnées déjà connues. Sinon, on géocode le texte saisi.
       const hit = gpsPoint;
       if (!hit) {
         const resolved = await geocodeAddress(gpsQuery);
@@ -67,11 +94,9 @@ export default function MapPage() {
       } else {
         setGpsDestination({ name: gpsLabel || gpsQuery, address: gpsLabel || gpsQuery, lat: hit.lat, lng: hit.lng });
       }
-      // Le guidage s'ouvre immédiatement ; l'itinéraire se calcule dans la
-      // feuille (position demandée à l'ouverture).
-      followRef.current = true;
       void locate(true);
     } finally {
+      gpsBusyRef.current = false;
       setGpsBusy(false);
     }
   };
@@ -85,15 +110,12 @@ export default function MapPage() {
       zoomControl: false,
       attributionControl: true,
     });
-    // Fonds CARTO clés (repli OSM automatique) — voir lib/mapTiles.
     addBaseMap(map);
     L.control.zoom({ position: 'bottomright' }).addTo(map);
     map.on('click', () => setSelected(null));
-    // Déplacer la carte à la main suspend le suivi automatique (l'utilisateur
-    // garde la main) ; le bouton « Me localiser » le réactive.
-    map.on('dragstart', () => { followRef.current = false; });
+    // Déplacer la carte à la main met le suivi en pause ; le bouton de localisation le relance.
+    map.on('dragstart', () => setFollow(false));
     mapRef.current = map;
-    // Suivi continu : la position se met à jour pendant les déplacements.
     startWatching();
     return () => {
       watcherRef.current?.stop();
@@ -126,7 +148,7 @@ export default function MapPage() {
     if (precision != null && precision > 0) {
       if (!accuracyRef.current) {
         accuracyRef.current = L.circle([lat, lng], {
-          radius: Math.min(precision, 250),
+          radius: Math.min(precision, MAX_ACCURACY_RADIUS),
           color: '#D8CA82',
           weight: 1,
           opacity: 0.5,
@@ -136,22 +158,15 @@ export default function MapPage() {
         }).addTo(map);
       } else {
         accuracyRef.current.setLatLng([lat, lng]);
-        accuracyRef.current.setRadius(Math.min(precision, 250));
+        accuracyRef.current.setRadius(Math.min(precision, MAX_ACCURACY_RADIUS));
       }
     }
     if (recenter && followRef.current) {
-      map.setView([lat, lng], Math.max(map.getZoom(), 16), { animate: true });
+      map.setView([lat, lng], Math.max(map.getZoom(), FOCUS_ZOOM), { animate: true });
     }
   };
 
-  /**
-   * Active le suivi continu de la position.
-   *
-   * Avant, la carte ne demandait la position qu'une seule fois à l'ouverture :
-   * on restait donc figé au point de départ (« je ne me vois pas bouger »).
-   * Le suivi est maintenant permanent tant que l'écran est ouvert, avec un
-   * repère qui avance, un cercle de précision et un recentrage automatique.
-   */
+  /** Active le suivi continu de la position. */
   const startWatching = () => {
     watcherRef.current?.stop();
     setLocating(true);
@@ -161,33 +176,39 @@ export default function MapPage() {
         setUserPos({ lat: coords.lat, lng: coords.lng });
         setAccuracy(coords.accuracy ?? null);
         setLocating(false);
+        setLocFailed(false);
         // Le premier point recadre la carte, puis on suit sans forcer le zoom.
         drawUser(coords.lat, coords.lng, coords.accuracy ?? null, first || followRef.current);
         first = false;
       },
       (error) => {
         setLocating(false);
+        setLocFailed(true);
         toast(error.message || 'Position introuvable. Vérifiez la localisation de votre appareil.', 'error');
       },
-      { intervalMs: 4000 },
+      { intervalMs: WATCH_INTERVAL_MS },
     );
   };
 
-  /** Recentrage demandé par l'utilisateur (bouton « Me localiser »). */
+  /** Recentrage demandé par l'utilisateur (bouton de localisation) : relance aussi le suivi. */
   const locate = async (silent = false) => {
-    followRef.current = true;
+    setFollow(true);
     setLocating(true);
     try {
       const pos = await getCurrentPosition({ silent });
       if (pos) {
+        // Après un échec (permission accordée après coup…), on repart sur un suivi neuf.
+        const restart = !watcherRef.current || locFailedRef.current;
         setUserPos({ lat: pos.lat, lng: pos.lng });
         setAccuracy(pos.accuracy ?? null);
+        setLocFailed(false);
         drawUser(pos.lat, pos.lng, pos.accuracy ?? null, true);
-        // Le bouton relance aussi le suivi s'il s'était arrêté (permission
-        // accordée après coup, retour d'arrière-plan…).
-        if (!watcherRef.current) startWatching();
+        if (restart) startWatching();
+      } else if (!userPos) {
+        setLocFailed(true);
       }
     } catch {
+      setLocFailed(true);
       if (!silent) toast('Position introuvable. Vérifiez la localisation de votre appareil.', 'error');
     } finally {
       setLocating(false);
@@ -198,6 +219,7 @@ export default function MapPage() {
   useEffect(() => {
     const unsub = watchEstablishments((list) => {
       setEstablishments(list);
+      setPartnersLoaded(true);
       const map = mapRef.current;
       if (!map) return;
       markersRef.current.forEach((m) => m.remove());
@@ -214,13 +236,14 @@ export default function MapPage() {
         });
         const marker = L.marker([e.lat, e.lng], { icon }).addTo(map);
         marker.on('click', () => {
-          setSelected(e);
+          selectPartner(e);
           map.panTo([e.lat, e.lng]);
         });
         return marker;
       });
     });
     return unsub;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const distance = (e: Establishment) =>
@@ -228,39 +251,37 @@ export default function MapPage() {
   const nearby = establishments
     .filter((e) => `${e.name} ${e.address} ${e.description}`.toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => (distance(a) ?? 99999) - (distance(b) ?? 99999));
+  const shownNearby = nearby.slice(0, MAX_NEARBY_RESULTS);
+  const hiddenNearby = nearby.length - shownNearby.length;
+
+  // La hauteur de l'en-tête change à chaque ouverture / repli : on évite les tuiles grises.
+  useEffect(() => {
+    const timer = setTimeout(() => mapRef.current?.invalidateSize(), RESIZE_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [gpsTyping, gpsReady, searchOpen, shownNearby.length, hiddenNearby, partnersLoaded]);
+
+  const live = following && !!userPos && !locFailed;
+  const locateLabel = locFailed
+    ? 'Position indisponible — réessayer'
+    : live
+      ? 'Suivi de position actif — recentrer'
+      : userPos
+        ? 'Suivi en pause — reprendre le suivi'
+        : 'Me localiser';
 
   return (
     <div className="map-screen" data-testid="map-screen">
-      {/*
-        En-tête en flux (et non en surimpression) : la recherche et les trois
-        accès « Parcours / Événements / Sortie » ne se chevauchent plus, et ils
-        restent au-dessus de la carte quelle que soit la hauteur d'écran.
-      */}
       <div className="map-header" data-testid="map-header">
         <div className="map-header-top">
           <div>
             <h1 className="screen-title">Carte</h1>
-            <div className="screen-sub">Partenaires autour de vous · vos sorties GPS dans Sortie</div>
           </div>
           <div className="header-actions">
             <NotificationBell />
           </div>
         </div>
-        <div className="map-quick-actions">
-          <button className="btn btn-outline btn-sm" onClick={() => navigate('/routes')} data-testid="map-routes-button">
-            🧭 Parcours
-          </button>
-          <button className="btn btn-outline btn-sm" onClick={() => navigate('/events')} data-testid="map-events-button">
-            👥 Événements
-          </button>
-          <button className="btn btn-gold btn-sm" onClick={() => navigate('/activity')} data-testid="map-activity-button">
-            ▶ Sortie
-          </button>
-        </div>
-        {/*
-          GPS libre : destination au choix, mode de déplacement, puis guidage
-          intégré. Annonce interstitielle au lancement et à l'arrivée.
-        */}
+
+        {/* GPS : action principale. Modes et bouton n'apparaissent qu'une fois la destination saisie. */}
         <div className="map-gps" data-testid="map-gps">
           <AddressAutocomplete
             value={gpsQuery}
@@ -273,81 +294,131 @@ export default function MapPage() {
             near={userPos}
             testId="gps-destination"
           />
-          <div className="chip-row" role="tablist" aria-label="Mode de déplacement du GPS" data-testid="gps-modes">
-            {TRAVEL_MODES.map((m) => (
+          {gpsReady && (
+            <>
+              <div className="chip-row" role="radiogroup" aria-label="Mode de déplacement du GPS" data-testid="gps-modes">
+                {TRAVEL_MODES.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={gpsMode === m.id}
+                    className={`chip ${gpsMode === m.id ? 'chip-active' : ''}`}
+                    onClick={() => setGpsMode(m.id)}
+                    data-testid={`gps-mode-${m.id}`}
+                  >
+                    <span aria-hidden="true">{m.icon}</span> {m.short}
+                  </button>
+                ))}
+              </div>
               <button
-                key={m.id}
                 type="button"
-                role="tab"
-                aria-selected={gpsMode === m.id}
-                className={`chip ${gpsMode === m.id ? 'chip-active' : ''}`}
-                onClick={() => setGpsMode(m.id)}
-                data-testid={`gps-mode-${m.id}`}
+                className="btn btn-gold"
+                onClick={() => void startGps()}
+                disabled={gpsBusy}
+                data-testid="gps-start"
               >
-                <span aria-hidden="true">{m.icon}</span> {m.short}
+                {gpsBusy ? 'Préparation…' : `🧭 Démarrer le GPS · ${TRAVEL_MODES.find((m) => m.id === gpsMode)?.short.toLowerCase()}`}
               </button>
-            ))}
-          </div>
-          <button
-            type="button"
-            className="btn btn-gold"
-            onClick={() => void startGps()}
-            disabled={gpsBusy || gpsQuery.trim().length < 3}
-            data-testid="gps-start"
-          >
-            {gpsBusy ? 'Préparation…' : `🧭 Démarrer le GPS · ${TRAVEL_MODES.find((m) => m.id === gpsMode)?.short.toLowerCase()}`}
-          </button>
+            </>
+          )}
         </div>
 
+        {/* Recherche de partenaires : secondaire, repliée par défaut. */}
         <div className="map-search">
-          <input
-            className="input"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Rechercher un partenaire…"
-            aria-label="Rechercher un partenaire"
-            data-testid="map-search-input"
-          />
-          <div className="nearby-list">
-            {nearby.slice(0, 5).map((e) => (
-              <button
-                key={e.id}
-                onClick={() => {
-                  setSelected(e);
-                  mapRef.current?.setView([e.lat, e.lng], 16);
-                }}
-              >
-                <b>{e.name}</b>
-                <span>{distance(e) !== null ? `${distance(e)!.toFixed(1)} km` : e.address}</span>
-              </button>
-            ))}
-          </div>
+          <button
+            type="button"
+            className="btn btn-outline btn-sm"
+            onClick={() => setSearchOpen((open) => !open)}
+            aria-expanded={searchOpen}
+            data-testid="map-search-toggle"
+          >
+            {searchOpen ? 'Fermer la recherche' : 'Rechercher un partenaire'}
+          </button>
+          {searchOpen && (
+            <>
+              <input
+                className="input"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Rechercher un partenaire…"
+                aria-label="Rechercher un partenaire"
+                autoFocus
+                data-testid="map-search-input"
+              />
+              <div className="nearby-list" data-testid="map-nearby-list">
+                {shownNearby.map((e) => (
+                  <button
+                    key={e.id}
+                    onClick={() => {
+                      selectPartner(e);
+                      setSearchOpen(false);
+                      mapRef.current?.setView([e.lat, e.lng], FOCUS_ZOOM);
+                    }}
+                  >
+                    <b>{e.name}</b>
+                    <span>{distance(e) !== null ? `${distance(e)!.toFixed(1)} km` : e.address}</span>
+                  </button>
+                ))}
+              </div>
+              {establishments.length === 0 ? (
+                <div style={HINT_STYLE} role="status" data-testid="map-partners-empty">
+                  {partnersLoaded ? 'Aucun partenaire pour le moment' : 'Chargement…'}
+                </div>
+              ) : nearby.length === 0 ? (
+                <div style={HINT_STYLE} role="status" data-testid="map-search-no-result">
+                  Aucun partenaire ne correspond
+                </div>
+              ) : hiddenNearby > 0 ? (
+                <div style={HINT_STYLE} data-testid="map-search-more">
+                  +{hiddenNearby} {hiddenNearby > 1 ? 'autres' : 'autre'}, précisez la recherche
+                </div>
+              ) : null}
+            </>
+          )}
         </div>
+
+        {/* Actions rapides : masquées pendant la saisie d'une destination. */}
+        {!gpsTyping && (
+          <div className="map-quick-actions">
+            <button className="btn btn-outline btn-sm" onClick={() => navigate('/routes')} data-testid="map-routes-button">
+              🧭 Parcours
+            </button>
+            <button className="btn btn-outline btn-sm" onClick={() => navigate('/events')} data-testid="map-events-button">
+              👥 Événements
+            </button>
+            <button className="btn btn-gold btn-sm" onClick={() => navigate('/activity')} data-testid="map-activity-button">
+              ▶ Sortie
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="map-stage">
         <div ref={containerRef} className="map-container" data-testid="map-container" />
 
         <button
-          className={`map-locate-btn ${followRef.current && userPos ? 'map-locate-live' : ''}`}
+          className={`map-locate-btn ${live ? 'map-locate-live' : ''}`}
           onClick={() => locate(false)}
           disabled={locating && !userPos}
           data-testid="map-locate-button"
-          aria-label={followRef.current && userPos ? 'Suivi de position actif — recentrer' : 'Me localiser'}
-          title={followRef.current && userPos ? 'Vous êtes suivi en temps réel' : 'Me localiser'}
+          aria-label={locateLabel}
+          title={locateLabel}
         >
           {locating && !userPos ? <div className="spinner" style={{ width: 20, height: 20, borderWidth: 2 }} /> : <LocateIcon />}
         </button>
 
-        {/* État du suivi : la position se met à jour pendant le déplacement. */}
         <div className="map-live-status" role="status" aria-live="polite" data-testid="map-live-status">
-          {userPos ? (
+          {locFailed ? (
+            <span>Position indisponible</span>
+          ) : userPos ? (
             <>
               <span className="map-live-dot" aria-hidden="true" />
               <span>
                 Position en direct
                 {accuracy != null ? ` · ±${Math.round(accuracy)} m` : ''}
-                {!followRef.current ? ' · carte libre' : ''}
+                {accuracy != null && accuracy > LOW_ACCURACY_METERS ? ' · précision faible' : ''}
+                {!following ? ' · suivi en pause' : ''}
               </span>
             </>
           ) : (
@@ -356,7 +427,12 @@ export default function MapPage() {
         </div>
 
         {selected && (
-          <div className="map-card pop-in" data-testid="establishment-card">
+          <div
+            className="map-card pop-in"
+            role="region"
+            aria-label={`Fiche partenaire : ${selected.name}`}
+            data-testid="establishment-card"
+          >
             <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
               {selected.logoDataUrl ? (
                 <img src={selected.logoDataUrl} alt={selected.name} className="map-card-logo" />
@@ -371,7 +447,12 @@ export default function MapPage() {
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>{selected.address}</div>
               </div>
-              <button className="map-card-close" onClick={() => setSelected(null)} data-testid="establishment-card-close">
+              <button
+                className="map-card-close"
+                onClick={() => setSelected(null)}
+                aria-label="Fermer la fiche"
+                data-testid="establishment-card-close"
+              >
                 ✕
               </button>
             </div>
@@ -398,10 +479,6 @@ export default function MapPage() {
         )}
       </div>
 
-      {/*
-        Itinéraire calculé dans l'application (aucune redirection vers Maps) :
-        adresse réelle + itinéraire à pied, vélo, voiture ou transports.
-      */}
       <DirectionsPanel
         open={!!directionsFor || !!gpsDestination}
         onClose={() => { setDirectionsFor(null); setGpsDestination(null); }}
@@ -422,9 +499,7 @@ export default function MapPage() {
         onLocate={() => locate(false)}
         onOriginResolved={setUserPos}
         onMapReady={(map) => {
-          // La carte de l'itinéraire remplace visuellement celle de la page ;
-          // on invalide sa taille à l'ouverture pour éviter les tuiles grises.
-          setTimeout(() => map.invalidateSize(), 60);
+          setTimeout(() => map.invalidateSize(), RESIZE_DELAY_MS);
         }}
       />
     </div>
